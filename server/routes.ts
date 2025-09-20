@@ -30,16 +30,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Setup Replit Auth (replaces custom OAuth)
   await setupAuth(app);
   
-  // Validate environment variables
-  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-    throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables are required');
+  // Initialize Razorpay (optional in development)
+  let razorpay: Razorpay | null = null;
+  
+  if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+  } else {
+    console.warn('Razorpay keys not configured - payment functionality disabled');
   }
-
-  // Initialize Razorpay
-  const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-  });
 
   // Auth routes - using Replit Auth
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -378,12 +379,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Get Razorpay public key for frontend
   app.get('/api/razorpay-key', (req, res) => {
+    if (!razorpay) {
+      return res.status(503).json({ error: 'Payment service not configured' });
+    }
     res.json({ key: process.env.RAZORPAY_KEY_ID });
   });
 
   // Razorpay webhook endpoint for reliable payment processing
   app.post('/api/razorpay-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     try {
+      if (!razorpay) {
+        return res.status(503).json({ error: 'Payment service not configured' });
+      }
       const signature = req.headers['x-razorpay-signature'] as string;
       
       if (!signature) {
@@ -624,6 +631,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create payment order endpoint - SERVER-SIDE PRICE CALCULATION
   app.post('/api/create-payment-order', async (req, res) => {
     try {
+      if (!razorpay) {
+        return res.status(503).json({ error: 'Payment service not configured' });
+      }
       // DEBUG: Log minimal identifiers (no PII)
       console.log('Payment order request:', {
         salonId: req.body.salonId,
@@ -717,6 +727,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Verify payment endpoint - COMPREHENSIVE VERIFICATION
   app.post('/api/verify-payment', async (req, res) => {
     try {
+      if (!razorpay) {
+        return res.status(503).json({ error: 'Payment service not configured' });
+      }
       // Validate input using Zod schema
       const validationResult = verifyPaymentSchema.safeParse(req.body);
       if (!validationResult.success) {
