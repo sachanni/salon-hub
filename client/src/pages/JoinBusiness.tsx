@@ -61,14 +61,18 @@ export default function JoinBusiness() {
       if (response.ok) {
         console.log('Registration successful, data:', data);
         
-        // Store user data immediately
-        if (data.token) {
-          localStorage.setItem('token', data.token);
-          console.log('Token stored');
-        }
-        if (data.user) {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          console.log('User data stored');
+        // Store user data immediately with error handling
+        try {
+          if (data.token) {
+            localStorage.setItem('token', data.token);
+            console.log('Token stored');
+          }
+          if (data.user) {
+            localStorage.setItem('user', JSON.stringify(data.user));
+            console.log('User data stored');
+          }
+        } catch (error) {
+          console.warn('Failed to store auth data:', error);
         }
         
         // Show success toast

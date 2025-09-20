@@ -1,5 +1,6 @@
 import { createContext, useContext, ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getQueryFn } from '@/lib/queryClient';
 
 export interface User {
   id: string;
@@ -25,6 +26,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: () => void;
   logout: () => void;
+  checkAuth: () => Promise<void>;
   hasRole: (role: string) => boolean;
   hasOrgRole: (orgId: string, role: string) => boolean;
   isBusinessUser: boolean;
@@ -51,11 +53,19 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  // Fetch current user using Replit Auth
+  const queryClientInstance = useQueryClient();
+  
+  // Fetch current user using Replit Auth - handle 401s gracefully
   const { data: user, isLoading } = useQuery({
     queryKey: ['/api/auth/user'],
+    queryFn: getQueryFn({ on401: "returnNull" }),
     retry: false,
   });
+  
+  // Function to refresh authentication state
+  const checkAuth = async () => {
+    await queryClientInstance.invalidateQueries({ queryKey: ['/api/auth/user'] });
+  };
 
   // Redirect to Replit Auth login
   const login = () => {
@@ -97,6 +107,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isAuthenticated: !!user,
     login,
     logout,
+    checkAuth,
     hasRole,
     hasOrgRole,
     isBusinessUser,
