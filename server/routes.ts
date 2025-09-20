@@ -120,8 +120,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.assignUserRole(newUser.id, role.id);
 
       // Create verification token and send email
-      const verificationToken = await storage.createVerificationToken(newUser.email, newUser.id);
-      const emailSent = await sendVerificationEmail(newUser.email, newUser.firstName || 'User', verificationToken);
+      const verificationToken = await storage.createVerificationToken(newUser.email || '', newUser.id);
+      const emailSent = await sendVerificationEmail(newUser.email || '', newUser.firstName || 'User', verificationToken);
 
       // AUTHENTICATION FIX: Establish passport session after successful registration
       const sessionUser = {
