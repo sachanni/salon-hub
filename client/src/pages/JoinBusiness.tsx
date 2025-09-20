@@ -129,25 +129,19 @@ export default function JoinBusiness() {
 
       if (response.ok && data.exists && data.isOwner) {
         if (!data.hasProfile || !data.profileComplete) {
-          // User exists but has incomplete profile - Fresha pattern
+          // User exists but has incomplete profile - automatically redirect
           toast({
             title: "Welcome back!",
             description: data.hasProfile 
-              ? `Continue setting up your salon profile. ${data.missingRequirements?.length || 0} steps remaining.`
-              : "Complete your salon profile to start accepting bookings.",
-            duration: 8000,
-            action: (
-              <ToastAction
-                altText="Continue Setup"
-                onClick={() => {
-                  // Redirect to business setup at the appropriate step
-                  setLocation(data.resumeUrl || '/business/setup');
-                }}
-              >
-                Continue Setup
-              </ToastAction>
-            )
+              ? `Redirecting to continue your salon setup. ${data.missingRequirements?.length || 0} steps remaining.`
+              : "Redirecting to complete your salon profile...",
+            duration: 3000,
           });
+          
+          // Immediately redirect to business setup at the appropriate step
+          setTimeout(() => {
+            setLocation(data.resumeUrl || '/business/setup');
+          }, 1000);
         } else {
           // User exists and profile is complete
           toast({
