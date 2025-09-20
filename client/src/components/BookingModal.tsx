@@ -53,19 +53,24 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId }: Bo
   const loadGuestData = () => {
     try {
       const saved = localStorage.getItem(GUEST_DATA_KEY);
-      if (saved) {
+      if (saved && typeof saved === 'string') {
         const guestData = JSON.parse(saved);
-        // Check if data is recent (within 30 days)
-        const lastUsed = new Date(guestData.lastUsed);
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        
-        if (lastUsed > thirtyDaysAgo) {
-          setGuestSessionId(guestData.sessionId);
-          return guestData;
+        // Validate that we got an object with expected properties
+        if (guestData && typeof guestData === 'object' && guestData.lastUsed) {
+          // Check if data is recent (within 30 days)
+          const lastUsed = new Date(guestData.lastUsed);
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          
+          if (lastUsed > thirtyDaysAgo) {
+            setGuestSessionId(guestData.sessionId);
+            return guestData;
+          } else {
+            // Clean up expired data
+            localStorage.removeItem(GUEST_DATA_KEY);
+          }
         } else {
-          // Clean up expired data
-          localStorage.removeItem(GUEST_DATA_KEY);
+          throw new Error('Invalid guest data structure');
         }
       }
     } catch (error) {

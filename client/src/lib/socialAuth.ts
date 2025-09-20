@@ -24,15 +24,31 @@ export async function handleSocialAuth(
           throw new Error('No Google credential received');
         }
         
-        const payload = JSON.parse(atob(credential.credential.split('.')[1]));
-        authData = {
-          provider: 'google',
-          token: credential.credential,
-          email: payload.email,
-          firstName: payload.given_name,
-          lastName: payload.family_name,
-          profileImage: payload.picture,
-        };
+        try {
+          // Safely parse Google JWT token
+          const tokenParts = credential.credential.split('.');
+          if (tokenParts.length !== 3) {
+            throw new Error('Invalid JWT format');
+          }
+          
+          const payloadString = atob(tokenParts[1]);
+          if (typeof payloadString !== 'string') {
+            throw new Error('Invalid JWT payload');
+          }
+          
+          const payload = JSON.parse(payloadString);
+          authData = {
+            provider: 'google',
+            token: credential.credential,
+            email: payload.email,
+            firstName: payload.given_name,
+            lastName: payload.family_name,
+            profileImage: payload.picture,
+          };
+        } catch (error) {
+          console.error('Error parsing Google JWT:', error);
+          throw new Error('Failed to parse Google authentication token');
+        }
         break;
 
       case 'facebook':

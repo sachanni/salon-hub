@@ -22,14 +22,19 @@ export function useRecentlyViewed() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(RECENTLY_VIEWED_KEY);
-      if (stored) {
+      if (stored && typeof stored === 'string') {
         const parsed: RecentlyViewedSalon[] = JSON.parse(stored);
-        // Sort by most recent first and validate data structure
-        const validSalons = parsed
-          .filter(salon => salon.id && salon.name && salon.viewedAt)
-          .sort((a, b) => new Date(b.viewedAt).getTime() - new Date(a.viewedAt).getTime())
-          .slice(0, MAX_RECENTLY_VIEWED);
-        setRecentlyViewed(validSalons);
+        // Validate that we got an array
+        if (Array.isArray(parsed)) {
+          // Sort by most recent first and validate data structure
+          const validSalons = parsed
+            .filter(salon => salon && typeof salon === 'object' && salon.id && salon.name && salon.viewedAt)
+            .sort((a, b) => new Date(b.viewedAt).getTime() - new Date(a.viewedAt).getTime())
+            .slice(0, MAX_RECENTLY_VIEWED);
+          setRecentlyViewed(validSalons);
+        } else {
+          throw new Error('Parsed data is not an array');
+        }
       }
     } catch (error) {
       console.error('Error loading recently viewed salons:', error);
