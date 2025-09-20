@@ -77,9 +77,9 @@ export default function JoinBusiness() {
         
         // Show success toast
         toast({
-          title: "Registration Successful!",
-          description: "Redirecting to business setup...",
-          duration: 2000,
+          title: "Welcome to SalonHub!",
+          description: "Registration successful! Setting up your business profile...",
+          duration: 4000,
         });
         
         console.log('Registration complete, refreshing auth state');

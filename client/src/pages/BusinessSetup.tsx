@@ -118,12 +118,44 @@ export default function BusinessSetup() {
 
   const currentSalon = userSalons[0]; // Use first salon for now
 
-  // Redirect if not authenticated or no salon
+  // Create organization and salon for new business owners
+  const createOrganizationMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/organizations', {
+        name: `${user?.firstName || 'Business'} Organization`,
+        description: 'Business organization for salon management'
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
+      toast({
+        title: "Organization Created",
+        description: "Your business organization has been set up. Let's configure your salon!",
+      });
+    },
+    onError: (error) => {
+      console.error('Error creating organization:', error);
+      toast({
+        title: "Setup Error",
+        description: "Failed to create business organization. Please try again.",
+        variant: "destructive",
+      });
+    }
+  });
+
+  // Redirect if not authenticated, or create org if business owner without salon
   useEffect(() => {
     if (!isAuthenticated) {
       setLocation('/join/business');
+      return;
     }
-  }, [isAuthenticated, setLocation]);
+
+    // If user is a business owner but has no salons, create organization
+    if (user && user.roles.includes('owner') && userSalons.length === 0) {
+      createOrganizationMutation.mutate();
+    }
+  }, [isAuthenticated, user, userSalons.length, setLocation]);
 
   // Load existing progress from API
   const { data: publishState } = useQuery({

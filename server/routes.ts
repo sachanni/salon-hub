@@ -173,6 +173,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Organization endpoints
+  app.post('/api/organizations', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { name, description } = req.body;
+
+      // Validate required fields
+      if (!name) {
+        return res.status(400).json({ error: "Organization name is required" });
+      }
+
+      // Create organization
+      const orgData = {
+        name,
+        description: description || '',
+        ownerUserId: userId,
+        status: 'active'
+      };
+
+      const newOrg = await storage.createOrganization(orgData);
+
+      // Add user as owner to organization
+      await storage.addUserToOrganization(newOrg.id, userId, 'owner');
+
+      // Create a default salon for the organization
+      const salonData = {
+        name: name + " Salon",
+        description: "Your business salon",
+        address: "Please update your address",
+        city: "Please update",
+        state: "Please update", 
+        zipCode: "00000",
+        phone: "Please update your phone",
+        email: req.user.claims.email || "Please update",
+        category: "hair_salon",
+        priceRange: "$$",
+        orgId: newOrg.id,
+        ownerId: userId,
+        isActive: 1
+      };
+
+      const newSalon = await storage.createSalon(salonData);
+
+      res.status(201).json({
+        success: true,
+        organization: newOrg,
+        salon: newSalon,
+        message: "Organization and salon created successfully"
+      });
+
+    } catch (error) {
+      console.error("Error creating organization:", error);
+      res.status(500).json({ error: "Failed to create organization. Please try again." });
+    }
+  });
+
   // Email verification endpoint
   app.get('/verify-email', async (req, res) => {
     try {
