@@ -5,6 +5,8 @@ import Footer from "@/components/Footer";
 import BookingModal from "@/components/BookingModal";
 import { useState, useEffect } from "react";
 import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
+import { useAuth } from "@/contexts/AuthContext";
+import { useLocation } from "wouter";
 
 export default function Home() {
   const [isBookingOpen, setIsBookingOpen] = useState(false);
@@ -13,6 +15,29 @@ export default function Home() {
   const [salonsData, setSalonsData] = useState<any[]>([]);
   
   const { addRecentlyViewed } = useRecentlyViewed();
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+
+  // Auto-detect business owners and redirect to setup
+  useEffect(() => {
+    if (isLoading) return; // Wait for auth to load
+    
+    if (isAuthenticated && user) {
+      // Check if user is a business owner
+      const isBusinessOwner = user.roles.includes('owner');
+      
+      if (isBusinessOwner) {
+        // Check if they have completed business setup (have organizations/salons)
+        const hasCompletedSetup = user.orgMemberships && user.orgMemberships.length > 0;
+        
+        if (!hasCompletedSetup) {
+          console.log('Business owner detected without setup, redirecting to business setup');
+          setLocation('/business/setup');
+          return;
+        }
+      }
+    }
+  }, [isAuthenticated, user, isLoading, setLocation]);
 
   // Fetch salon data on component mount for recently viewed tracking
   useEffect(() => {
