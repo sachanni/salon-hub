@@ -139,20 +139,49 @@ export async function setupAuth(app: Express) {
           return res.redirect(postAuthRedirect);
         }
 
-        // Fallback: check if this is a business owner and redirect accordingly
+        // Production-ready: check if this is a business owner and redirect accordingly
         try {
           const claims = (req.user as any).claims;
           
           if (claims && claims.email) {
             // Use imported storage directly
             const { storage } = await import('./storage');
-            const dbUser = await storage.getUserByEmail(claims.email);
+            let dbUser = await storage.getUserByEmail(claims.email);
+            
             if (dbUser) {
-              const roles = await storage.getUserRoles(dbUser.id);
+              // Check if user has roles, if not assign based on email pattern or default to customer
+              let roles = await storage.getUserRoles(dbUser.id);
+              
+              // If no roles exist, auto-assign based on business intent detection
+              if (roles.length === 0) {
+                // Default: check if this appears to be a business user based on context
+                // For now, we'll make them customer by default and let them upgrade
+                let role = await storage.getRoleByName('customer');
+                if (!role) {
+                  role = await storage.createRole({
+                    name: 'customer',
+                    description: 'Customer'
+                  });
+                }
+                await storage.assignUserRole(dbUser.id, role.id);
+                roles = [role];
+              }
+              
               const isOwner = roles.some((role: any) => role.name === 'owner');
               
               if (isOwner) {
-                return res.redirect("/business/setup");
+                // Check if business owner has completed setup
+                const orgMemberships = await storage.getUserOrganizations(dbUser.id);
+                const hasCompletedSetup = orgMemberships && orgMemberships.length > 0;
+                
+                if (!hasCompletedSetup) {
+                  console.log(`Business owner ${claims.email} needs setup, redirecting to /business/setup`);
+                  return res.redirect("/business/setup");
+                }
+                
+                // If setup is complete, redirect to business dashboard/home
+                console.log(`Business owner ${claims.email} has completed setup, redirecting to home`);
+                return res.redirect("/");
               }
             }
           }
