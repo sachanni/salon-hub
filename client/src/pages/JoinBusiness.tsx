@@ -89,8 +89,16 @@ export default function JoinBusiness() {
         
         console.log('Auth state refreshed, triggering redirect');
         
-        // Trigger redirect via React state - more reliable than direct window.location
-        setShouldRedirect(true);
+        // Handle backend-provided redirect (production-ready auto-detection)
+        if (data.redirect) {
+          console.log(`Backend suggested redirect to: ${data.redirect}`);
+          setTimeout(() => {
+            setLocation(data.redirect);
+          }, 1000);
+        } else {
+          // Fallback: Trigger redirect via React state
+          setShouldRedirect(true);
+        }
       } else {
         // Handle "User already exists" error with smart detection (Fresha pattern)
         if (data.error === "User with this email already exists") {

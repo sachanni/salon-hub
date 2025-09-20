@@ -138,7 +138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       // Establish session using passport's login function
-      req.logIn(sessionUser, (err: any) => {
+      req.logIn(sessionUser, async (err: any) => {
         if (err) {
           console.error("Session establishment failed after registration:", err);
           // Still return success since user was created, but without session
@@ -155,7 +155,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log("Session established successfully after registration for user:", newUser.id);
 
-        // Success with session established
+        // Production-ready: Auto-redirect business owners to setup page (same logic as Replit Auth)
+        if (userType === 'owner') {
+          try {
+            // Check if business owner has completed setup
+            const orgMemberships = await storage.getUserOrganizations(newUser.id);
+            const hasCompletedSetup = orgMemberships && orgMemberships.length > 0;
+            
+            if (!hasCompletedSetup) {
+              console.log(`Manual registration: Business owner ${email} needs setup, redirecting to /business/setup`);
+              const { password: _, ...userResponse } = newUser;
+              return res.status(200).json({
+                success: true,
+                user: userResponse,
+                message: "Account created successfully! Please check your email to verify your account.",
+                emailSent: emailSent,
+                requiresVerification: true,
+                authenticated: true,
+                redirect: '/business/setup'  // Frontend will handle this redirect
+              });
+            }
+            
+            console.log(`Manual registration: Business owner ${email} has completed setup`);
+          } catch (error) {
+            console.error("Error checking organization status in manual registration:", error);
+          }
+        }
+
+        // Success with session established (customers or completed business owners)
         const { password: _, ...userResponse } = newUser;
         res.status(200).json({
           success: true,
@@ -163,7 +190,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "Account created successfully! Please check your email to verify your account.",
           emailSent: emailSent,
           requiresVerification: true,
-          authenticated: true
+          authenticated: true,
+          redirect: '/'  // Frontend will handle this redirect
         });
       });
 
