@@ -111,7 +111,19 @@ export default function BusinessDashboard() {
   useEffect(() => {
     if (salon) {
       const salonData = salon as any;
+      
+      // Debug: Log what data we actually have
+      console.log('Salon data for completion check:', {
+        name: salonData.name,
+        description: salonData.description,
+        address: salonData.address,
+        hasName: !!salonData.name,
+        hasDescription: !!salonData.description,
+        hasAddress: !!salonData.address
+      });
+      
       const profileComplete = !!(salonData.name && salonData.description && salonData.address);
+      console.log('Profile complete status:', profileComplete);
       
       // Only update if profile completion status actually changed
       setCompletionStatus(prev => {
