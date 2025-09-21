@@ -43,17 +43,16 @@ export default function LocationContactStep({
 
   // Populate form with existing data
   useEffect(() => {
-    if (salonData) {
-      setFormData(prev => ({
-        ...prev,
+    if (salonData && !formData.address) { // Only populate if form is empty
+      setFormData({
         address: salonData.address || "",
         city: salonData.city || "",
         state: salonData.state || "",
-        zipCode: salonData.zipCode || "",
+        zipCode: salonData.zipCode || "", // Drizzle handles mapping from zip_code to zipCode automatically
         phone: salonData.phone || "",
         email: salonData.email || "",
-        businessHours: salonData.businessHours || ""
-      }));
+        businessHours: "" // For now, businessHours field is not in database - keep form field but don't load from DB
+      });
     }
   }, [salonData]);
 

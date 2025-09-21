@@ -75,10 +75,10 @@ export default function ProfileStep({
         address: salon.address || "",
         city: salon.city || "",
         state: salon.state || "",
-        zipCode: salon.zip_code || salon.zipCode || "", // Handle both database formats
+        zipCode: salon.zipCode || "", // Drizzle handles mapping from zip_code to zipCode automatically
         phone: salon.phone || "",
         email: salon.email || "",
-        businessHours: salon.business_hours || salon.businessHours || ""
+        businessHours: "" // For now, businessHours field is not in database - keep form field but don't load from DB
       });
     }
   }, [salonData]); // Remove formData from dependencies to prevent loops

@@ -146,7 +146,6 @@ export const salons = pgTable("salons", {
   imageUrl: text("image_url"),
   openTime: text("open_time"), // e.g., "9:00 AM"
   closeTime: text("close_time"), // e.g., "8:00 PM"
-  businessHours: text("business_hours"), // Free-form business hours text
   isActive: integer("is_active").notNull().default(1),
   ownerId: varchar("owner_id").references(() => users.id), // Keep for backward compatibility
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "set null" }), // New organization link
