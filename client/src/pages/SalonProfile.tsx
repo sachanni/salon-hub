@@ -348,24 +348,45 @@ export default function SalonProfile() {
                       </div>
                     ) : staff && staff.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {staff.map((member) => (
-                          <div key={member.id} className="text-center" data-testid={`staff-${member.id}`}>
-                            <div className="h-32 w-32 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                              <Users className="h-16 w-16 text-primary" />
+                        {staff.map((member, index) => {
+                          // Professional team member photos
+                          const profileImages = [
+                            'https://images.unsplash.com/photo-1594824720108-82cccd6946e6?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
+                            'https://images.unsplash.com/photo-1582750433449-648ed127bb54?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
+                            'https://images.unsplash.com/photo-1595475884552-c2b8a8b3d39a?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
+                            'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80'
+                          ];
+                          
+                          return (
+                            <div key={member.id} className="text-center" data-testid={`staff-${member.id}`}>
+                              <div className="relative mx-auto mb-4">
+                                <img
+                                  src={profileImages[index % profileImages.length]}
+                                  alt={member.name}
+                                  className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg"
+                                />
+                                <div className="absolute -bottom-2 -right-2 bg-green-500 h-6 w-6 rounded-full border-2 border-white flex items-center justify-center">
+                                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                                </div>
+                              </div>
+                              <h4 className="font-semibold text-lg mb-1" data-testid={`text-staff-name-${member.id}`}>
+                                {member.name}
+                              </h4>
+                              <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${member.id}`}>
+                                {member.role || 'Senior Specialist'}
+                              </p>
+                              <div className="flex items-center justify-center gap-1 text-sm mb-3">
+                                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                                <span className="font-medium">4.9</span>
+                                <span className="text-muted-foreground">(156 reviews)</span>
+                              </div>
+                              <Button variant="outline" size="sm" className="text-xs">
+                                <Calendar className="h-3 w-3 mr-1" />
+                                Book with {member.name.split(' ')[0]}
+                              </Button>
                             </div>
-                            <h4 className="font-semibold text-lg mb-1" data-testid={`text-staff-name-${member.id}`}>
-                              {member.name}
-                            </h4>
-                            <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${member.id}`}>
-                              {member.role || 'Senior Specialist'}
-                            </p>
-                            <div className="flex items-center justify-center gap-1 text-sm">
-                              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                              <span>4.9</span>
-                              <span className="text-muted-foreground">(156 reviews)</span>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="text-center py-8">
@@ -544,18 +565,34 @@ export default function SalonProfile() {
                   </p>
                 </div>
                 
-                {/* Map placeholder */}
-                <div className="h-32 bg-muted rounded-lg flex items-center justify-center">
-                  <div className="text-center text-muted-foreground">
-                    <MapPin className="h-6 w-6 mx-auto mb-1" />
-                    <p className="text-xs">Interactive Map</p>
+                {/* Interactive Map */}
+                <div className="space-y-3">
+                  <div className="h-48 rounded-lg overflow-hidden border">
+                    <iframe
+                      width="100%"
+                      height="100%"
+                      style={{ border: 0 }}
+                      loading="lazy"
+                      allowFullScreen
+                      referrerPolicy="no-referrer-when-downgrade"
+                      src={`https://maps.google.com/maps?q=${encodeURIComponent(
+                        `${salon.address}, ${salon.city}, ${salon.state} ${salon.zipCode}`
+                      )}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+                      className="w-full h-full"
+                      title="Salon Location"
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1" size="sm">
+                      <MapPin className="h-4 w-4 mr-2" />
+                      Get Directions
+                    </Button>
+                    <Button variant="outline" size="sm">
+                      <Phone className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                
-                <Button variant="outline" className="w-full">
-                  <MapPin className="h-4 w-4 mr-2" />
-                  Get Directions
-                </Button>
               </CardContent>
             </Card>
           </div>
