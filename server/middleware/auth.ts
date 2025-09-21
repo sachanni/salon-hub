@@ -112,6 +112,14 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
       const userRoles = req.user.roles || [];
       const isOwner = userRoles.includes('owner');
       
+      console.log('Authorization debug:', {
+        userId: req.user.id,
+        userRoles: userRoles,
+        isOwner: isOwner,
+        salonId: salonId,
+        orgMemberships: req.user.orgMemberships
+      });
+      
       if (isOwner) {
         console.log('Access granted - user is business owner for salon:', salonId);
         next();
