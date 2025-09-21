@@ -52,6 +52,13 @@ import {
   type TestVariant, type InsertTestVariant,
   type TestMetric, type InsertTestMetric,
   type TestResult, type InsertTestResult,
+  // A/B testing automation system types
+  type AutomationConfiguration, type InsertAutomationConfiguration,
+  type VariantGenerationRule, type InsertVariantGenerationRule,
+  type PerformanceMonitoringSetting, type InsertPerformanceMonitoringSetting,
+  type OptimizationRecommendation, type InsertOptimizationRecommendation,
+  type AutomatedActionLog, type InsertAutomatedActionLog,
+  type CampaignOptimizationInsight, type InsertCampaignOptimizationInsight,
   users, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
@@ -64,7 +71,10 @@ import {
   vendors, productCategories, products, stockMovements, purchaseOrders, purchaseOrderItems,
   productUsage, reorderRules, inventoryAdjustments, inventoryAdjustmentItems,
   // A/B testing system tables
-  abTestCampaigns, testVariants, testMetrics, testResults
+  abTestCampaigns, testVariants, testMetrics, testResults,
+  // A/B testing automation system tables
+  automationConfigurations, variantGenerationRules, performanceMonitoringSettings,
+  optimizationRecommendations, automatedActionLogs, campaignOptimizationInsights
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
@@ -896,6 +906,82 @@ export interface IStorage {
       improvement: number;
     }>;
   }>;
+
+  // ====================================
+  // A/B TESTING AUTOMATION SYSTEM OPERATIONS
+  // ====================================
+
+  // Automation Configuration Operations
+  getAutomationConfiguration(id: string): Promise<AutomationConfiguration | undefined>;
+  getAutomationConfigurationBySalonId(salonId: string): Promise<AutomationConfiguration | undefined>;
+  createAutomationConfiguration(config: InsertAutomationConfiguration): Promise<AutomationConfiguration>;
+  updateAutomationConfiguration(id: string, updates: Partial<InsertAutomationConfiguration>): Promise<void>;
+  deleteAutomationConfiguration(id: string): Promise<void>;
+
+  // Variant Generation Rule Operations
+  getVariantGenerationRule(id: string): Promise<VariantGenerationRule | undefined>;
+  getVariantGenerationRulesBySalonId(salonId: string, filters?: { ruleType?: string; isActive?: number }): Promise<VariantGenerationRule[]>;
+  getVariantGenerationRulesByConfigId(configId: string): Promise<VariantGenerationRule[]>;
+  createVariantGenerationRule(rule: InsertVariantGenerationRule): Promise<VariantGenerationRule>;
+  updateVariantGenerationRule(id: string, updates: Partial<InsertVariantGenerationRule>): Promise<void>;
+  deleteVariantGenerationRule(id: string): Promise<void>;
+
+  // Performance Monitoring Setting Operations
+  getPerformanceMonitoringSetting(id: string): Promise<PerformanceMonitoringSetting | undefined>;
+  getPerformanceMonitoringSettingsBySalonId(salonId: string): Promise<PerformanceMonitoringSetting[]>;
+  getPerformanceMonitoringSettingsByConfigId(configId: string): Promise<PerformanceMonitoringSetting[]>;
+  createPerformanceMonitoringSetting(setting: InsertPerformanceMonitoringSetting): Promise<PerformanceMonitoringSetting>;
+  updatePerformanceMonitoringSetting(id: string, updates: Partial<InsertPerformanceMonitoringSetting>): Promise<void>;
+  deletePerformanceMonitoringSetting(id: string): Promise<void>;
+
+  // Optimization Recommendation Operations
+  getOptimizationRecommendation(id: string): Promise<OptimizationRecommendation | undefined>;
+  getOptimizationRecommendationsBySalonId(salonId: string, filters?: { 
+    status?: string; 
+    recommendationType?: string; 
+    createdAfter?: Date; 
+    createdBefore?: Date; 
+  }): Promise<OptimizationRecommendation[]>;
+  getOptimizationRecommendationsByCampaignId(campaignId: string): Promise<OptimizationRecommendation[]>;
+  getOptimizationRecommendationsByTestCampaignId(testCampaignId: string): Promise<OptimizationRecommendation[]>;
+  createOptimizationRecommendation(recommendation: InsertOptimizationRecommendation): Promise<OptimizationRecommendation>;
+  updateOptimizationRecommendation(id: string, updates: Partial<InsertOptimizationRecommendation>): Promise<void>;
+  deleteOptimizationRecommendation(id: string): Promise<void>;
+  updateExpiredOptimizationRecommendations(): Promise<number>;
+
+  // Automated Action Log Operations
+  getAutomatedActionLog(id: string): Promise<AutomatedActionLog | undefined>;
+  getAutomatedActionLogsBySalonId(salonId: string, filters?: { 
+    actionType?: string; 
+    status?: string; 
+    limit?: number; 
+  }): Promise<AutomatedActionLog[]>;
+  getAutomatedActionLogsByConfigId(configId: string): Promise<AutomatedActionLog[]>;
+  createAutomatedActionLog(log: InsertAutomatedActionLog): Promise<AutomatedActionLog>;
+  updateAutomatedActionLog(id: string, updates: Partial<InsertAutomatedActionLog>): Promise<void>;
+  deleteAutomatedActionLogsBefore(cutoffDate: Date): Promise<number>;
+
+  // Campaign Optimization Insight Operations
+  getCampaignOptimizationInsight(id: string): Promise<CampaignOptimizationInsight | undefined>;
+  getCampaignOptimizationInsightsBySalonId(salonId: string, filters?: { 
+    insightType?: string; 
+    status?: string; 
+    isActionable?: number; 
+    createdAfter?: Date; 
+  }): Promise<CampaignOptimizationInsight[]>;
+  createCampaignOptimizationInsight(insight: InsertCampaignOptimizationInsight): Promise<CampaignOptimizationInsight>;
+  updateCampaignOptimizationInsight(id: string, updates: Partial<InsertCampaignOptimizationInsight>): Promise<void>;
+  deleteCampaignOptimizationInsight(id: string): Promise<void>;
+
+  // Additional helper methods for automation
+  getTestMetricByVariantAndDate(variantId: string, date: Date): Promise<TestMetric | undefined>;
+  getCommunicationHistoryByVariantId(variantId: string): Promise<CommunicationHistory[]>;
+  getCommunicationHistoryByTemplateId(templateId: string, filters?: { startDate?: string; endDate?: string }): Promise<CommunicationHistory[]>;
+  getCommunicationHistoryBySalonId(salonId: string, filters?: { startDate?: string; endDate?: string }): Promise<CommunicationHistory[]>;
+  getCommunicationHistoryBySegment(segmentId: string, filters?: { startDate?: string; endDate?: string }): Promise<CommunicationHistory[]>;
+  getMessageTemplatesBySalonId(salonId: string): Promise<MessageTemplate[]>;
+  getCustomerSegmentsBySalonId(salonId: string): Promise<CustomerSegment[]>;
+  deleteTestMetricsBefore(cutoffDate: Date): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {

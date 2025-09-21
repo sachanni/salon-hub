@@ -1923,6 +1923,418 @@ export const testResultsRelations = relations(testResults, ({ one }) => ({
   }),
 }));
 
+// ===== A/B TESTING AUTOMATION SYSTEM =====
+
+// Automation Configurations - Settings for automated A/B testing features
+export const automationConfigurations = pgTable("automation_configurations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  configurationName: varchar("configuration_name", { length: 100 }).notNull(),
+  isEnabled: integer("is_enabled").notNull().default(1),
+  
+  // Variant generation settings
+  enableVariantGeneration: integer("enable_variant_generation").notNull().default(1),
+  maxVariantsPerTest: integer("max_variants_per_test").notNull().default(4),
+  variantGenerationTypes: jsonb("variant_generation_types").default('["subject_line", "content", "send_time"]'), // Types of variants to auto-generate
+  
+  // Performance monitoring settings
+  enablePerformanceMonitoring: integer("enable_performance_monitoring").notNull().default(1),
+  monitoringIntervalMinutes: integer("monitoring_interval_minutes").notNull().default(15),
+  performanceAlertThreshold: decimal("performance_alert_threshold", { precision: 5, scale: 4 }).default('0.0500'), // 5% performance change threshold
+  
+  // Winner selection settings
+  enableAutoWinnerSelection: integer("enable_auto_winner_selection").notNull().default(0),
+  autoWinnerConfidenceLevel: integer("auto_winner_confidence_level").notNull().default(95), // 90, 95, 99
+  minimumTestDurationHours: integer("minimum_test_duration_hours").notNull().default(24),
+  minimumSampleSize: integer("minimum_sample_size").notNull().default(100),
+  
+  // Campaign optimization settings
+  enableCampaignOptimization: integer("enable_campaign_optimization").notNull().default(1),
+  optimizationTypes: jsonb("optimization_types").default('["send_time", "frequency", "channel"]'), // Types of optimizations to suggest
+  learningDataDays: integer("learning_data_days").notNull().default(30), // Days of historical data to use for learning
+  
+  // Business rules for automation
+  businessRules: jsonb("business_rules").default('{}'), // Custom business rules as JSON
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("automation_configurations_salon_id_idx").on(table.salonId),
+  index("automation_configurations_enabled_idx").on(table.isEnabled),
+  unique("automation_configurations_salon_name_unique").on(table.salonId, table.configurationName),
+  check("max_variants_valid", sql`max_variants_per_test >= 2 AND max_variants_per_test <= 10`),
+  check("monitoring_interval_valid", sql`monitoring_interval_minutes >= 5 AND monitoring_interval_minutes <= 1440`),
+  check("confidence_level_valid", sql`auto_winner_confidence_level IN (90, 95, 99)`),
+  check("duration_valid", sql`minimum_test_duration_hours >= 1 AND minimum_test_duration_hours <= 168`),
+  check("sample_size_valid", sql`minimum_sample_size >= 10`),
+]);
+
+export const insertAutomationConfigurationSchema = createInsertSchema(automationConfigurations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type AutomationConfiguration = typeof automationConfigurations.$inferSelect;
+export type InsertAutomationConfiguration = z.infer<typeof insertAutomationConfigurationSchema>;
+
+// Variant Generation Rules - AI-powered rules for creating test variants
+export const variantGenerationRules = pgTable("variant_generation_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  configurationId: varchar("configuration_id").notNull().references(() => automationConfigurations.id, { onDelete: "cascade" }),
+  ruleName: varchar("rule_name", { length: 100 }).notNull(),
+  ruleType: varchar("rule_type", { length: 50 }).notNull(), // subject_line, content, timing, channel, personalization
+  isActive: integer("is_active").notNull().default(1),
+  priority: integer("priority").notNull().default(0), // Higher priority rules are applied first
+  
+  // Rule conditions
+  conditions: jsonb("conditions").default('{}'), // JSON: audience criteria, performance thresholds, etc.
+  
+  // Rule actions
+  actions: jsonb("actions").default('{}'), // JSON: variant modifications to apply
+  
+  // Performance tracking
+  timesApplied: integer("times_applied").notNull().default(0),
+  successRate: decimal("success_rate", { precision: 5, scale: 4 }).default('0.0000'), // % of times this rule improved performance
+  averageImprovement: decimal("average_improvement", { precision: 5, scale: 4 }).default('0.0000'), // Average performance improvement
+  
+  // Best practice templates
+  bestPracticeTemplates: jsonb("best_practice_templates").default('[]'), // Proven effective patterns
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("variant_generation_rules_salon_id_idx").on(table.salonId),
+  index("variant_generation_rules_config_id_idx").on(table.configurationId),
+  index("variant_generation_rules_type_idx").on(table.ruleType),
+  index("variant_generation_rules_active_idx").on(table.isActive),
+  index("variant_generation_rules_priority_idx").on(table.priority),
+  unique("variant_generation_rules_config_name_unique").on(table.configurationId, table.ruleName),
+]);
+
+export const insertVariantGenerationRuleSchema = createInsertSchema(variantGenerationRules).omit({
+  id: true,
+  timesApplied: true,
+  successRate: true,
+  averageImprovement: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type VariantGenerationRule = typeof variantGenerationRules.$inferSelect;
+export type InsertVariantGenerationRule = z.infer<typeof insertVariantGenerationRuleSchema>;
+
+// Performance Monitoring Settings - Real-time monitoring configurations
+export const performanceMonitoringSettings = pgTable("performance_monitoring_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  configurationId: varchar("configuration_id").notNull().references(() => automationConfigurations.id, { onDelete: "cascade" }),
+  monitoringName: varchar("monitoring_name", { length: 100 }).notNull(),
+  isActive: integer("is_active").notNull().default(1),
+  
+  // Monitoring targets
+  targetMetrics: jsonb("target_metrics").default('["open_rate", "click_rate", "conversion_rate"]'), // Metrics to monitor
+  metricThresholds: jsonb("metric_thresholds").default('{}'), // Alert thresholds for each metric
+  
+  // Monitoring frequency
+  checkIntervalMinutes: integer("check_interval_minutes").notNull().default(15),
+  alertCooldownMinutes: integer("alert_cooldown_minutes").notNull().default(60), // Prevent spam alerts
+  
+  // Alert settings
+  enableEmailAlerts: integer("enable_email_alerts").notNull().default(1),
+  enableSmsAlerts: integer("enable_sms_alerts").notNull().default(0),
+  alertRecipients: jsonb("alert_recipients").default('[]'), // Email/phone list for alerts
+  
+  // Early detection settings
+  enableEarlyWinnerDetection: integer("enable_early_winner_detection").notNull().default(1),
+  earlyDetectionMinimumSamples: integer("early_detection_minimum_samples").notNull().default(50),
+  earlyDetectionSignificanceLevel: decimal("early_detection_significance_level", { precision: 5, scale: 4 }).default('0.0500'), // 5% significance level
+  
+  // Data collection settings
+  enableProviderIntegration: integer("enable_provider_integration").notNull().default(1),
+  providerSettings: jsonb("provider_settings").default('{}'), // SendGrid, Twilio integration settings
+  
+  lastMonitoredAt: timestamp("last_monitored_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("performance_monitoring_settings_salon_id_idx").on(table.salonId),
+  index("performance_monitoring_settings_config_id_idx").on(table.configurationId),
+  index("performance_monitoring_settings_active_idx").on(table.isActive),
+  index("performance_monitoring_settings_last_monitored_idx").on(table.lastMonitoredAt),
+  unique("performance_monitoring_settings_config_name_unique").on(table.configurationId, table.monitoringName),
+  check("check_interval_valid", sql`check_interval_minutes >= 5 AND check_interval_minutes <= 1440`),
+  check("cooldown_valid", sql`alert_cooldown_minutes >= 5 AND alert_cooldown_minutes <= 1440`),
+]);
+
+export const insertPerformanceMonitoringSettingSchema = createInsertSchema(performanceMonitoringSettings).omit({
+  id: true,
+  lastMonitoredAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type PerformanceMonitoringSetting = typeof performanceMonitoringSettings.$inferSelect;
+export type InsertPerformanceMonitoringSetting = z.infer<typeof insertPerformanceMonitoringSettingSchema>;
+
+// Optimization Recommendations - ML-generated optimization suggestions
+export const optimizationRecommendations = pgTable("optimization_recommendations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  campaignId: varchar("campaign_id").references(() => communicationCampaigns.id, { onDelete: "cascade" }),
+  testCampaignId: varchar("test_campaign_id").references(() => abTestCampaigns.id, { onDelete: "cascade" }),
+  
+  recommendationType: varchar("recommendation_type", { length: 50 }).notNull(), // send_time, audience, content, frequency, channel
+  recommendationTitle: varchar("recommendation_title", { length: 200 }).notNull(),
+  recommendationDescription: text("recommendation_description").notNull(),
+  
+  // Confidence and impact metrics
+  confidenceScore: decimal("confidence_score", { precision: 5, scale: 4 }).notNull(), // 0-1 confidence in recommendation
+  expectedImprovement: decimal("expected_improvement", { precision: 5, scale: 4 }).notNull(), // % improvement expected
+  impactScore: decimal("impact_score", { precision: 5, scale: 4 }).notNull(), // Business impact score
+  
+  // Implementation details
+  implementationData: jsonb("implementation_data").default('{}'), // JSON: specific changes to make
+  implementationComplexity: varchar("implementation_complexity", { length: 20 }).notNull().default('low'), // low, medium, high
+  estimatedEffortHours: decimal("estimated_effort_hours", { precision: 4, scale: 2 }).default('0.25'),
+  
+  // ML model details
+  modelVersion: varchar("model_version", { length: 50 }),
+  modelFeatures: jsonb("model_features").default('{}'), // Features used for this recommendation
+  basedOnDataPoints: integer("based_on_data_points").default(0), // Number of data points used
+  
+  // Status and feedback
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, implemented, rejected, expired
+  implementedAt: timestamp("implemented_at"),
+  implementedBy: varchar("implemented_by").references(() => users.id),
+  actualImprovement: decimal("actual_improvement", { precision: 5, scale: 4 }), // Measured improvement after implementation
+  feedbackScore: integer("feedback_score"), // User feedback 1-5
+  feedbackNotes: text("feedback_notes"),
+  
+  // Expiration and priority
+  expiresAt: timestamp("expires_at"),
+  priority: integer("priority").notNull().default(5), // 1-10 priority scale
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("optimization_recommendations_salon_id_idx").on(table.salonId),
+  index("optimization_recommendations_campaign_id_idx").on(table.campaignId),
+  index("optimization_recommendations_test_campaign_id_idx").on(table.testCampaignId),
+  index("optimization_recommendations_type_idx").on(table.recommendationType),
+  index("optimization_recommendations_status_idx").on(table.status),
+  index("optimization_recommendations_priority_idx").on(table.priority),
+  index("optimization_recommendations_expires_at_idx").on(table.expiresAt),
+  check("confidence_score_valid", sql`confidence_score >= 0 AND confidence_score <= 1`),
+  check("impact_score_valid", sql`impact_score >= 0 AND impact_score <= 1`),
+  check("priority_valid", sql`priority >= 1 AND priority <= 10`),
+  check("feedback_score_valid", sql`feedback_score IS NULL OR (feedback_score >= 1 AND feedback_score <= 5)`),
+]);
+
+export const insertOptimizationRecommendationSchema = createInsertSchema(optimizationRecommendations).omit({
+  id: true,
+  implementedAt: true,
+  actualImprovement: true,
+  feedbackScore: true,
+  feedbackNotes: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type OptimizationRecommendation = typeof optimizationRecommendations.$inferSelect;
+export type InsertOptimizationRecommendation = z.infer<typeof insertOptimizationRecommendationSchema>;
+
+// Automated Action Logs - Track all automated actions performed by the system
+export const automatedActionLogs = pgTable("automated_action_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  configurationId: varchar("configuration_id").references(() => automationConfigurations.id, { onDelete: "set null" }),
+  campaignId: varchar("campaign_id").references(() => communicationCampaigns.id, { onDelete: "set null" }),
+  testCampaignId: varchar("test_campaign_id").references(() => abTestCampaigns.id, { onDelete: "set null" }),
+  recommendationId: varchar("recommendation_id").references(() => optimizationRecommendations.id, { onDelete: "set null" }),
+  
+  actionType: varchar("action_type", { length: 50 }).notNull(), // variant_generated, winner_selected, optimization_applied, alert_sent, etc.
+  actionDescription: text("action_description").notNull(),
+  
+  // Action details
+  actionData: jsonb("action_data").default('{}'), // JSON: specific action parameters and results
+  triggeredBy: varchar("triggered_by", { length: 50 }).notNull(), // system, user, schedule, webhook
+  triggerData: jsonb("trigger_data").default('{}'), // What triggered this action
+  
+  // Results
+  status: varchar("status", { length: 20 }).notNull().default('completed'), // pending, completed, failed, cancelled
+  resultData: jsonb("result_data").default('{}'), // Action results and metrics
+  errorMessage: text("error_message"), // Error details if failed
+  
+  // Performance impact
+  performanceImpact: jsonb("performance_impact").default('{}'), // Measured impact of this action
+  
+  // Timing
+  executionTimeMs: integer("execution_time_ms"), // How long the action took
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("automated_action_logs_salon_id_idx").on(table.salonId),
+  index("automated_action_logs_config_id_idx").on(table.configurationId),
+  index("automated_action_logs_campaign_id_idx").on(table.campaignId),
+  index("automated_action_logs_test_campaign_id_idx").on(table.testCampaignId),
+  index("automated_action_logs_action_type_idx").on(table.actionType),
+  index("automated_action_logs_status_idx").on(table.status),
+  index("automated_action_logs_triggered_by_idx").on(table.triggeredBy),
+  index("automated_action_logs_created_at_idx").on(table.createdAt),
+]);
+
+export const insertAutomatedActionLogSchema = createInsertSchema(automatedActionLogs).omit({
+  id: true,
+  executionTimeMs: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export type AutomatedActionLog = typeof automatedActionLogs.$inferSelect;
+export type InsertAutomatedActionLog = z.infer<typeof insertAutomatedActionLogSchema>;
+
+// Campaign Optimization Insights - Machine learning insights for campaign improvement
+export const campaignOptimizationInsights = pgTable("campaign_optimization_insights", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  insightType: varchar("insight_type", { length: 50 }).notNull(), // send_time_patterns, audience_preferences, content_performance, channel_effectiveness
+  insightTitle: varchar("insight_title", { length: 200 }).notNull(),
+  insightDescription: text("insight_description").notNull(),
+  
+  // Insight data
+  insightData: jsonb("insight_data").default('{}'), // JSON: detailed insight findings
+  supportingMetrics: jsonb("supporting_metrics").default('{}'), // Metrics that support this insight
+  
+  // Confidence and validity
+  confidenceScore: decimal("confidence_score", { precision: 5, scale: 4 }).notNull(), // 0-1 confidence in insight
+  sampleSize: integer("sample_size").notNull(), // Number of data points used
+  dataDateRange: jsonb("data_date_range").default('{}'), // Start and end dates of analyzed data
+  
+  // Actionability
+  isActionable: integer("is_actionable").notNull().default(1),
+  recommendedActions: jsonb("recommended_actions").default('[]'), // List of recommended actions
+  
+  // Performance tracking
+  timesActedUpon: integer("times_acted_upon").notNull().default(0),
+  averageImpactWhenActedUpon: decimal("average_impact_when_acted_upon", { precision: 5, scale: 4 }).default('0.0000'),
+  
+  // Lifecycle
+  status: varchar("status", { length: 20 }).notNull().default('active'), // active, implemented, expired, superseded
+  validUntil: timestamp("valid_until"), // When this insight expires
+  supersededBy: varchar("superseded_by").references(() => campaignOptimizationInsights.id),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("campaign_optimization_insights_salon_id_idx").on(table.salonId),
+  index("campaign_optimization_insights_type_idx").on(table.insightType),
+  index("campaign_optimization_insights_status_idx").on(table.status),
+  index("campaign_optimization_insights_actionable_idx").on(table.isActionable),
+  index("campaign_optimization_insights_valid_until_idx").on(table.validUntil),
+  check("confidence_score_valid", sql`confidence_score >= 0 AND confidence_score <= 1`),
+  check("sample_size_valid", sql`sample_size > 0`),
+]);
+
+export const insertCampaignOptimizationInsightSchema = createInsertSchema(campaignOptimizationInsights).omit({
+  id: true,
+  timesActedUpon: true,
+  averageImpactWhenActedUpon: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type CampaignOptimizationInsight = typeof campaignOptimizationInsights.$inferSelect;
+export type InsertCampaignOptimizationInsight = z.infer<typeof insertCampaignOptimizationInsightSchema>;
+
+// Automation Relations
+export const automationConfigurationsRelations = relations(automationConfigurations, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [automationConfigurations.salonId],
+    references: [salons.id],
+  }),
+  variantRules: many(variantGenerationRules),
+  monitoringSettings: many(performanceMonitoringSettings),
+  actionLogs: many(automatedActionLogs),
+}));
+
+export const variantGenerationRulesRelations = relations(variantGenerationRules, ({ one }) => ({
+  salon: one(salons, {
+    fields: [variantGenerationRules.salonId],
+    references: [salons.id],
+  }),
+  configuration: one(automationConfigurations, {
+    fields: [variantGenerationRules.configurationId],
+    references: [automationConfigurations.id],
+  }),
+}));
+
+export const performanceMonitoringSettingsRelations = relations(performanceMonitoringSettings, ({ one }) => ({
+  salon: one(salons, {
+    fields: [performanceMonitoringSettings.salonId],
+    references: [salons.id],
+  }),
+  configuration: one(automationConfigurations, {
+    fields: [performanceMonitoringSettings.configurationId],
+    references: [automationConfigurations.id],
+  }),
+}));
+
+export const optimizationRecommendationsRelations = relations(optimizationRecommendations, ({ one }) => ({
+  salon: one(salons, {
+    fields: [optimizationRecommendations.salonId],
+    references: [salons.id],
+  }),
+  campaign: one(communicationCampaigns, {
+    fields: [optimizationRecommendations.campaignId],
+    references: [communicationCampaigns.id],
+  }),
+  testCampaign: one(abTestCampaigns, {
+    fields: [optimizationRecommendations.testCampaignId],
+    references: [abTestCampaigns.id],
+  }),
+  implementedBy: one(users, {
+    fields: [optimizationRecommendations.implementedBy],
+    references: [users.id],
+  }),
+}));
+
+export const automatedActionLogsRelations = relations(automatedActionLogs, ({ one }) => ({
+  salon: one(salons, {
+    fields: [automatedActionLogs.salonId],
+    references: [salons.id],
+  }),
+  configuration: one(automationConfigurations, {
+    fields: [automatedActionLogs.configurationId],
+    references: [automationConfigurations.id],
+  }),
+  campaign: one(communicationCampaigns, {
+    fields: [automatedActionLogs.campaignId],
+    references: [communicationCampaigns.id],
+  }),
+  testCampaign: one(abTestCampaigns, {
+    fields: [automatedActionLogs.testCampaignId],
+    references: [abTestCampaigns.id],
+  }),
+  recommendation: one(optimizationRecommendations, {
+    fields: [automatedActionLogs.recommendationId],
+    references: [optimizationRecommendations.id],
+  }),
+}));
+
+export const campaignOptimizationInsightsRelations = relations(campaignOptimizationInsights, ({ one }) => ({
+  salon: one(salons, {
+    fields: [campaignOptimizationInsights.salonId],
+    references: [salons.id],
+  }),
+  supersededBy: one(campaignOptimizationInsights, {
+    fields: [campaignOptimizationInsights.supersededBy],
+    references: [campaignOptimizationInsights.id],
+  }),
+}));
+
 // ===== INVENTORY MANAGEMENT SYSTEM =====
 
 // Vendors - supplier information for inventory management
