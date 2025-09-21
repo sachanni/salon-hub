@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +22,17 @@ interface StaffMember {
   email: string;
   phone: string;
   role: string;
-  specialties: string;
+  specialties: string[];
+}
+
+// Internal form state interface to keep UI simple
+interface StaffFormData {
+  id?: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  specialties: string; // Form uses string, converts to array on submit
 }
 
 export default function StaffStep({ 
@@ -33,29 +43,52 @@ export default function StaffStep({
 }: StaffStepProps) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [isAddingStaff, setIsAddingStaff] = useState(false);
-  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
-  const [newStaff, setNewStaff] = useState<StaffMember>({
+  const [editingStaff, setEditingStaff] = useState<StaffFormData | null>(null);
+  const [newStaff, setNewStaff] = useState<StaffFormData>({
     name: "",
     email: "",
     phone: "",
     role: "Stylist",
     specialties: ""
   });
+
+  // Helper function to convert array to comma-separated string for display
+  const arrayToString = (arr: string[] | string): string => {
+    if (Array.isArray(arr)) {
+      return arr.join(", ");
+    }
+    return arr || "";
+  };
+
+  // Helper function to convert comma-separated string to array
+  const stringToArray = (str: string): string[] => {
+    if (!str || typeof str !== 'string') return [];
+    return str.split(',').map(s => s.trim()).filter(s => s.length > 0);
+  };
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   // Load existing staff
   const { data: existingStaff } = useQuery({
     queryKey: ['/api/salons', salonId, 'staff'],
-    enabled: !!salonId,
-    onSuccess: (data) => {
-      setStaff(data || []);
-    }
+    enabled: !!salonId
   });
+
+  // Handle data loading
+  useEffect(() => {
+    if (existingStaff) {
+      setStaff(Array.isArray(existingStaff) ? existingStaff : []);
+    }
+  }, [existingStaff]);
 
   // Add staff mutation
   const addStaffMutation = useMutation({
-    mutationFn: async (staffMember: StaffMember) => {
+    mutationFn: async (staffFormData: StaffFormData) => {
+      // Convert form data to proper staff member format
+      const staffMember: Omit<StaffMember, 'id'> = {
+        ...staffFormData,
+        specialties: stringToArray(staffFormData.specialties)
+      };
       const response = await apiRequest('POST', `/api/salons/${salonId}/staff`, staffMember);
       return response.json();
     },
@@ -73,10 +106,16 @@ export default function StaffStep({
 
   // Update staff mutation
   const updateStaffMutation = useMutation({
-    mutationFn: async (staffMember: StaffMember) => {
-      if (!staffMember.id) throw new Error('Staff ID required for update');
+    mutationFn: async (staffFormData: StaffFormData) => {
+      if (!staffFormData.id) throw new Error('Staff ID required for update');
       
-      const response = await apiRequest('PUT', `/api/salons/${salonId}/staff/${staffMember.id}`, staffMember);
+      // Convert form data to proper staff member format
+      const staffMember: StaffMember = {
+        ...staffFormData,
+        specialties: stringToArray(staffFormData.specialties)
+      };
+      
+      const response = await apiRequest('PUT', `/api/salons/${salonId}/staff/${staffFormData.id}`, staffMember);
       return response.json();
     },
     onSuccess: (data) => {
@@ -160,9 +199,9 @@ export default function StaffStep({
                       )}
                       <div className="flex items-center gap-2 mt-2">
                         <Badge variant="outline">{member.role}</Badge>
-                        {member.specialties && (
+                        {member.specialties && member.specialties.length > 0 && (
                           <span className="text-sm text-muted-foreground">
-                            {member.specialties}
+                            {arrayToString(member.specialties)}
                           </span>
                         )}
                       </div>
@@ -173,7 +212,10 @@ export default function StaffStep({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setEditingStaff(member)}
+                      onClick={() => setEditingStaff({
+                        ...member,
+                        specialties: arrayToString(member.specialties)
+                      })}
                       data-testid={`button-edit-staff-${member.id}`}
                     >
                       <Edit className="h-4 w-4" />
