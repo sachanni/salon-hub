@@ -62,8 +62,8 @@ export default function JoinCustomer() {
             localStorage.setItem('user', JSON.stringify(data.user));
           }
           
-          // Redirect to home
-          setLocation('/');
+          // Redirect to customer dashboard
+          setLocation('/customer/dashboard');
         }
       } else {
         toast({
@@ -102,8 +102,8 @@ export default function JoinCustomer() {
           description: `Welcome to SalonHub! You can now start booking services.`,
         });
         
-        // Redirect to home or dashboard
-        setLocation('/');
+        // Redirect to customer dashboard
+        setLocation('/customer/dashboard');
       } else {
         throw new Error(result.message || 'Social login failed');
       }

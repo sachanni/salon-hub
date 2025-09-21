@@ -48,8 +48,8 @@ export default function LoginCustomer() {
         // Refresh auth state
         await checkAuth();
         
-        // Handle redirect (customers typically go to home)
-        setLocation(data.redirect || '/');
+        // For customer login, redirect to customer dashboard instead of home
+        setLocation(data.redirect || '/customer/dashboard');
       } else {
         setError(data.error || "Login failed. Please try again.");
         

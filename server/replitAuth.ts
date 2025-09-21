@@ -107,7 +107,8 @@ export async function setupAuth(app: Express) {
     if (userType === 'owner') {
       (req.session as any).postAuthRedirect = '/business/setup';
     } else {
-      (req.session as any).postAuthRedirect = '/';
+      // For customer users, redirect to customer dashboard
+      (req.session as any).postAuthRedirect = '/customer/dashboard';
     }
 
     passport.authenticate(`replitauth:${req.hostname}`, {
@@ -179,14 +180,21 @@ export async function setupAuth(app: Express) {
                   return res.redirect("/business/setup");
                 }
                 
-                // If setup is complete, redirect to business dashboard/home
-                console.log(`Business owner ${claims.email} has completed setup, redirecting to home`);
-                return res.redirect("/");
+                // If setup is complete, redirect to business dashboard
+                console.log(`Business owner ${claims.email} has completed setup, redirecting to business dashboard`);
+                return res.redirect("/business/dashboard");
+              } else {
+                // Customer - redirect to customer dashboard
+                const isCustomer = roles.some((role: any) => role.name === 'customer');
+                if (isCustomer) {
+                  console.log(`Customer ${claims.email} authenticated, redirecting to customer dashboard`);
+                  return res.redirect("/customer/dashboard");
+                }
               }
             }
           }
           
-          // Default redirect for customers or if role check fails
+          // Default redirect - fallback to home for unknown roles
           res.redirect("/");
         } catch (error) {
           console.error("Error checking user role in callback:", error);

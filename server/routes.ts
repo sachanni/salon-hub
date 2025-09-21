@@ -227,6 +227,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log("Session established successfully after registration for user:", newUser.id);
 
+      // Check user role for consistent redirect (same logic as login)
+      const roles = await storage.getUserRoles(newUser.id);
+      const isOwner = roles.some(role => role.name === 'owner');
+      const isCustomer = roles.some(role => role.name === 'customer');
+      
+      let redirectUrl = '/';
+      if (isOwner) {
+        // Business owners go to business dashboard
+        redirectUrl = '/business/dashboard';
+      } else if (isCustomer) {
+        // Customers go to customer dashboard
+        redirectUrl = '/customer/dashboard';
+      }
+
       // Success with session established
       const { password: _, ...userResponse } = newUser;
       res.status(200).json({
@@ -236,7 +250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         emailSent: emailSent,
         requiresVerification: true,
         authenticated: true,
-        redirect: '/'  // Frontend will handle this redirect
+        redirect: redirectUrl  // Consistent role-based redirect
       });
 
     } catch (error) {
@@ -355,11 +369,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check user role for redirect
       const roles = await storage.getUserRoles(user.id);
       const isOwner = roles.some(role => role.name === 'owner');
+      const isCustomer = roles.some(role => role.name === 'customer');
       
       let redirectUrl = '/';
       if (isOwner) {
         // Always redirect business owners to dashboard - dashboard handles setup within tabs
         redirectUrl = '/business/dashboard';
+      } else if (isCustomer) {
+        // Redirect customers to their dashboard
+        redirectUrl = '/customer/dashboard';
       }
 
       // Success response
