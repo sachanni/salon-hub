@@ -49,11 +49,53 @@ export default function BusinessDashboard() {
   const { user, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [salonId, setSalonId] = useState<string | null>(null);
+  
+  // Track completion status for each setup section
+  const [completionStatus, setCompletionStatus] = useState({
+    profile: false,
+    services: false,
+    staff: false,
+    settings: false,
+    media: false
+  });
+
+  // Setup flow order
+  const setupFlow = ['profile', 'services', 'staff', 'settings', 'media'];
+
+  // Auto-navigation logic
+  const handleSectionComplete = (section: string) => {
+    setCompletionStatus(prev => ({ ...prev, [section]: true }));
+    
+    // Find next step in setup flow
+    const currentIndex = setupFlow.indexOf(section);
+    const nextStep = currentIndex >= 0 && currentIndex < setupFlow.length - 1 
+      ? setupFlow[currentIndex + 1] 
+      : 'overview';
+    
+    // Auto-navigate to next step after a brief delay
+    setTimeout(() => {
+      setActiveTab(nextStep);
+    }, 1000);
+  };
+
+  // Check if setup is complete
+  const isSetupComplete = Object.values(completionStatus).every(status => status);
+
+  // Get next recommended step
+  const getNextStep = () => {
+    return setupFlow.find(step => !completionStatus[step as keyof typeof completionStatus]) || 'overview';
+  };
 
   // Fetch user's accessible salons (authoritative source)
   const { data: accessibleSalons, isLoading: salonsLoading } = useQuery({
     queryKey: ['/api/my/salons'],
     enabled: isAuthenticated,
+  });
+
+  // Fetch salon details
+  const { data: salon, isLoading: salonLoading } = useQuery({
+    queryKey: [`/api/salons/${salonId}`],
+    enabled: !!salonId,
   });
 
   // Select salon ID from accessible salons only
@@ -63,11 +105,29 @@ export default function BusinessDashboard() {
     }
   }, [accessibleSalons, salonId]);
 
-  // Fetch salon details
-  const { data: salon, isLoading: salonLoading } = useQuery({
-    queryKey: [`/api/salons/${salonId}`],
-    enabled: !!salonId,
-  });
+  // Auto-navigate to appropriate starting tab for new users
+  useEffect(() => {
+    if (salonId && salon && activeTab === "overview") {
+      const nextStep = getNextStep();
+      if (nextStep !== 'overview') {
+        setActiveTab(nextStep);
+      }
+    }
+  }, [salonId, salon, activeTab]);
+
+  // Check completion status based on salon data
+  useEffect(() => {
+    if (salon) {
+      const salonData = salon as any;
+      setCompletionStatus({
+        profile: !!(salonData.name && salonData.description && salonData.address),
+        services: false, // Will be checked against services API
+        staff: false,    // Will be checked against staff API
+        settings: false, // Will be checked against settings API
+        media: false     // Will be checked against media API
+      });
+    }
+  }, [salon]);
 
   // Fetch dashboard stats (mock for now - would connect to real analytics)
   const { data: stats = { totalBookings: 0, todayBookings: 0, monthlyRevenue: 0, activeStaff: 0 } } = useQuery({
@@ -196,30 +256,40 @@ export default function BusinessDashboard() {
             >
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
+              {isSetupComplete && <CheckCircle className="h-3 w-3 text-green-500" />}
             </TabsTrigger>
             <TabsTrigger 
               value="profile" 
-              className="flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className={`flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white ${
+                getNextStep() === 'profile' ? 'ring-2 ring-blue-400 ring-opacity-50' : ''
+              }`}
               data-testid="tab-profile"
             >
               <Building2 className="h-4 w-4" />
               <span className="hidden sm:inline">Profile</span>
+              {completionStatus.profile && <CheckCircle className="h-3 w-3 text-green-500" />}
             </TabsTrigger>
             <TabsTrigger 
               value="services" 
-              className="flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className={`flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white ${
+                getNextStep() === 'services' ? 'ring-2 ring-blue-400 ring-opacity-50' : ''
+              }`}
               data-testid="tab-services"
             >
               <Scissors className="h-4 w-4" />
               <span className="hidden sm:inline">Services</span>
+              {completionStatus.services && <CheckCircle className="h-3 w-3 text-green-500" />}
             </TabsTrigger>
             <TabsTrigger 
               value="staff" 
-              className="flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className={`flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white ${
+                getNextStep() === 'staff' ? 'ring-2 ring-blue-400 ring-opacity-50' : ''
+              }`}
               data-testid="tab-staff"
             >
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">Staff</span>
+              {completionStatus.staff && <CheckCircle className="h-3 w-3 text-green-500" />}
             </TabsTrigger>
             <TabsTrigger 
               value="calendar" 
@@ -239,24 +309,81 @@ export default function BusinessDashboard() {
             </TabsTrigger>
             <TabsTrigger 
               value="media" 
-              className="flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className={`flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white ${
+                getNextStep() === 'media' ? 'ring-2 ring-blue-400 ring-opacity-50' : ''
+              }`}
               data-testid="tab-media"
             >
               <Camera className="h-4 w-4" />
               <span className="hidden sm:inline">Media</span>
+              {completionStatus.media && <CheckCircle className="h-3 w-3 text-green-500" />}
             </TabsTrigger>
             <TabsTrigger 
               value="settings" 
-              className="flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className={`flex items-center gap-2 py-3 px-4 data-[state=active]:bg-blue-600 data-[state=active]:text-white ${
+                getNextStep() === 'settings' ? 'ring-2 ring-blue-400 ring-opacity-50' : ''
+              }`}
               data-testid="tab-settings"
             >
               <Settings className="h-4 w-4" />
               <span className="hidden sm:inline">Settings</span>
+              {completionStatus.settings && <CheckCircle className="h-3 w-3 text-green-500" />}
             </TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
+            {/* Setup Progress Banner */}
+            {!isSetupComplete && (
+              <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                    <AlertTriangle className="h-5 w-5" />
+                    Complete Your Business Setup
+                  </CardTitle>
+                  <CardDescription className="text-blue-600 dark:text-blue-400">
+                    Finish setting up your business profile to start accepting bookings from customers.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-4">
+                    <div className="text-sm text-blue-700 dark:text-blue-300">
+                      Next Step: <span className="font-semibold capitalize">{getNextStep()}</span>
+                    </div>
+                    <Button 
+                      onClick={() => setActiveTab(getNextStep())}
+                      size="sm"
+                      data-testid="button-continue-setup"
+                    >
+                      Continue Setup
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Setup Complete Banner */}
+            {isSetupComplete && (
+              <Card className="border-green-200 bg-green-50 dark:bg-green-950/20">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                    <CheckCircle className="h-5 w-5" />
+                    Setup Complete! Ready to Go Live
+                  </CardTitle>
+                  <CardDescription className="text-green-600 dark:text-green-400">
+                    Your business profile is complete and ready for customers to discover and book services.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button className="bg-green-600 hover:bg-green-700" data-testid="button-publish-profile">
+                    <Star className="h-4 w-4 mr-2" />
+                    Publish Your Profile
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
@@ -383,8 +510,8 @@ export default function BusinessDashboard() {
                 <CardContent>
                   <BusinessInfoStep 
                     salonId={salonId} 
-                    onComplete={() => {}} 
-                    isCompleted={false}
+                    onComplete={() => handleSectionComplete('profile')} 
+                    isCompleted={completionStatus.profile}
                   />
                 </CardContent>
               </Card>
@@ -399,8 +526,8 @@ export default function BusinessDashboard() {
                 <CardContent>
                   <LocationContactStep 
                     salonId={salonId} 
-                    onComplete={() => {}} 
-                    isCompleted={false}
+                    onComplete={() => handleSectionComplete('profile')} 
+                    isCompleted={completionStatus.profile}
                   />
                 </CardContent>
               </Card>
@@ -422,8 +549,8 @@ export default function BusinessDashboard() {
               <CardContent>
                 <ServicesStep 
                   salonId={salonId} 
-                  onComplete={() => {}} 
-                  isCompleted={false}
+                  onComplete={() => handleSectionComplete('services')} 
+                  isCompleted={completionStatus.services}
                 />
               </CardContent>
             </Card>
@@ -444,8 +571,8 @@ export default function BusinessDashboard() {
               <CardContent>
                 <StaffStep 
                   salonId={salonId} 
-                  onComplete={() => {}} 
-                  isCompleted={false}
+                  onComplete={() => handleSectionComplete('staff')} 
+                  isCompleted={completionStatus.staff}
                 />
               </CardContent>
             </Card>
@@ -512,8 +639,8 @@ export default function BusinessDashboard() {
               <CardContent>
                 <MediaStep 
                   salonId={salonId} 
-                  onComplete={() => {}} 
-                  isCompleted={false}
+                  onComplete={() => handleSectionComplete('media')} 
+                  isCompleted={completionStatus.media}
                 />
               </CardContent>
             </Card>
@@ -532,8 +659,8 @@ export default function BusinessDashboard() {
                 <CardContent>
                   <BookingSettingsStep 
                     salonId={salonId} 
-                    onComplete={() => {}} 
-                    isCompleted={false}
+                    onComplete={() => handleSectionComplete('settings')} 
+                    isCompleted={completionStatus.settings}
                   />
                 </CardContent>
               </Card>
@@ -548,8 +675,8 @@ export default function BusinessDashboard() {
                 <CardContent>
                   <ResourcesStep 
                     salonId={salonId} 
-                    onComplete={() => {}} 
-                    isCompleted={false}
+                    onComplete={() => handleSectionComplete('settings')} 
+                    isCompleted={completionStatus.settings}
                   />
                 </CardContent>
               </Card>
