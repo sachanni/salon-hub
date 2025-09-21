@@ -200,8 +200,9 @@ export default function ReviewPublishStep({
         return;
       }
 
-      if (section.id === 'payment_setup' && (!payoutAccounts || payoutAccounts.length === 0)) {
-        issues.push('Set up at least one payment method');
+      // Skip payment setup requirement - it's now optional
+      if (section.id === 'payment_setup') {
+        completed++; // Auto-complete payment setup section
         return;
       }
 
@@ -224,7 +225,7 @@ export default function ReviewPublishStep({
     });
 
     setPublishStatus({
-      canPublish: completed >= 6, // Minimum 6 sections completed
+      canPublish: completed >= 5, // Changed from 6 to 5 since payment setup is optional
       completedSections: completed,
       totalSections: SETUP_SECTIONS.length,
       issues
@@ -435,7 +436,7 @@ export default function ReviewPublishStep({
 
                 {!publishStatus.canPublish && (
                   <p className="text-sm text-amber-600">
-                    Complete at least 6 sections to publish your salon
+                    Complete the core sections to publish your salon
                   </p>
                 )}
               </div>
