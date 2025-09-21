@@ -31,6 +31,7 @@ import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard"
 import FinancialReportingDashboard from "@/components/FinancialReportingDashboard";
 import CustomerCommunicationDashboard from "@/components/CustomerCommunicationDashboard";
 import InventoryManagementDashboard from "@/components/InventoryManagementDashboard";
+import CalendarManagement from "@/pages/CalendarManagement";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -838,6 +839,15 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle calendar tab
+    if (activeTab === "calendar") {
+      return (
+        <div className="p-6">
+          <CalendarManagement salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     const Component = components[activeTab as keyof typeof components];
     if (Component && salonId) {
       return (
@@ -1019,6 +1029,21 @@ export default function BusinessDashboard() {
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Communications
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("calendar")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "calendar" 
+                  ? "border-blue-500 text-blue-600" 
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+              data-testid="tab-calendar"
+            >
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                Calendar & Bookings
               </div>
             </button>
 
