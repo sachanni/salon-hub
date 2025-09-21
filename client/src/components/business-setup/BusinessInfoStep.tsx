@@ -47,9 +47,9 @@ export default function BusinessInfoStep({
 
   // Load existing salon data
   const { data: salonData } = useQuery({
-    queryKey: ['business-info-salon-data', salonId],
+    queryKey: ['/api/salons', salonId],
     enabled: !!salonId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 0, // Always fetch fresh data when revisiting
   });
 
   // Populate form with existing data

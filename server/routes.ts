@@ -861,7 +861,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const serviceData = {
         ...req.body,
         salonId,
-        isActive: true
+        isActive: 1  // Use integer 1 instead of boolean true
       };
       
       const service = await storage.createService(serviceData);

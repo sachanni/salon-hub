@@ -170,10 +170,10 @@ export default function BusinessSetup() {
       setCompletedSteps(completed);
       
       // Find the first incomplete step
-      const firstIncompleteStep = SETUP_STEPS.find(step => !completed.includes(step.id))?.id || SETUP_STEPS.length;
+      const firstIncompleteStep = SETUP_STEPS.find(step => !completed.includes(step.id))?.id;
       
-      // Use saved step if it's ahead of first incomplete, otherwise go to first incomplete
-      const targetStep = Math.max(publishState.onboardingStep || 1, firstIncompleteStep);
+      // Go to first incomplete step if it exists, otherwise use saved step or default to 1
+      const targetStep = firstIncompleteStep ?? (publishState.onboardingStep || 1);
       setCurrentStep(targetStep);
     }
   }, [publishState]);
@@ -214,25 +214,17 @@ export default function BusinessSetup() {
   }, [currentStep, completedSteps, stepData, currentSalon?.id]);
 
   const handleStepComplete = (stepId: number, data: any) => {
-    console.log(`Step ${stepId} completed with data:`, data);
-    
     // Save step data
     setStepData(prev => ({ ...prev, [stepId]: data }));
     
     // Mark step as completed
     if (!completedSteps.includes(stepId)) {
-      setCompletedSteps(prev => {
-        const newCompleted = [...prev, stepId];
-        console.log('Updated completed steps:', newCompleted);
-        return newCompleted;
-      });
+      setCompletedSteps(prev => [...prev, stepId]);
     }
 
     // Auto-advance to next step
     if (stepId < SETUP_STEPS.length) {
-      const nextStep = stepId + 1;
-      console.log(`Auto-advancing from step ${stepId} to step ${nextStep}`);
-      setCurrentStep(nextStep);
+      setCurrentStep(stepId + 1);
     }
 
     toast({
