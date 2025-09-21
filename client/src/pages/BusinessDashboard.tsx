@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +48,7 @@ export default function BusinessDashboard() {
   const { user, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [salonId, setSalonId] = useState<string | null>(null);
+  const hasAutoNavigated = useRef(false);
   
   // Track completion status for each setup section
   const [completionStatus, setCompletionStatus] = useState({
@@ -104,29 +105,35 @@ export default function BusinessDashboard() {
     }
   }, [accessibleSalons, salonId]);
 
-  // Auto-navigate to appropriate starting tab for new users
-  useEffect(() => {
-    if (salonId && salon && activeTab === "overview") {
-      const nextStep = getNextStep();
-      if (nextStep !== 'overview') {
-        setActiveTab(nextStep);
-      }
-    }
-  }, [salonId, salon, activeTab]);
-
-  // Check completion status based on salon data
+  // Check completion status based on salon data (prevent infinite loops)
   useEffect(() => {
     if (salon) {
       const salonData = salon as any;
-      setCompletionStatus({
-        profile: !!(salonData.name && salonData.description && salonData.address),
-        services: false, // Will be checked against services API
-        staff: false,    // Will be checked against staff API
-        settings: false, // Will be checked against settings API
-        media: false     // Will be checked against media API
+      const profileComplete = !!(salonData.name && salonData.description && salonData.address);
+      
+      // Only update completion status if it actually changed
+      setCompletionStatus(prev => {
+        if (prev.profile !== profileComplete) {
+          return {
+            ...prev,
+            profile: profileComplete
+          };
+        }
+        return prev;
       });
+      
+      // Auto-navigate only once and only if needed
+      if (activeTab === "overview" && !profileComplete && !hasAutoNavigated.current) {
+        hasAutoNavigated.current = true;
+        setActiveTab('profile');
+      }
     }
-  }, [salon]);
+  }, [salon, activeTab]);
+
+  // Reset auto-navigation flag when user manually changes tabs
+  useEffect(() => {
+    hasAutoNavigated.current = false;
+  }, [activeTab]);
 
   // Fetch dashboard stats (mock for now - would connect to real analytics)
   const { data: stats = { totalBookings: 0, todayBookings: 0, monthlyRevenue: 0, activeStaff: 0 } } = useQuery({
