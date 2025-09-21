@@ -24,7 +24,20 @@ export default function JoinBusiness() {
   const [isLoading, setIsLoading] = useState(false);
   const [shouldRedirect, setShouldRedirect] = useState(false);
   const { toast } = useToast();
-  const { checkAuth } = useAuth();
+  const { checkAuth, isAuthenticated, user } = useAuth();
+
+  // Redirect authenticated users away from registration page
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      // If user has salons, go to dashboard
+      if (user.orgMemberships && user.orgMemberships.length > 0) {
+        setLocation('/dashboard');
+      } else {
+        // If no salons, go to business setup
+        setLocation('/business-setup');
+      }
+    }
+  }, [isAuthenticated, user, setLocation]);
 
   // Handle redirect after state update
   useEffect(() => {
