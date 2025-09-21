@@ -59,7 +59,7 @@ export default function SalonProfile() {
 
   // Your uploaded images only - no placeholder images
   const allImages = (mediaAssets && Array.isArray(mediaAssets)) ? 
-    mediaAssets.map((asset: any) => asset.fileUrl).filter(Boolean) : [];
+    mediaAssets.map((asset: any) => asset.url).filter(Boolean) : [];
 
   // Service categories from actual data
   const serviceCategories = (services && Array.isArray(services)) ? 
