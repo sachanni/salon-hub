@@ -62,7 +62,7 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
     
     req.user = {
       id: user.id,
-      email: user.email,
+      email: user.email || '',
       roles,
       orgMemberships
     };
@@ -75,12 +75,12 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
 }
 
 export function requireRole(allowedRoles: string[]) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  return (req: any, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const hasRequiredRole = req.user.roles.some(role => allowedRoles.includes(role));
+    const hasRequiredRole = req.user.roles.some((role: string) => allowedRoles.includes(role));
     if (!hasRequiredRole) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
@@ -90,7 +90,7 @@ export function requireRole(allowedRoles: string[]) {
 }
 
 export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manager']) {
-  return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  return async (req: any, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
@@ -128,7 +128,7 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
       }
 
       // For non-owners, check organization membership
-      const hasAccess = req.user.orgMemberships?.some(membership => 
+      const hasAccess = req.user.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         allowedOrgRoles.includes(membership.orgRole)
       );
@@ -148,7 +148,7 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
 }
 
 export function requireStaffAccess() {
-  return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  return async (req: any, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
@@ -163,7 +163,7 @@ export function requireStaffAccess() {
       const isStaff = await storage.isUserStaffOfSalon(req.user.id, salonId);
       
       const salon = await storage.getSalonById(salonId);
-      const hasManagerAccess = salon && req.user.orgMemberships?.some(membership => 
+      const hasManagerAccess = salon && req.user.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         ['owner', 'manager'].includes(membership.orgRole)
       );

@@ -21,6 +21,17 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 
+// Type definitions for completion data
+interface CompletionData {
+  profile: { isComplete: boolean; missingFields?: string[] };
+  services: { isComplete: boolean; count: number };
+  staff: { isComplete: boolean; count: number };
+  settings: { isComplete: boolean; missingFields?: string[] };
+  media: { isComplete: boolean; count: number };
+  overallProgress: number;
+  nextStep?: string;
+}
+
 // Import step components
 import ProfileStep from "@/components/business-setup/ProfileStep";
 import ServicesStep from "@/components/business-setup/ServicesStep";
@@ -48,7 +59,14 @@ export default function BusinessDashboard() {
     }
   }, [salons, salonId]);
 
-  // Simple completion check
+  // Use centralized completion service
+  const { data: completionData } = useQuery<CompletionData>({
+    queryKey: ['/api/salons', salonId, 'dashboard-completion'],
+    enabled: !!salonId,
+    staleTime: 30000
+  });
+
+  // Keep individual data queries for components that still need them
   const { data: salonData } = useQuery({
     queryKey: ['/api/salons', salonId],
     enabled: !!salonId,
@@ -67,12 +85,26 @@ export default function BusinessDashboard() {
     staleTime: 30000
   });
 
-  // Fix completion logic with proper type checking
-  const salon = salonData as any;
-  const isProfileComplete = salon && salon.name && salon.address && salon.phone;
-  const hasServices = Array.isArray(services) && services.length > 0;
-  const hasStaff = Array.isArray(staff) && staff.length > 0;
-  const completionPercentage = Math.round(((isProfileComplete ? 1 : 0) + (hasServices ? 1 : 0) + (hasStaff ? 1 : 0)) / 3 * 100);
+  const { data: bookingSettings } = useQuery({
+    queryKey: ['/api/salons', salonId, 'booking-settings'],
+    enabled: !!salonId,
+    staleTime: 30000
+  });
+
+  const { data: mediaAssets } = useQuery({
+    queryKey: ['/api/salons', salonId, 'media-assets'],
+    enabled: !!salonId,
+    staleTime: 30000
+  });
+
+  // Use centralized completion logic instead of ad-hoc checks
+  const isProfileComplete = completionData?.profile?.isComplete ?? false;
+  const hasServices = completionData?.services?.isComplete ?? false;
+  const hasStaff = completionData?.staff?.isComplete ?? false;
+  const hasSettings = completionData?.settings?.isComplete ?? false;
+  const hasMedia = completionData?.media?.isComplete ?? false;
+  const completionPercentage = completionData?.overallProgress ?? 0;
+  const nextStep = completionData?.nextStep;
 
   if (!isAuthenticated) {
     return (
@@ -142,17 +174,28 @@ export default function BusinessDashboard() {
                 <div className="flex items-center justify-between pt-2">
                   <div>
                     <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                      Next: {!isProfileComplete ? 'Complete Profile' : 'Add Services'}
+                      Next: {
+                        nextStep ? (
+                          nextStep === 'profile' ? 'Complete Profile' :
+                          nextStep === 'services' ? 'Add Services' :
+                          nextStep === 'staff' ? 'Add Staff' :
+                          nextStep === 'settings' ? 'Configure Settings' :
+                          nextStep === 'media' ? 'Add Media' :
+                          'Continue Setup'
+                        ) : 'Setup Complete'
+                      }
                     </p>
                   </div>
-                  <Button 
-                    onClick={() => setActiveTab(!isProfileComplete ? 'profile' : 'services')}
-                    size="sm"
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    Continue Setup
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
+                  {nextStep && (
+                    <Button 
+                      onClick={() => setActiveTab(nextStep)}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      Continue Setup
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -346,6 +389,8 @@ export default function BusinessDashboard() {
               <div className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
                 Settings
+                {hasSettings && <CheckCircle className="h-3 w-3 text-green-500" />}
+                {!hasSettings && <span className="text-xs text-red-500">*</span>}
               </div>
             </button>
 
@@ -360,6 +405,8 @@ export default function BusinessDashboard() {
               <div className="flex items-center gap-2">
                 <Camera className="h-4 w-4" />
                 Media
+                {hasMedia && <CheckCircle className="h-3 w-3 text-green-500" />}
+                {!hasMedia && <span className="text-xs text-red-500">*</span>}
               </div>
             </button>
           </div>

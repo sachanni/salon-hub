@@ -24,7 +24,7 @@ import {
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
@@ -60,6 +60,7 @@ export interface IStorage {
   
   // Salon operations (additional methods)
   getSalonById(id: string): Promise<Salon | undefined>;
+  getSalonsByOrgId(orgId: string): Promise<Salon[]>;
   isUserStaffOfSalon(userId: string, salonId: string): Promise<boolean>;
   
   // Email verification operations
@@ -78,6 +79,8 @@ export interface IStorage {
   getAllServices(): Promise<Service[]>;
   getServicesBySalonId(salonId: string): Promise<Service[]>;
   createService(service: InsertService): Promise<Service>;
+  updateService(id: string, updates: Partial<InsertService>): Promise<void>;
+  deleteService(id: string): Promise<void>;
   
   // Booking operations
   getBooking(id: string): Promise<Booking | undefined>;
@@ -184,6 +187,15 @@ export interface IStorage {
   createPublishState(state: InsertPublishState): Promise<PublishState>;
   updatePublishState(salonId: string, updates: Partial<InsertPublishState>): Promise<void>;
   checkBusinessReadiness(salonId: string): Promise<{ isReady: boolean; missingRequirements: string[] }>;
+  checkDashboardCompletion(salonId: string): Promise<{
+    profile: { isComplete: boolean; missingFields?: string[] };
+    services: { isComplete: boolean; count: number };
+    staff: { isComplete: boolean; count: number };
+    settings: { isComplete: boolean; missingFields?: string[] };
+    media: { isComplete: boolean; count: number };
+    overallProgress: number;
+    nextStep?: string;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -306,6 +318,13 @@ export class DatabaseStorage implements IStorage {
     return this.getSalon(id);
   }
 
+  async getSalonsByOrgId(orgId: string): Promise<Salon[]> {
+    return await db.select().from(salons).where(and(
+      eq(salons.orgId, orgId),
+      eq(salons.isActive, 1)
+    ));
+  }
+
   async isUserStaffOfSalon(userId: string, salonId: string): Promise<boolean> {
     const [staffMember] = await db
       .select()
@@ -353,6 +372,14 @@ export class DatabaseStorage implements IStorage {
   async createService(service: InsertService): Promise<Service> {
     const [newService] = await db.insert(services).values(service).returning();
     return newService;
+  }
+
+  async updateService(id: string, updates: Partial<InsertService>): Promise<void> {
+    await db.update(services).set(updates).where(eq(services.id, id));
+  }
+
+  async deleteService(id: string): Promise<void> {
+    await db.update(services).set({ isActive: 0 }).where(eq(services.id, id));
   }
 
   // Booking operations
@@ -598,7 +625,7 @@ export class DatabaseStorage implements IStorage {
       .from(emailVerificationTokens)
       .where(and(
         eq(emailVerificationTokens.token, token),
-        eq(emailVerificationTokens.verifiedAt, null) // Not already verified
+        isNull(emailVerificationTokens.verifiedAt) // Not already verified
       ));
 
     if (!verificationToken) {
@@ -923,6 +950,111 @@ export class DatabaseStorage implements IStorage {
       missingRequirements
     };
   }
+
+  async checkDashboardCompletion(salonId: string): Promise<{
+    profile: { isComplete: boolean; missingFields?: string[] };
+    services: { isComplete: boolean; count: number };
+    staff: { isComplete: boolean; count: number };
+    settings: { isComplete: boolean; missingFields?: string[] };
+    media: { isComplete: boolean; count: number };
+    overallProgress: number;
+    nextStep?: string;
+  }> {
+    // Get all the data we need to check completion
+    const salon = await this.getSalon(salonId);
+    const services = await this.getServicesBySalonId(salonId);
+    const staff = await this.getStaffBySalonId(salonId);
+    const bookingSettings = await this.getBookingSettings(salonId);
+    const mediaAssets = await this.getMediaAssetsBySalonId(salonId);
+
+    // Check Profile completion
+    const profileMissingFields: string[] = [];
+    if (!salon?.name) profileMissingFields.push('name');
+    if (!salon?.address) profileMissingFields.push('address');
+    if (!salon?.phone) profileMissingFields.push('phone');
+    if (!salon?.email) profileMissingFields.push('email');
+    if (!salon?.description) profileMissingFields.push('description');
+    
+    const profileComplete = profileMissingFields.length === 0;
+
+    // Check Services completion
+    const servicesComplete = services.length > 0;
+
+    // Check Staff completion
+    const staffComplete = staff.length > 0;
+
+    // Check Settings completion with specific required fields
+    const settingsMissingFields: string[] = [];
+    if (!bookingSettings) {
+      settingsMissingFields.push('bookingSettings');
+    } else {
+      // Check for meaningful values, not just defaults
+      if (!bookingSettings.timezone || bookingSettings.timezone === 'America/New_York') {
+        settingsMissingFields.push('timezone');
+      }
+      if (bookingSettings.leadTimeMinutes === 60) {
+        settingsMissingFields.push('leadTimeMinutes');
+      }
+      if (bookingSettings.cancelWindowMinutes === 1440) {
+        settingsMissingFields.push('cancelWindowMinutes');
+      }
+    }
+    
+    const settingsComplete = settingsMissingFields.length === 0;
+
+    // Check Media completion
+    const mediaComplete = mediaAssets.length > 0;
+
+    // Calculate overall progress
+    const completedSections = [
+      profileComplete,
+      servicesComplete,
+      staffComplete,
+      settingsComplete,
+      mediaComplete
+    ].filter(Boolean).length;
+    
+    const overallProgress = Math.round((completedSections / 5) * 100);
+
+    // Determine next step
+    let nextStep: string | undefined;
+    if (!profileComplete) {
+      nextStep = 'profile';
+    } else if (!servicesComplete) {
+      nextStep = 'services';
+    } else if (!staffComplete) {
+      nextStep = 'staff';
+    } else if (!settingsComplete) {
+      nextStep = 'settings';
+    } else if (!mediaComplete) {
+      nextStep = 'media';
+    }
+
+    return {
+      profile: { 
+        isComplete: profileComplete, 
+        missingFields: profileComplete ? undefined : profileMissingFields 
+      },
+      services: { 
+        isComplete: servicesComplete, 
+        count: services.length 
+      },
+      staff: { 
+        isComplete: staffComplete, 
+        count: staff.length 
+      },
+      settings: { 
+        isComplete: settingsComplete, 
+        missingFields: settingsComplete ? undefined : settingsMissingFields 
+      },
+      media: { 
+        isComplete: mediaComplete, 
+        count: mediaAssets.length 
+      },
+      overallProgress,
+      nextStep
+    };
+  }
 }
 
 // Example data initialization
@@ -944,8 +1076,6 @@ async function initializeSalonsAndServices() {
           email: "info@artisantheory.com",
           category: "Hair Salon",
           priceRange: "$$",
-          rating: "4.85",
-          reviewCount: 247,
           openTime: "9:00 AM",
           closeTime: "9:00 PM",
           isActive: 1
@@ -961,8 +1091,6 @@ async function initializeSalonsAndServices() {
           email: "contact@lospa.com",
           category: "Nails",
           priceRange: "$$$",
-          rating: "4.90",
-          reviewCount: 591,
           openTime: "10:00 AM",
           closeTime: "8:00 PM",
           isActive: 1
@@ -978,8 +1106,6 @@ async function initializeSalonsAndServices() {
           email: "hello@tranquilspa.com",
           category: "Massage",
           priceRange: "$$$$",
-          rating: "5.00",
-          reviewCount: 328,
           openTime: "8:00 AM",
           closeTime: "10:00 PM",
           isActive: 1
@@ -1033,8 +1159,11 @@ class MemStorage {
     const newSalon: Salon = {
       id: randomUUID(),
       ...salon,
-      rating: salon.rating || "0.00",
-      reviewCount: salon.reviewCount || 0,
+      description: salon.description || null,
+      website: salon.website || null,
+      isActive: salon.isActive ?? 1,
+      rating: "0.00",
+      reviewCount: 0,
       createdAt: new Date(),
     };
     this.salons.push(newSalon);
@@ -1064,6 +1193,10 @@ class MemStorage {
     const newService: Service = {
       id: randomUUID(),
       ...service,
+      description: service.description || null,
+      category: service.category || null,
+      currency: service.currency || 'INR',
+      isActive: service.isActive ?? 1,
       createdAt: new Date(),
     };
     this.services.push(newService);
@@ -1078,6 +1211,14 @@ class MemStorage {
     const newBooking: Booking = {
       id: randomUUID(),
       ...booking,
+      status: booking.status || 'pending',
+      currency: booking.currency || 'INR',
+      staffId: booking.staffId || null,
+      timeSlotId: booking.timeSlotId || null,
+      guestSessionId: booking.guestSessionId || null,
+      salonName: booking.salonName || null,
+      serviceName: booking.serviceName || null,
+      notes: booking.notes || null,
       createdAt: new Date(),
     };
     this.bookings.push(newBooking);
@@ -1107,6 +1248,11 @@ class MemStorage {
     const newPayment: Payment = {
       id: randomUUID(),
       ...payment,
+      status: payment.status || 'pending',
+      currency: payment.currency || 'INR',
+      razorpayOrderId: payment.razorpayOrderId || null,
+      razorpayPaymentId: payment.razorpayPaymentId || null,
+      razorpaySignature: payment.razorpaySignature || null,
       createdAt: new Date(),
       completedAt: null,
     };

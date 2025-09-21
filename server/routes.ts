@@ -334,7 +334,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get salon information (for business setup and profile viewing)
-  app.get('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const salon = await storage.getSalon(salonId);
@@ -351,7 +351,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update salon information (for business setup)
-  app.put('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -476,8 +476,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create new verification token and send email
-      const verificationToken = await storage.createVerificationToken(user.email, user.id);
-      const emailSent = await sendVerificationEmail(user.email, user.firstName || 'User', verificationToken);
+      const verificationToken = await storage.createVerificationToken(user.email || '', user.id);
+      const emailSent = await sendVerificationEmail(user.email || '', user.firstName || 'User', verificationToken);
 
       res.json({
         success: true,
@@ -823,7 +823,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const accessibleSalons = allSalons.filter(salon => {
         if (salon.ownerId === userId) return true;
         if (salon.orgId) {
-          return orgMemberships.some(membership => 
+          return orgMemberships.some((membership: any) => 
             membership.orgId === salon.orgId && 
             ['owner', 'manager'].includes(membership.orgRole)
           );
@@ -861,7 +861,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Salon-specific services endpoints
   // Get services for a specific salon
-  app.get('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const services = await storage.getServicesBySalonId(salonId);
@@ -873,7 +873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create service for a specific salon
-  app.post('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -900,7 +900,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update service for a specific salon
-  app.put('/api/salons/:salonId/services/:serviceId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/services/:serviceId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
     try {
       const { salonId, serviceId } = req.params;
       
@@ -916,8 +916,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         salonId
       };
       
-      const service = await storage.updateService(serviceData);
-      res.json(service);
+      await storage.updateService(serviceId, req.body);
+      
+      // Return updated service
+      const updatedService = await storage.getService(serviceId);
+      res.json(updatedService);
     } catch (error) {
       console.error('Error updating salon service:', error);
       res.status(500).json({ error: 'Failed to update salon service' });
@@ -925,7 +928,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete service for a specific salon
-  app.delete('/api/salons/:salonId/services/:serviceId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/services/:serviceId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
     try {
       const { salonId, serviceId } = req.params;
       
@@ -1150,7 +1153,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Calendar Management Routes - Protected by authentication
   
   // Staff management - requires salon management access
-  app.get('/api/salons/:salonId/staff', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/staff', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const staff = await storage.getStaffBySalonId(salonId);
@@ -1161,7 +1164,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/salons/:salonId/staff', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/staff', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const staffData = { ...req.body, salonId };
@@ -1174,7 +1177,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Availability patterns management - requires salon management access
-  app.get('/api/salons/:salonId/availability-patterns', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/availability-patterns', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const patterns = await storage.getAvailabilityPatternsBySalonId(salonId);
@@ -1185,7 +1188,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/salons/:salonId/availability-patterns', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/availability-patterns', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const patternData = { ...req.body, salonId };
@@ -1205,7 +1208,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put('/api/availability-patterns/:patternId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+  app.put('/api/availability-patterns/:patternId', isAuthenticated, async (req: any, res) => {
     try {
       const { patternId } = req.params;
       
@@ -1220,7 +1223,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Salon not found' });
       }
       
-      const hasAccess = req.user?.orgMemberships?.some(membership => 
+      const hasAccess = req.user?.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         ['owner', 'manager'].includes(membership.orgRole)
       );
@@ -1245,7 +1248,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/availability-patterns/:patternId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/availability-patterns/:patternId', isAuthenticated, async (req: any, res) => {
     try {
       const { patternId } = req.params;
       
@@ -1260,7 +1263,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Salon not found' });
       }
       
-      const hasAccess = req.user?.orgMemberships?.some(membership => 
+      const hasAccess = req.user?.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         ['owner', 'manager'].includes(membership.orgRole)
       );
@@ -1302,7 +1305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Time slots management - requires salon access
-  app.get('/api/salons/:salonId/time-slots', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/time-slots', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const { startDate, endDate } = req.query;
@@ -1320,7 +1323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Block/unblock time slots - requires staff access or management access
-  app.post('/api/time-slots/:slotId/block', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+  app.post('/api/time-slots/:slotId/block', isAuthenticated, async (req: any, res) => {
     try {
       const { slotId } = req.params;
       
@@ -1336,7 +1339,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Check if user has management access or is staff for this salon
-      const hasManagementAccess = req.user?.orgMemberships?.some(membership => 
+      const hasManagementAccess = req.user?.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         ['owner', 'manager'].includes(membership.orgRole)
       );
@@ -1355,7 +1358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/time-slots/:slotId/unblock', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+  app.post('/api/time-slots/:slotId/unblock', isAuthenticated, async (req: any, res) => {
     try {
       const { slotId } = req.params;
       
@@ -1371,7 +1374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Check if user has management access or is staff for this salon
-      const hasManagementAccess = req.user?.orgMemberships?.some(membership => 
+      const hasManagementAccess = req.user?.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         ['owner', 'manager'].includes(membership.orgRole)
       );
@@ -1391,7 +1394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Regenerate availability for a salon - requires management access
-  app.post('/api/salons/:salonId/regenerate-availability', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/regenerate-availability', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const { startDate: startDateStr, endDate: endDateStr } = req.body;
@@ -1422,7 +1425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==========================================
   
   // Booking Settings Management
-  app.get('/api/salons/:salonId/booking-settings', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/booking-settings', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const settings = await storage.getBookingSettings(salonId);
@@ -1433,7 +1436,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/booking-settings', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/booking-settings', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1462,7 +1465,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/booking-settings', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/booking-settings', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1492,7 +1495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Resources Management (chairs, rooms, equipment)
-  app.get('/api/salons/:salonId/resources', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/resources', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const resources = await storage.getResourcesBySalonId(salonId);
@@ -1503,7 +1506,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/resources', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/resources', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1524,7 +1527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/resources/:resourceId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/resources/:resourceId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, resourceId } = req.params;
       
@@ -1556,7 +1559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete('/api/salons/:salonId/resources/:resourceId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/resources/:resourceId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, resourceId } = req.params;
       await storage.deleteResource(resourceId, salonId);
@@ -1568,7 +1571,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Staff-Service Mappings Management
-  app.get('/api/salons/:salonId/staff-services', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/staff-services', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const { staffId, serviceId } = req.query;
@@ -1586,7 +1589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/staff-services', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/staff-services', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1607,7 +1610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/staff-services/:staffId/:serviceId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/staff-services/:staffId/:serviceId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { staffId, serviceId } = req.params;
       await storage.updateStaffService(staffId, serviceId, req.body);
@@ -1618,7 +1621,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete('/api/salons/:salonId/staff-services/:staffId/:serviceId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/staff-services/:staffId/:serviceId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { staffId, serviceId } = req.params;
       await storage.deleteStaffService(staffId, serviceId);
@@ -1630,7 +1633,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Service-Resource Mappings Management  
-  app.get('/api/salons/:salonId/service-resources', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/service-resources', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const { serviceId, resourceId } = req.query;
@@ -1648,7 +1651,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/service-resources', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/service-resources', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1669,7 +1672,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/service-resources/:serviceId/:resourceId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/service-resources/:serviceId/:resourceId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { serviceId, resourceId } = req.params;
       await storage.updateServiceResource(serviceId, resourceId, req.body);
@@ -1680,7 +1683,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete('/api/salons/:salonId/service-resources/:serviceId/:resourceId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/service-resources/:serviceId/:resourceId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { serviceId, resourceId } = req.params;
       await storage.deleteServiceResource(serviceId, resourceId);
@@ -1692,7 +1695,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Media Assets Management
-  app.get('/api/salons/:salonId/media-assets', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/media-assets', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const { assetType } = req.query;
@@ -1710,7 +1713,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/media-assets', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/media-assets', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1731,7 +1734,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/media-assets/:assetId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/media-assets/:assetId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, assetId } = req.params;
       await storage.updateMediaAsset(assetId, salonId, req.body);
@@ -1742,7 +1745,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete('/api/salons/:salonId/media-assets/:assetId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/media-assets/:assetId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, assetId } = req.params;
       await storage.deleteMediaAsset(assetId, salonId);
@@ -1754,7 +1757,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Tax Rates Management
-  app.get('/api/salons/:salonId/tax-rates', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/tax-rates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const taxRates = await storage.getTaxRatesBySalonId(salonId);
@@ -1765,7 +1768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/tax-rates', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/tax-rates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1786,7 +1789,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/tax-rates/:taxRateId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/tax-rates/:taxRateId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, taxRateId } = req.params;
       
@@ -1818,7 +1821,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/tax-rates/:taxRateId/set-default', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/tax-rates/:taxRateId/set-default', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, taxRateId } = req.params;
       await storage.setDefaultTaxRate(salonId, taxRateId);
@@ -1829,7 +1832,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete('/api/salons/:salonId/tax-rates/:taxRateId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/tax-rates/:taxRateId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, taxRateId } = req.params;
       
@@ -1851,7 +1854,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Payout Accounts Management
-  app.get('/api/salons/:salonId/payout-accounts', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/payout-accounts', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const accounts = await storage.getPayoutAccountsBySalonId(salonId);
@@ -1862,7 +1865,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/payout-accounts', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/payout-accounts', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1883,7 +1886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/payout-accounts/:accountId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/payout-accounts/:accountId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, accountId } = req.params;
       await storage.updatePayoutAccount(accountId, salonId, req.body);
@@ -1894,7 +1897,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/payout-accounts/:accountId/set-default', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/payout-accounts/:accountId/set-default', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, accountId } = req.params;
       await storage.setDefaultPayoutAccount(salonId, accountId);
@@ -1905,7 +1908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete('/api/salons/:salonId/payout-accounts/:accountId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.delete('/api/salons/:salonId/payout-accounts/:accountId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, accountId } = req.params;
       await storage.deletePayoutAccount(accountId, salonId);
@@ -1917,7 +1920,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Publish State Management
-  app.get('/api/salons/:salonId/publish-state', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.get('/api/salons/:salonId/publish-state', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const state = await storage.getPublishState(salonId);
@@ -1928,7 +1931,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.post('/api/salons/:salonId/publish-state', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.post('/api/salons/:salonId/publish-state', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1957,7 +1960,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.put('/api/salons/:salonId/publish-state', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+  app.put('/api/salons/:salonId/publish-state', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       
@@ -1983,6 +1986,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error updating publish state:', error);
       res.status(500).json({ error: 'Failed to update publish state' });
+    }
+  });
+
+  // Dashboard Completion Status
+  app.get('/api/salons/:salonId/dashboard-completion', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const completion = await storage.checkDashboardCompletion(salonId);
+      res.json(completion);
+    } catch (error) {
+      console.error('Error fetching dashboard completion:', error);
+      res.status(500).json({ error: 'Failed to fetch dashboard completion status' });
     }
   });
 
