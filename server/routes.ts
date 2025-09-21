@@ -218,10 +218,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Assign role to user
       await storage.assignUserRole(newUser.id, role.id);
 
-      // Create verification token and send email
-      const verificationToken = await storage.createVerificationToken(newUser.email || '', newUser.id);
-      const emailSent = await sendVerificationEmail(newUser.email || '', newUser.firstName || 'User', verificationToken);
-
       // Establish session after successful registration
       req.session.userId = newUser.id;
 
@@ -241,14 +237,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         redirectUrl = '/customer/dashboard';
       }
 
-      // Success with session established
+      // Try to send verification email in background (optional)
+      try {
+        const verificationToken = await storage.createVerificationToken(newUser.email || '', newUser.id);
+        await sendVerificationEmail(newUser.email || '', newUser.firstName || 'User', verificationToken);
+      } catch (error) {
+        console.log("Email verification sending failed (non-blocking):", error);
+      }
+
+      // Success with session established - no verification required for immediate access
       const { password: _, ...userResponse } = newUser;
       res.status(200).json({
         success: true,
         user: userResponse,
-        message: "Account created successfully! Please check your email to verify your account.",
-        emailSent: emailSent,
-        requiresVerification: true,
+        message: "Welcome to SalonHub! Your account has been created successfully.",
+        requiresVerification: false, // Allow immediate access
         authenticated: true,
         redirect: redirectUrl  // Consistent role-based redirect
       });
