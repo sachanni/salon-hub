@@ -793,6 +793,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get salons that the current user can manage (protected endpoint)
+  app.get('/api/my/salons', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const orgMemberships = req.user.orgMemberships || [];
+      
+      const allSalons = await storage.getSalons();
+      
+      const accessibleSalons = allSalons.filter(salon => {
+        if (salon.ownerId === userId) return true;
+        if (salon.orgId) {
+          return orgMemberships.some(membership => 
+            membership.orgId === salon.orgId && 
+            ['owner', 'manager'].includes(membership.orgRole)
+          );
+        }
+        return false;
+      });
+      
+      console.log(`User ${userId} has access to ${accessibleSalons.length} salons`);
+      res.json(accessibleSalons);
+    } catch (error) {
+      console.error('Error fetching user salons:', error);
+      res.status(500).json({ error: 'Failed to fetch user salons' });
+    }
+  });
+
   // Get available services
   app.get('/api/services', async (req, res) => {
     try {
