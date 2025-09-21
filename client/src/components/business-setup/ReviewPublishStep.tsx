@@ -143,21 +143,23 @@ export default function ReviewPublishStep({
         publishedAt: new Date().toISOString()
       };
 
-      // Try to update first
-      let response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, publishData);
-      
-      // If no state exists (404), create it first then update
-      if (response.status === 404) {
-        // Create with default values
-        await apiRequest('POST', `/api/salons/${salonId}/publish-state`, {
-          salonId,
-          ...publishData
-        });
-        // Then update (though POST already set the values, this ensures consistency)
-        response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, publishData);
+      try {
+        // Try to update first
+        const response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, publishData);
+        return response.json();
+      } catch (error: any) {
+        // If no state exists (404), create it first 
+        if (error.message && error.message.includes('404')) {
+          // Create with default values
+          const response = await apiRequest('POST', `/api/salons/${salonId}/publish-state`, {
+            salonId,
+            ...publishData
+          });
+          return response.json();
+        }
+        // Re-throw other errors
+        throw error;
       }
-      
-      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ 
