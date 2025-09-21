@@ -770,6 +770,14 @@ export const insertPayoutAccountSchema = createInsertSchema(payoutAccounts).omit
 export const insertPublishStateSchema = createInsertSchema(publishState).omit({
   id: true,
   lastUpdated: true,
+}).extend({
+  // Allow publishedAt to accept ISO string dates from frontend
+  publishedAt: z.union([z.date(), z.string().datetime()]).optional().transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
 });
 
 // Types for new models
