@@ -841,6 +841,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Salon-specific services endpoints
+  // Get services for a specific salon
+  app.get('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const services = await storage.getServicesBySalonId(salonId);
+      res.json(services || []);
+    } catch (error) {
+      console.error('Error fetching salon services:', error);
+      res.status(500).json({ error: 'Failed to fetch salon services' });
+    }
+  });
+
+  // Create service for a specific salon
+  app.post('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const serviceData = {
+        ...req.body,
+        salonId,
+        isActive: true
+      };
+      
+      const service = await storage.createService(serviceData);
+      res.json(service);
+    } catch (error) {
+      console.error('Error creating salon service:', error);
+      res.status(500).json({ error: 'Failed to create salon service' });
+    }
+  });
+
+  // Update service for a specific salon
+  app.put('/api/salons/:salonId/services/:serviceId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, serviceId } = req.params;
+      
+      // Verify service belongs to this salon
+      const existingService = await storage.getService(serviceId);
+      if (!existingService || existingService.salonId !== salonId) {
+        return res.status(404).json({ error: 'Service not found or does not belong to this salon' });
+      }
+      
+      const serviceData = {
+        ...req.body,
+        id: serviceId,
+        salonId
+      };
+      
+      const service = await storage.updateService(serviceData);
+      res.json(service);
+    } catch (error) {
+      console.error('Error updating salon service:', error);
+      res.status(500).json({ error: 'Failed to update salon service' });
+    }
+  });
+
+  // Delete service for a specific salon
+  app.delete('/api/salons/:salonId/services/:serviceId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, serviceId } = req.params;
+      
+      // Verify service belongs to this salon
+      const existingService = await storage.getService(serviceId);
+      if (!existingService || existingService.salonId !== salonId) {
+        return res.status(404).json({ error: 'Service not found or does not belong to this salon' });
+      }
+      
+      await storage.deleteService(serviceId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting salon service:', error);
+      res.status(500).json({ error: 'Failed to delete salon service' });
+    }
+  });
+
   // Create payment order endpoint - SERVER-SIDE PRICE CALCULATION
   app.post('/api/create-payment-order', async (req, res) => {
     try {
