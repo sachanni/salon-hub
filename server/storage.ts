@@ -983,19 +983,19 @@ export class DatabaseStorage implements IStorage {
     // Check Staff completion
     const staffComplete = staff.length > 0;
 
-    // Check Settings completion with specific required fields
+    // Check Settings completion - settings are complete if they exist and have required fields
     const settingsMissingFields: string[] = [];
     if (!bookingSettings) {
       settingsMissingFields.push('bookingSettings');
     } else {
-      // Check for meaningful values, not just defaults
-      if (!bookingSettings.timezone || bookingSettings.timezone === 'America/New_York') {
+      // Only check for essential fields, not specific values
+      if (!bookingSettings.timezone) {
         settingsMissingFields.push('timezone');
       }
-      if (bookingSettings.leadTimeMinutes === 60) {
+      if (bookingSettings.leadTimeMinutes === null || bookingSettings.leadTimeMinutes === undefined) {
         settingsMissingFields.push('leadTimeMinutes');
       }
-      if (bookingSettings.cancelWindowMinutes === 1440) {
+      if (bookingSettings.cancelWindowMinutes === null || bookingSettings.cancelWindowMinutes === undefined) {
         settingsMissingFields.push('cancelWindowMinutes');
       }
     }
