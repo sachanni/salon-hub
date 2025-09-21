@@ -27,7 +27,7 @@ function Router() {
         <Route path="/join/business" component={JoinBusiness} />
         <Route path="/login/customer" component={LoginCustomer} />
         <Route path="/login/business" component={LoginBusiness} />
-        <Route path="/business/setup" component={BusinessSetup} />
+        <Route path="/business-setup" component={BusinessSetup} />
         <Route path="/business/dashboard" component={BusinessDashboard} />
         <Route path="/calendar" component={CalendarManagement} />
         <Route path="/calendar-management/:salonId" component={CalendarManagement} />
