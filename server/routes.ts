@@ -333,8 +333,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get salon information (for business setup and profile viewing)
-  app.get('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+  // PUBLIC: Get salon information for customer viewing (no auth required)
+  app.get('/api/salons/:salonId', async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const salon = await storage.getSalon(salonId);
+      
+      if (!salon) {
+        return res.status(404).json({ error: 'Salon not found' });
+      }
+      
+      res.json(salon);
+    } catch (error) {
+      console.error('Error fetching salon:', error);
+      res.status(500).json({ error: 'Failed to fetch salon' });
+    }
+  });
+
+  // PROTECTED: Get salon information for business management
+  app.get('/api/salons/:salonId/manage', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const salon = await storage.getSalon(salonId);
@@ -861,7 +878,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Salon-specific services endpoints
   // Get services for a specific salon
-  app.get('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: any, res) => {
+  // PUBLIC: Get salon services for customer viewing (no auth required)
+  app.get('/api/salons/:salonId/services', async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const services = await storage.getServicesBySalonId(salonId);
+      res.json(services || []);
+    } catch (error) {
+      console.error('Error fetching salon services:', error);
+      res.status(500).json({ error: 'Failed to fetch salon services' });
+    }
+  });
+
+  // PROTECTED: Get salon services for business management
+  app.get('/api/salons/:salonId/services/manage', isAuthenticated, requireSalonAccess(['owner', 'manager', 'staff']), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const services = await storage.getServicesBySalonId(salonId);
@@ -1153,7 +1183,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Calendar Management Routes - Protected by authentication
   
   // Staff management - requires salon management access
-  app.get('/api/salons/:salonId/staff', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+  // PUBLIC: Get salon staff for customer viewing (no auth required)
+  app.get('/api/salons/:salonId/staff', async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const staff = await storage.getStaffBySalonId(salonId);
+      res.json(staff);
+    } catch (error) {
+      console.error('Error fetching staff:', error);
+      res.status(500).json({ error: 'Failed to fetch staff' });
+    }
+  });
+
+  // PROTECTED: Get salon staff for business management
+  app.get('/api/salons/:salonId/staff/manage', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const staff = await storage.getStaffBySalonId(salonId);
@@ -1695,7 +1738,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Media Assets Management
-  app.get('/api/salons/:salonId/media-assets', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+  // PUBLIC: Get salon media assets for customer viewing (no auth required)
+  app.get('/api/salons/:salonId/media-assets', async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { assetType } = req.query;
+      
+      if (assetType) {
+        const assets = await storage.getMediaAssetsByType(salonId, assetType as string);
+        res.json(assets);
+      } else {
+        const assets = await storage.getMediaAssetsBySalonId(salonId);
+        res.json(assets);
+      }
+    } catch (error) {
+      console.error('Error fetching media assets:', error);
+      res.status(500).json({ error: 'Failed to fetch media assets' });
+    }
+  });
+
+  // PROTECTED: Get salon media assets for business management
+  app.get('/api/salons/:salonId/media-assets/manage', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
       const { assetType } = req.query;
