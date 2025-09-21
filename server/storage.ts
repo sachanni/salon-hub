@@ -47,6 +47,11 @@ import {
   type ReorderRule, type InsertReorderRule,
   type InventoryAdjustment, type InsertInventoryAdjustment,
   type InventoryAdjustmentItem, type InsertInventoryAdjustmentItem,
+  // A/B testing system types
+  type AbTestCampaign, type InsertAbTestCampaign,
+  type TestVariant, type InsertTestVariant,
+  type TestMetric, type InsertTestMetric,
+  type TestResult, type InsertTestResult,
   users, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
@@ -57,7 +62,9 @@ import {
   communicationPreferences, scheduledMessages, communicationAnalytics,
   // Inventory management system tables
   vendors, productCategories, products, stockMovements, purchaseOrders, purchaseOrderItems,
-  productUsage, reorderRules, inventoryAdjustments, inventoryAdjustmentItems
+  productUsage, reorderRules, inventoryAdjustments, inventoryAdjustmentItems,
+  // A/B testing system tables
+  abTestCampaigns, testVariants, testMetrics, testResults
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
@@ -830,6 +837,65 @@ export interface IStorage {
       leadTimes: Array<{ vendorId: string; avgLeadTime: number }>;
     };
   }>;
+
+  // ====================================
+  // A/B TESTING SYSTEM OPERATIONS
+  // ====================================
+  
+  // A/B Test Campaign Operations
+  getAbTestCampaign(id: string): Promise<AbTestCampaign | undefined>;
+  getAbTestCampaignsBySalonId(salonId: string, filters?: { status?: string; testType?: string }): Promise<AbTestCampaign[]>;
+  createAbTestCampaign(campaign: InsertAbTestCampaign): Promise<AbTestCampaign>;
+  updateAbTestCampaign(id: string, updates: Partial<InsertAbTestCampaign>): Promise<void>;
+  deleteAbTestCampaign(id: string): Promise<void>;
+
+  // Test Variant Operations
+  getTestVariant(id: string): Promise<TestVariant | undefined>;
+  getTestVariantsByTestId(testCampaignId: string): Promise<TestVariant[]>;
+  createTestVariant(variant: InsertTestVariant): Promise<TestVariant>;
+  updateTestVariant(id: string, updates: Partial<InsertTestVariant>): Promise<void>;
+  deleteTestVariant(id: string): Promise<void>;
+
+  // Test Metrics Operations
+  getTestMetric(id: string): Promise<TestMetric | undefined>;
+  getTestMetricsByVariantId(variantId: string, dateRange?: { start: string; end: string }): Promise<TestMetric[]>;
+  getTestMetricsByTestId(testCampaignId: string, dateRange?: { start: string; end: string }): Promise<TestMetric[]>;
+  createTestMetric(metric: InsertTestMetric): Promise<TestMetric>;
+  updateTestMetric(id: string, updates: Partial<InsertTestMetric>): Promise<void>;
+  bulkCreateTestMetrics(metrics: InsertTestMetric[]): Promise<TestMetric[]>;
+
+  // Test Results Operations
+  getTestResult(id: string): Promise<TestResult | undefined>;
+  getTestResultByTestId(testCampaignId: string): Promise<TestResult | undefined>;
+  createTestResult(result: InsertTestResult): Promise<TestResult>;
+  updateTestResult(id: string, updates: Partial<InsertTestResult>): Promise<void>;
+
+  // Analytics and Aggregation Methods
+  getAbTestPerformanceSummary(testCampaignId: string): Promise<{
+    totalParticipants: number;
+    variants: Array<{
+      variantId: string;
+      variantName: string;
+      openRate: number;
+      clickRate: number;
+      conversionRate: number;
+      bookingRate: number;
+      isWinner: boolean;
+    }>;
+  }>;
+  getAbTestCampaignAnalytics(salonId: string, period: string): Promise<{
+    totalTests: number;
+    activeTests: number;
+    completedTests: number;
+    averageImprovement: number;
+    topPerformingVariants: Array<{
+      variantId: string;
+      variantName: string;
+      testName: string;
+      performanceMetric: number;
+      improvement: number;
+    }>;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1402,8 +1468,6 @@ export class DatabaseStorage implements IStorage {
         .select({
           staffId: staff.id,
           staffName: staff.name,
-          position: staff.position,
-          hourlyRatePaisa: staff.hourlyRatePaisa,
           totalBookings: sql<number>`count(${bookings.id})`,
           completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
           cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
@@ -1423,7 +1487,7 @@ export class DatabaseStorage implements IStorage {
           eq(staff.salonId, salonId),
           eq(staff.isActive, 1)
         ))
-        .groupBy(staff.id, staff.name, staff.position, staff.hourlyRatePaisa);
+        .groupBy(staff.id, staff.name);
 
       // Calculate utilization and efficiency metrics
       const staffAnalytics = staffMetrics.map(staff => {
@@ -1442,7 +1506,6 @@ export class DatabaseStorage implements IStorage {
         return {
           staffId: staff.staffId,
           staffName: staff.staffName,
-          position: staff.position,
           totalBookings,
           completedBookings,
           completionRate: Number(completionRate.toFixed(1)),
@@ -1675,7 +1738,12 @@ export class DatabaseStorage implements IStorage {
       });
 
       // Service category analysis
-      const categoryAnalysis = {};
+      const categoryAnalysis: Record<string, {
+        serviceCount: number;
+        totalBookings: number;
+        totalRevenue: number;
+        averageCompletionRate: number;
+      }> = {};
       serviceAnalytics.forEach(service => {
         const category = service.category || 'Other';
         if (!categoryAnalysis[category]) {
@@ -1693,7 +1761,7 @@ export class DatabaseStorage implements IStorage {
       });
 
       // Calculate category averages
-      Object.values(categoryAnalysis).forEach((category: any) => {
+      Object.values(categoryAnalysis).forEach((category) => {
         category.averageCompletionRate = category.serviceCount > 0 
           ? Number((category.averageCompletionRate / category.serviceCount).toFixed(1))
           : 0;
@@ -2962,7 +3030,11 @@ export class DatabaseStorage implements IStorage {
         totalBookings,
         totalSpent,
         lastVisit: stats?.lastVisit || null,
-        favoriteServices: favoriteServices || [],
+        favoriteServices: favoriteServices.map(f => ({
+          serviceId: f.serviceId,
+          serviceName: f.serviceName || 'Unknown Service',
+          count: f.count
+        })),
         averageSpend,
         bookingFrequency
       };
@@ -2995,7 +3067,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateExpenseCategory(id: string, salonId: string, updates: Partial<InsertExpenseCategory>): Promise<void> {
     await db.update(expenseCategories)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updates)
       .where(and(eq(expenseCategories.id, id), eq(expenseCategories.salonId, salonId)));
   }
 
@@ -3033,25 +3105,25 @@ export class DatabaseStorage implements IStorage {
     endDate?: string;
     createdBy?: string;
   }): Promise<Expense[]> {
-    let query = db.select().from(expenses).where(eq(expenses.salonId, salonId));
+    const conditions = [eq(expenses.salonId, salonId)];
 
     if (filters?.categoryId) {
-      query = query.where(eq(expenses.categoryId, filters.categoryId));
+      conditions.push(eq(expenses.categoryId, filters.categoryId));
     }
     if (filters?.status) {
-      query = query.where(eq(expenses.status, filters.status));
+      conditions.push(eq(expenses.status, filters.status));
     }
     if (filters?.startDate) {
-      query = query.where(gte(expenses.expenseDate, new Date(filters.startDate)));
+      conditions.push(gte(expenses.expenseDate, new Date(filters.startDate)));
     }
     if (filters?.endDate) {
-      query = query.where(lte(expenses.expenseDate, new Date(filters.endDate)));
+      conditions.push(lte(expenses.expenseDate, new Date(filters.endDate)));
     }
     if (filters?.createdBy) {
-      query = query.where(eq(expenses.createdBy, filters.createdBy));
+      conditions.push(eq(expenses.createdBy, filters.createdBy));
     }
 
-    return await query.orderBy(desc(expenses.expenseDate));
+    return await db.select().from(expenses).where(and(...conditions)).orderBy(desc(expenses.expenseDate));
   }
 
   async createExpense(expense: InsertExpense): Promise<Expense> {
@@ -3093,8 +3165,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getExpensesByCategory(salonId: string, categoryId: string, period?: string): Promise<Expense[]> {
-    let query = db.select().from(expenses)
-      .where(and(eq(expenses.salonId, salonId), eq(expenses.categoryId, categoryId)));
+    const conditions = [eq(expenses.salonId, salonId), eq(expenses.categoryId, categoryId)];
 
     if (period) {
       const now = new Date();
@@ -3112,10 +3183,10 @@ export class DatabaseStorage implements IStorage {
           break;
       }
       
-      query = query.where(gte(expenses.expenseDate, startDate));
+      conditions.push(gte(expenses.expenseDate, startDate));
     }
 
-    return await query.orderBy(desc(expenses.expenseDate));
+    return await db.select().from(expenses).where(and(...conditions)).orderBy(desc(expenses.expenseDate));
   }
 
   async getExpenseAnalytics(salonId: string, period: string): Promise<{
@@ -3248,22 +3319,24 @@ export class DatabaseStorage implements IStorage {
 
   async getActiveCommissionRate(salonId: string, staffId?: string, serviceId?: string): Promise<CommissionRate | undefined> {
     const now = new Date();
-    let query = db.select().from(commissionRates)
-      .where(and(
-        eq(commissionRates.salonId, salonId),
-        eq(commissionRates.isActive, 1),
-        lte(commissionRates.effectiveFrom, now),
-        sql`(${commissionRates.effectiveTo} IS NULL OR ${commissionRates.effectiveTo} >= ${now})`
-      ));
+    const conditions = [
+      eq(commissionRates.salonId, salonId),
+      eq(commissionRates.isActive, 1),
+      lte(commissionRates.effectiveFrom, now),
+      sql`(${commissionRates.effectiveTo} IS NULL OR ${commissionRates.effectiveTo} >= ${now})`
+    ];
 
     if (staffId) {
-      query = query.where(eq(commissionRates.staffId, staffId));
+      conditions.push(eq(commissionRates.staffId, staffId));
     }
     if (serviceId) {
-      query = query.where(eq(commissionRates.serviceId, serviceId));
+      conditions.push(eq(commissionRates.serviceId, serviceId));
     }
 
-    const rates = await query.orderBy(desc(commissionRates.effectiveFrom)).limit(1);
+    const rates = await db.select().from(commissionRates)
+      .where(and(...conditions))
+      .orderBy(desc(commissionRates.effectiveFrom))
+      .limit(1);
     return rates[0] || undefined;
   }
 
@@ -3297,26 +3370,26 @@ export class DatabaseStorage implements IStorage {
     startDate?: string;
     endDate?: string;
   }): Promise<Commission[]> {
-    let query = db.select().from(commissions).where(eq(commissions.salonId, salonId));
+    const conditions = [eq(commissions.salonId, salonId)];
 
     if (filters?.staffId) {
-      query = query.where(eq(commissions.staffId, filters.staffId));
+      conditions.push(eq(commissions.staffId, filters.staffId));
     }
     if (filters?.paymentStatus) {
-      query = query.where(eq(commissions.paymentStatus, filters.paymentStatus));
+      conditions.push(eq(commissions.paymentStatus, filters.paymentStatus));
     }
     if (filters?.startDate) {
-      query = query.where(gte(commissions.serviceDate, new Date(filters.startDate)));
+      conditions.push(gte(commissions.serviceDate, new Date(filters.startDate)));
     }
     if (filters?.endDate) {
-      query = query.where(lte(commissions.serviceDate, new Date(filters.endDate)));
+      conditions.push(lte(commissions.serviceDate, new Date(filters.endDate)));
     }
 
-    return await query.orderBy(desc(commissions.serviceDate));
+    return await db.select().from(commissions).where(and(...conditions)).orderBy(desc(commissions.serviceDate));
   }
 
   async getCommissionsByStaffId(staffId: string, period?: string): Promise<Commission[]> {
-    let query = db.select().from(commissions).where(eq(commissions.staffId, staffId));
+    const conditions = [eq(commissions.staffId, staffId)];
 
     if (period) {
       const now = new Date();
@@ -3334,10 +3407,10 @@ export class DatabaseStorage implements IStorage {
           break;
       }
       
-      query = query.where(gte(commissions.serviceDate, startDate));
+      conditions.push(gte(commissions.serviceDate, startDate));
     }
 
-    return await query.orderBy(desc(commissions.serviceDate));
+    return await db.select().from(commissions).where(and(...conditions)).orderBy(desc(commissions.serviceDate));
   }
 
   async createCommission(commission: InsertCommission): Promise<Commission> {
@@ -3373,7 +3446,7 @@ export class DatabaseStorage implements IStorage {
       salonId: bookings.salonId,
       serviceId: bookings.serviceId,
       staffId: bookings.staffId,
-      scheduledAt: bookings.scheduledAt,
+      bookingDate: bookings.bookingDate,
       servicePrice: services.priceInPaisa
     }).from(bookings)
       .innerJoin(services, eq(bookings.serviceId, services.id))
@@ -3413,7 +3486,7 @@ export class DatabaseStorage implements IStorage {
       commissionAmount = rate.maxAmount;
     }
 
-    const serviceDate = new Date(bookingData.scheduledAt);
+    const serviceDate = new Date(bookingData.bookingDate);
     
     const commissionData: InsertCommission = {
       salonId: bookingData.salonId,
@@ -3472,7 +3545,7 @@ export class DatabaseStorage implements IStorage {
     // Get commissions by staff
     const staffResults = await db.select({
       staffId: commissions.staffId,
-      staffName: sql<string>`CONCAT(${staff.firstName}, ' ', ${staff.lastName})`,
+      staffName: staff.name,
       earned: sql<number>`COALESCE(SUM(${commissions.commissionAmountPaisa}), 0)`,
       paid: sql<number>`COALESCE(SUM(CASE WHEN ${commissions.paymentStatus} = 'paid' THEN ${commissions.commissionAmountPaisa} ELSE 0 END), 0)`,
       pending: sql<number>`COALESCE(SUM(CASE WHEN ${commissions.paymentStatus} = 'pending' THEN ${commissions.commissionAmountPaisa} ELSE 0 END), 0)`
@@ -3482,7 +3555,7 @@ export class DatabaseStorage implements IStorage {
         eq(commissions.salonId, salonId),
         gte(commissions.serviceDate, startDate)
       ))
-      .groupBy(commissions.staffId, staff.firstName, staff.lastName);
+      .groupBy(commissions.staffId, staff.name);
 
     // Get monthly trend
     const monthlyResults = await db.select({
@@ -3522,19 +3595,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getBudgetsBySalonId(salonId: string, filters?: { categoryId?: string; budgetType?: string; isActive?: boolean }): Promise<Budget[]> {
-    let query = db.select().from(budgets).where(eq(budgets.salonId, salonId));
+    const conditions = [eq(budgets.salonId, salonId)];
 
     if (filters?.categoryId) {
-      query = query.where(eq(budgets.categoryId, filters.categoryId));
+      conditions.push(eq(budgets.categoryId, filters.categoryId));
     }
     if (filters?.budgetType) {
-      query = query.where(eq(budgets.budgetType, filters.budgetType));
+      conditions.push(eq(budgets.budgetType, filters.budgetType));
     }
     if (filters?.isActive !== undefined) {
-      query = query.where(eq(budgets.isActive, filters.isActive ? 1 : 0));
+      conditions.push(eq(budgets.isActive, filters.isActive ? 1 : 0));
     }
 
-    return await query.orderBy(desc(budgets.startDate));
+    return await db.select().from(budgets).where(and(...conditions)).orderBy(desc(budgets.startDate));
   }
 
   async createBudget(budget: InsertBudget): Promise<Budget> {
@@ -3654,16 +3727,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getFinancialReportsBySalonId(salonId: string, filters?: { reportType?: string; reportPeriod?: string }): Promise<FinancialReport[]> {
-    let query = db.select().from(financialReports).where(eq(financialReports.salonId, salonId));
+    const conditions = [eq(financialReports.salonId, salonId)];
 
     if (filters?.reportType) {
-      query = query.where(eq(financialReports.reportType, filters.reportType));
+      conditions.push(eq(financialReports.reportType, filters.reportType));
     }
     if (filters?.reportPeriod) {
-      query = query.where(eq(financialReports.reportPeriod, filters.reportPeriod));
+      conditions.push(eq(financialReports.reportPeriod, filters.reportPeriod));
     }
 
-    return await query.orderBy(desc(financialReports.createdAt));
+    return await db.select().from(financialReports).where(and(...conditions)).orderBy(desc(financialReports.createdAt));
   }
 
   async createFinancialReport(report: InsertFinancialReport): Promise<FinancialReport> {
@@ -3715,8 +3788,8 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
-        gte(bookings.scheduledAt, start),
-        lte(bookings.scheduledAt, end)
+        gte(bookings.createdAt, start),
+        lte(bookings.createdAt, end)
       ));
 
     const serviceRevenue = revenueResult[0]?.serviceRevenue || 0;
@@ -3939,7 +4012,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
-        gte(bookings.scheduledAt, startDate)
+        gte(bookings.createdAt, startDate)
       ));
 
     const grossRevenue = revenueResult[0]?.grossRevenue || 0;
@@ -4038,7 +4111,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
-        gte(bookings.scheduledAt, startDate)
+        gte(bookings.createdAt, startDate)
       ));
 
     const currentRevenue = revenueResults[0]?.totalRevenue || 0;
@@ -4266,19 +4339,19 @@ export class DatabaseStorage implements IStorage {
     type?: string;
     scheduledBefore?: Date;
   }): Promise<ScheduledMessage[]> {
-    let query = db.select().from(scheduledMessages).where(eq(scheduledMessages.salonId, salonId));
+    const conditions = [eq(scheduledMessages.salonId, salonId)];
     
     if (filters?.status) {
-      query = query.where(eq(scheduledMessages.status, filters.status));
+      conditions.push(eq(scheduledMessages.status, filters.status));
     }
     if (filters?.type) {
-      query = query.where(eq(scheduledMessages.type, filters.type));
+      conditions.push(eq(scheduledMessages.type, filters.type));
     }
     if (filters?.scheduledBefore) {
-      query = query.where(lte(scheduledMessages.scheduledFor, filters.scheduledBefore));
+      conditions.push(lte(scheduledMessages.scheduledFor, filters.scheduledBefore));
     }
     
-    return await query;
+    return await db.select().from(scheduledMessages).where(and(...conditions));
   }
 
   async getScheduledMessagesDue(beforeTime?: Date): Promise<ScheduledMessage[]> {
@@ -4296,16 +4369,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createScheduledMessage(message: InsertScheduledMessage): Promise<ScheduledMessage> {
-    const [created] = await db.insert(scheduledMessages).values({
-      ...message,
-      id: message.id || randomUUID()
-    }).returning();
+    const [created] = await db.insert(scheduledMessages).values(message).returning();
     return created;
   }
 
   async updateScheduledMessage(id: string, updates: Partial<InsertScheduledMessage>): Promise<void> {
     await db.update(scheduledMessages)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updates)
       .where(eq(scheduledMessages.id, id));
   }
 
@@ -4313,9 +4383,7 @@ export class DatabaseStorage implements IStorage {
     await db.update(scheduledMessages)
       .set({ 
         status: 'sent',
-        sentAt: new Date(),
-        providerId: providerId || null,
-        updatedAt: new Date()
+        sentAt: new Date()
       })
       .where(eq(scheduledMessages.id, id));
   }
@@ -4324,8 +4392,7 @@ export class DatabaseStorage implements IStorage {
     await db.update(scheduledMessages)
       .set({ 
         status: 'failed',
-        failureReason: reason,
-        updatedAt: new Date()
+        failureReason: reason
       })
       .where(eq(scheduledMessages.id, id));
   }
@@ -4333,8 +4400,7 @@ export class DatabaseStorage implements IStorage {
   async cancelScheduledMessage(id: string): Promise<void> {
     await db.update(scheduledMessages)
       .set({ 
-        status: 'cancelled',
-        updatedAt: new Date()
+        status: 'cancelled'
       })
       .where(eq(scheduledMessages.id, id));
   }
@@ -4343,8 +4409,7 @@ export class DatabaseStorage implements IStorage {
     await db.update(scheduledMessages)
       .set({ 
         scheduledFor: newScheduleTime,
-        status: 'pending',
-        updatedAt: new Date()
+        status: 'pending'
       })
       .where(eq(scheduledMessages.id, id));
   }
@@ -4381,8 +4446,8 @@ export class DatabaseStorage implements IStorage {
         variables.customerName = booking.customerName;
         variables.customerEmail = booking.customerEmail;
         variables.customerPhone = booking.customerPhone;
-        variables.bookingDate = booking.scheduledAt.toLocaleDateString();
-        variables.bookingTime = booking.scheduledAt.toLocaleTimeString();
+        variables.bookingDate = booking.createdAt?.toLocaleDateString() || '';
+        variables.bookingTime = booking.createdAt?.toLocaleTimeString() || '';
         
         // Get service info
         const service = await this.getService(booking.serviceId);
@@ -4408,32 +4473,29 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMessageTemplatesBySalonId(salonId: string, filters?: { type?: string; channel?: string; isActive?: boolean }): Promise<MessageTemplate[]> {
-    let query = db.select().from(messageTemplates).where(eq(messageTemplates.salonId, salonId));
+    const conditions = [eq(messageTemplates.salonId, salonId)];
     
     if (filters?.type) {
-      query = query.where(eq(messageTemplates.type, filters.type));
+      conditions.push(eq(messageTemplates.type, filters.type));
     }
     if (filters?.channel) {
-      query = query.where(eq(messageTemplates.channel, filters.channel));
+      conditions.push(eq(messageTemplates.channel, filters.channel));
     }
     if (filters?.isActive !== undefined) {
-      query = query.where(eq(messageTemplates.isActive, filters.isActive ? 1 : 0));
+      conditions.push(eq(messageTemplates.isActive, filters.isActive ? 1 : 0));
     }
     
-    return await query;
+    return await db.select().from(messageTemplates).where(and(...conditions));
   }
 
   async createMessageTemplate(template: InsertMessageTemplate): Promise<MessageTemplate> {
-    const [created] = await db.insert(messageTemplates).values({
-      ...template,
-      id: template.id || randomUUID()
-    }).returning();
+    const [created] = await db.insert(messageTemplates).values(template).returning();
     return created;
   }
 
   async updateMessageTemplate(id: string, salonId: string, updates: Partial<InsertMessageTemplate>): Promise<void> {
     await db.update(messageTemplates)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updates)
       .where(and(
         eq(messageTemplates.id, id),
         eq(messageTemplates.salonId, salonId)
@@ -4481,6 +4543,521 @@ export class DatabaseStorage implements IStorage {
     // Implementation would send follow-up message
     console.log(`Sending follow-up message for booking ${bookingId}`);
     return true;
+  }
+
+  // ====================================
+  // A/B TESTING SYSTEM OPERATIONS
+  // ====================================
+
+  // A/B Test Campaign Operations
+  async getAbTestCampaign(id: string): Promise<AbTestCampaign | undefined> {
+    try {
+      const [campaign] = await db
+        .select()
+        .from(abTestCampaigns)
+        .where(eq(abTestCampaigns.id, id));
+      return campaign || undefined;
+    } catch (error) {
+      console.error('Error fetching A/B test campaign:', error);
+      throw new Error('Failed to fetch A/B test campaign');
+    }
+  }
+
+  async getAbTestCampaignsBySalonId(
+    salonId: string, 
+    filters?: { status?: string; testType?: string }
+  ): Promise<AbTestCampaign[]> {
+    try {
+      let query = db
+        .select()
+        .from(abTestCampaigns)
+        .where(eq(abTestCampaigns.salonId, salonId));
+
+      const conditions = [eq(abTestCampaigns.salonId, salonId)];
+      
+      if (filters?.status) {
+        conditions.push(eq(abTestCampaigns.status, filters.status));
+      }
+      
+      if (filters?.testType) {
+        conditions.push(eq(abTestCampaigns.testType, filters.testType));
+      }
+
+      if (conditions.length > 1) {
+        query = db
+          .select()
+          .from(abTestCampaigns)
+          .where(and(...conditions));
+      }
+
+      const campaigns = await query.orderBy(desc(abTestCampaigns.createdAt));
+      return campaigns;
+    } catch (error) {
+      console.error('Error fetching A/B test campaigns by salon:', error);
+      throw new Error('Failed to fetch A/B test campaigns');
+    }
+  }
+
+  async createAbTestCampaign(campaign: InsertAbTestCampaign): Promise<AbTestCampaign> {
+    try {
+      const [newCampaign] = await db
+        .insert(abTestCampaigns)
+        .values(campaign)
+        .returning();
+      return newCampaign;
+    } catch (error) {
+      console.error('Error creating A/B test campaign:', error);
+      throw new Error('Failed to create A/B test campaign');
+    }
+  }
+
+  async updateAbTestCampaign(id: string, updates: Partial<InsertAbTestCampaign>): Promise<void> {
+    try {
+      await db
+        .update(abTestCampaigns)
+        .set(updates)
+        .where(eq(abTestCampaigns.id, id));
+    } catch (error) {
+      console.error('Error updating A/B test campaign:', error);
+      throw new Error('Failed to update A/B test campaign');
+    }
+  }
+
+  async deleteAbTestCampaign(id: string): Promise<void> {
+    try {
+      await db
+        .delete(abTestCampaigns)
+        .where(eq(abTestCampaigns.id, id));
+    } catch (error) {
+      console.error('Error deleting A/B test campaign:', error);
+      throw new Error('Failed to delete A/B test campaign');
+    }
+  }
+
+  // Test Variant Operations
+  async getTestVariant(id: string): Promise<TestVariant | undefined> {
+    try {
+      const [variant] = await db
+        .select()
+        .from(testVariants)
+        .where(eq(testVariants.id, id));
+      return variant || undefined;
+    } catch (error) {
+      console.error('Error fetching test variant:', error);
+      throw new Error('Failed to fetch test variant');
+    }
+  }
+
+  async getTestVariantsByTestId(testCampaignId: string): Promise<TestVariant[]> {
+    try {
+      const variants = await db
+        .select()
+        .from(testVariants)
+        .where(eq(testVariants.testCampaignId, testCampaignId))
+        .orderBy(asc(testVariants.priority));
+      return variants;
+    } catch (error) {
+      console.error('Error fetching test variants by test ID:', error);
+      throw new Error('Failed to fetch test variants');
+    }
+  }
+
+  async createTestVariant(variant: InsertTestVariant): Promise<TestVariant> {
+    try {
+      const [newVariant] = await db
+        .insert(testVariants)
+        .values(variant)
+        .returning();
+      return newVariant;
+    } catch (error) {
+      console.error('Error creating test variant:', error);
+      throw new Error('Failed to create test variant');
+    }
+  }
+
+  async updateTestVariant(id: string, updates: Partial<InsertTestVariant>): Promise<void> {
+    try {
+      await db
+        .update(testVariants)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(testVariants.id, id));
+    } catch (error) {
+      console.error('Error updating test variant:', error);
+      throw new Error('Failed to update test variant');
+    }
+  }
+
+  async deleteTestVariant(id: string): Promise<void> {
+    try {
+      await db
+        .delete(testVariants)
+        .where(eq(testVariants.id, id));
+    } catch (error) {
+      console.error('Error deleting test variant:', error);
+      throw new Error('Failed to delete test variant');
+    }
+  }
+
+  // Test Metrics Operations
+  async getTestMetric(id: string): Promise<TestMetric | undefined> {
+    try {
+      const [metric] = await db
+        .select()
+        .from(testMetrics)
+        .where(eq(testMetrics.id, id));
+      return metric || undefined;
+    } catch (error) {
+      console.error('Error fetching test metric:', error);
+      throw new Error('Failed to fetch test metric');
+    }
+  }
+
+  async getTestMetricsByVariantId(
+    variantId: string, 
+    dateRange?: { start: string; end: string }
+  ): Promise<TestMetric[]> {
+    try {
+      let query = db
+        .select()
+        .from(testMetrics)
+        .where(eq(testMetrics.variantId, variantId));
+
+      if (dateRange) {
+        const conditions = [
+          eq(testMetrics.variantId, variantId),
+          gte(testMetrics.metricDate, new Date(dateRange.start)),
+          lte(testMetrics.metricDate, new Date(dateRange.end))
+        ];
+        
+        query = db
+          .select()
+          .from(testMetrics)
+          .where(and(...conditions));
+      }
+
+      const metrics = await query.orderBy(desc(testMetrics.metricDate));
+      return metrics;
+    } catch (error) {
+      console.error('Error fetching test metrics by variant ID:', error);
+      throw new Error('Failed to fetch test metrics');
+    }
+  }
+
+  async getTestMetricsByTestId(
+    testCampaignId: string, 
+    dateRange?: { start: string; end: string }
+  ): Promise<TestMetric[]> {
+    try {
+      let query = db
+        .select()
+        .from(testMetrics)
+        .where(eq(testMetrics.testCampaignId, testCampaignId));
+
+      if (dateRange) {
+        const conditions = [
+          eq(testMetrics.testCampaignId, testCampaignId),
+          gte(testMetrics.metricDate, new Date(dateRange.start)),
+          lte(testMetrics.metricDate, new Date(dateRange.end))
+        ];
+        
+        query = db
+          .select()
+          .from(testMetrics)
+          .where(and(...conditions));
+      }
+
+      const metrics = await query.orderBy(desc(testMetrics.metricDate));
+      return metrics;
+    } catch (error) {
+      console.error('Error fetching test metrics by test ID:', error);
+      throw new Error('Failed to fetch test metrics');
+    }
+  }
+
+  async createTestMetric(metric: InsertTestMetric): Promise<TestMetric> {
+    try {
+      // Calculate rates before inserting
+      const calculatedMetric = {
+        ...metric,
+        openRate: metric.deliveredCount > 0 ? (metric.openCount / metric.deliveredCount) : 0,
+        clickRate: metric.deliveredCount > 0 ? (metric.clickCount / metric.deliveredCount) : 0,
+        conversionRate: metric.deliveredCount > 0 ? (metric.conversionCount / metric.deliveredCount) : 0,
+        bookingRate: metric.deliveredCount > 0 ? (metric.bookingCount / metric.deliveredCount) : 0,
+      };
+
+      const [newMetric] = await db
+        .insert(testMetrics)
+        .values(calculatedMetric)
+        .returning();
+      return newMetric;
+    } catch (error) {
+      console.error('Error creating test metric:', error);
+      throw new Error('Failed to create test metric');
+    }
+  }
+
+  async updateTestMetric(id: string, updates: Partial<InsertTestMetric>): Promise<void> {
+    try {
+      // Recalculate rates if count fields are updated
+      const updateData: any = { ...updates, updatedAt: new Date() };
+      
+      if ('deliveredCount' in updates || 'openCount' in updates || 'clickCount' in updates || 
+          'conversionCount' in updates || 'bookingCount' in updates) {
+        const [currentMetric] = await db
+          .select()
+          .from(testMetrics)
+          .where(eq(testMetrics.id, id));
+        
+        if (currentMetric) {
+          const updatedMetric = { ...currentMetric, ...updates };
+          updateData.openRate = updatedMetric.deliveredCount > 0 ? 
+            (updatedMetric.openCount / updatedMetric.deliveredCount) : 0;
+          updateData.clickRate = updatedMetric.deliveredCount > 0 ? 
+            (updatedMetric.clickCount / updatedMetric.deliveredCount) : 0;
+          updateData.conversionRate = updatedMetric.deliveredCount > 0 ? 
+            (updatedMetric.conversionCount / updatedMetric.deliveredCount) : 0;
+          updateData.bookingRate = updatedMetric.deliveredCount > 0 ? 
+            (updatedMetric.bookingCount / updatedMetric.deliveredCount) : 0;
+        }
+      }
+
+      await db
+        .update(testMetrics)
+        .set(updateData)
+        .where(eq(testMetrics.id, id));
+    } catch (error) {
+      console.error('Error updating test metric:', error);
+      throw new Error('Failed to update test metric');
+    }
+  }
+
+  async bulkCreateTestMetrics(metrics: InsertTestMetric[]): Promise<TestMetric[]> {
+    try {
+      // Calculate rates for each metric
+      const calculatedMetrics = metrics.map(metric => ({
+        ...metric,
+        openRate: metric.deliveredCount > 0 ? (metric.openCount / metric.deliveredCount) : 0,
+        clickRate: metric.deliveredCount > 0 ? (metric.clickCount / metric.deliveredCount) : 0,
+        conversionRate: metric.deliveredCount > 0 ? (metric.conversionCount / metric.deliveredCount) : 0,
+        bookingRate: metric.deliveredCount > 0 ? (metric.bookingCount / metric.deliveredCount) : 0,
+      }));
+
+      const newMetrics = await db
+        .insert(testMetrics)
+        .values(calculatedMetrics)
+        .returning();
+      return newMetrics;
+    } catch (error) {
+      console.error('Error bulk creating test metrics:', error);
+      throw new Error('Failed to bulk create test metrics');
+    }
+  }
+
+  // Test Results Operations
+  async getTestResult(id: string): Promise<TestResult | undefined> {
+    try {
+      const [result] = await db
+        .select()
+        .from(testResults)
+        .where(eq(testResults.id, id));
+      return result || undefined;
+    } catch (error) {
+      console.error('Error fetching test result:', error);
+      throw new Error('Failed to fetch test result');
+    }
+  }
+
+  async getTestResultByTestId(testCampaignId: string): Promise<TestResult | undefined> {
+    try {
+      const [result] = await db
+        .select()
+        .from(testResults)
+        .where(eq(testResults.testCampaignId, testCampaignId));
+      return result || undefined;
+    } catch (error) {
+      console.error('Error fetching test result by test ID:', error);
+      throw new Error('Failed to fetch test result');
+    }
+  }
+
+  async createTestResult(result: InsertTestResult): Promise<TestResult> {
+    try {
+      const [newResult] = await db
+        .insert(testResults)
+        .values(result)
+        .returning();
+      return newResult;
+    } catch (error) {
+      console.error('Error creating test result:', error);
+      throw new Error('Failed to create test result');
+    }
+  }
+
+  async updateTestResult(id: string, updates: Partial<InsertTestResult>): Promise<void> {
+    try {
+      await db
+        .update(testResults)
+        .set(updates)
+        .where(eq(testResults.id, id));
+    } catch (error) {
+      console.error('Error updating test result:', error);
+      throw new Error('Failed to update test result');
+    }
+  }
+
+  // Analytics and Aggregation Methods
+  async getAbTestPerformanceSummary(testCampaignId: string): Promise<{
+    totalParticipants: number;
+    variants: Array<{
+      variantId: string;
+      variantName: string;
+      openRate: number;
+      clickRate: number;
+      conversionRate: number;
+      bookingRate: number;
+      isWinner: boolean;
+    }>;
+  }> {
+    try {
+      // Get campaign and result to determine winner
+      const [campaign] = await db
+        .select()
+        .from(abTestCampaigns)
+        .where(eq(abTestCampaigns.id, testCampaignId));
+      
+      if (!campaign) {
+        throw new Error('A/B test campaign not found');
+      }
+
+      const [result] = await db
+        .select()
+        .from(testResults)
+        .where(eq(testResults.testCampaignId, testCampaignId));
+
+      // Get variants with aggregated metrics
+      const variantsWithMetrics = await db
+        .select({
+          variantId: testVariants.id,
+          variantName: testVariants.variantName,
+          totalParticipants: sql<number>`SUM(${testMetrics.participantCount})`,
+          avgOpenRate: sql<number>`AVG(${testMetrics.openRate})`,
+          avgClickRate: sql<number>`AVG(${testMetrics.clickRate})`,
+          avgConversionRate: sql<number>`AVG(${testMetrics.conversionRate})`,
+          avgBookingRate: sql<number>`AVG(${testMetrics.bookingRate})`
+        })
+        .from(testVariants)
+        .leftJoin(testMetrics, eq(testVariants.id, testMetrics.variantId))
+        .where(eq(testVariants.testCampaignId, testCampaignId))
+        .groupBy(testVariants.id, testVariants.variantName);
+
+      const totalParticipants = variantsWithMetrics.reduce(
+        (sum, variant) => sum + (variant.totalParticipants || 0), 
+        0
+      );
+
+      const variants = variantsWithMetrics.map(variant => ({
+        variantId: variant.variantId,
+        variantName: variant.variantName,
+        openRate: Number(variant.avgOpenRate) || 0,
+        clickRate: Number(variant.avgClickRate) || 0,
+        conversionRate: Number(variant.avgConversionRate) || 0,
+        bookingRate: Number(variant.avgBookingRate) || 0,
+        isWinner: result?.winnerVariantId === variant.variantId
+      }));
+
+      return {
+        totalParticipants,
+        variants
+      };
+    } catch (error) {
+      console.error('Error fetching A/B test performance summary:', error);
+      throw new Error('Failed to fetch A/B test performance summary');
+    }
+  }
+
+  async getAbTestCampaignAnalytics(salonId: string, period: string): Promise<{
+    totalTests: number;
+    activeTests: number;
+    completedTests: number;
+    averageImprovement: number;
+    topPerformingVariants: Array<{
+      variantId: string;
+      variantName: string;
+      testName: string;
+      performanceMetric: number;
+      improvement: number;
+    }>;
+  }> {
+    try {
+      // Get campaign counts
+      const allCampaigns = await db
+        .select({
+          id: abTestCampaigns.id,
+          status: abTestCampaigns.status,
+          campaignName: abTestCampaigns.campaignName
+        })
+        .from(abTestCampaigns)
+        .where(eq(abTestCampaigns.salonId, salonId));
+
+      const totalTests = allCampaigns.length;
+      const activeTests = allCampaigns.filter(c => c.status === 'active').length;
+      const completedTests = allCampaigns.filter(c => c.status === 'completed').length;
+
+      // Get completed tests with results for improvement calculation
+      const completedTestsWithResults = await db
+        .select({
+          campaignId: abTestCampaigns.id,
+          campaignName: abTestCampaigns.campaignName,
+          performanceImprovement: testResults.performanceImprovement
+        })
+        .from(abTestCampaigns)
+        .innerJoin(testResults, eq(abTestCampaigns.id, testResults.testCampaignId))
+        .where(
+          and(
+            eq(abTestCampaigns.salonId, salonId),
+            eq(abTestCampaigns.status, 'completed')
+          )
+        );
+
+      const averageImprovement = completedTestsWithResults.length > 0 ?
+        completedTestsWithResults.reduce((sum, test) => 
+          sum + (Number(test.performanceImprovement) || 0), 0
+        ) / completedTestsWithResults.length : 0;
+
+      // Get top performing variants
+      const topPerformingVariants = await db
+        .select({
+          variantId: testVariants.id,
+          variantName: testVariants.variantName,
+          testName: abTestCampaigns.campaignName,
+          avgBookingRate: sql<number>`AVG(${testMetrics.bookingRate})`,
+          avgConversionRate: sql<number>`AVG(${testMetrics.conversionRate})`
+        })
+        .from(testVariants)
+        .innerJoin(abTestCampaigns, eq(testVariants.testCampaignId, abTestCampaigns.id))
+        .leftJoin(testMetrics, eq(testVariants.id, testMetrics.variantId))
+        .where(eq(abTestCampaigns.salonId, salonId))
+        .groupBy(testVariants.id, testVariants.variantName, abTestCampaigns.campaignName)
+        .orderBy(desc(sql`AVG(${testMetrics.bookingRate})`))
+        .limit(5);
+
+      return {
+        totalTests,
+        activeTests,
+        completedTests,
+        averageImprovement,
+        topPerformingVariants: topPerformingVariants.map(variant => ({
+          variantId: variant.variantId,
+          variantName: variant.variantName,
+          testName: variant.testName,
+          performanceMetric: Number(variant.avgBookingRate) || 0,
+          improvement: Number(variant.avgConversionRate) || 0
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching A/B test campaign analytics:', error);
+      throw new Error('Failed to fetch A/B test campaign analytics');
+    }
   }
 }
 
