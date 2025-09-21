@@ -1,6 +1,7 @@
 import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,7 @@ export default function SalonProfile() {
   const { salonId } = useParams();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isFavorited, setIsFavorited] = useState(false);
+  const { addRecentlyViewed } = useRecentlyViewed();
 
   // Fetch salon details
   const { data: salon, isLoading: isSalonLoading } = useQuery({
@@ -60,6 +62,23 @@ export default function SalonProfile() {
   // Your uploaded images only - no placeholder images
   const allImages = (mediaAssets && Array.isArray(mediaAssets)) ? 
     mediaAssets.map((asset: any) => asset.url).filter(Boolean) : [];
+
+  // Automatically track salon visit for recently viewed
+  useEffect(() => {
+    if (salon && !isSalonLoading) {
+      console.log('Tracking salon visit for recently viewed:', salon.name);
+      addRecentlyViewed({
+        id: salon.id,
+        name: salon.name,
+        rating: salon.rating || 4.5,
+        reviewCount: salon.reviewCount || 0,
+        location: salon.location || '',
+        category: salon.category || 'Beauty & Wellness',
+        priceRange: salon.priceRange || '$$',
+        image: salon.image || ''
+      });
+    }
+  }, [salon, isSalonLoading, addRecentlyViewed]);
 
   // Service categories from actual data
   const serviceCategories = (services && Array.isArray(services)) ? 
