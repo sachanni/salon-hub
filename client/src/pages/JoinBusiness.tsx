@@ -31,7 +31,7 @@ export default function JoinBusiness() {
     if (isAuthenticated && user) {
       // If user has salons, go to dashboard
       if (user.orgMemberships && user.orgMemberships.length > 0) {
-        setLocation('/business/dashboard');
+        setLocation('/dashboard');
       } else {
         // If no salons, go to business setup
         setLocation('/business-setup');
