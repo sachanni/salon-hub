@@ -107,6 +107,14 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
         return res.status(404).json({ error: 'Salon not found' });
       }
 
+      // Debug logging
+      console.log('Salon access check:', {
+        salonId,
+        salonOrgId: salon.orgId,
+        userOrgMemberships: req.user.orgMemberships,
+        allowedRoles: allowedOrgRoles
+      });
+
       // Check if user belongs to the salon's organization with appropriate role
       const hasAccess = req.user.orgMemberships?.some(membership => 
         membership.orgId === salon.orgId && 
@@ -114,9 +122,11 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
       );
 
       if (!hasAccess) {
+        console.log('Access denied - no matching org membership found');
         return res.status(403).json({ error: 'Access denied to this salon' });
       }
 
+      console.log('Access granted for salon:', salonId);
       next();
     } catch (error) {
       console.error('Salon access check failed:', error);
