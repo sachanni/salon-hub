@@ -20,9 +20,19 @@ import {
   type PayoutAccount, type InsertPayoutAccount,
   type PublishState, type InsertPublishState,
   type CustomerProfile, type InsertCustomerProfile, type UpdateCustomerNotesInput,
+  // Financial system types
+  type ExpenseCategory, type InsertExpenseCategory,
+  type Expense, type InsertExpense,
+  type CommissionRate, type InsertCommissionRate,
+  type Commission, type InsertCommission,
+  type Budget, type InsertBudget,
+  type FinancialReport, type InsertFinancialReport,
+  type TaxSetting, type InsertTaxSetting,
   users, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
-  bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles
+  bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
+  // Financial system tables
+  expenseCategories, expenses, commissionRates, commissions, budgets, financialReports, taxSettings
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
@@ -226,6 +236,210 @@ export interface IStorage {
     favoriteServices: Array<{ serviceId: string; serviceName: string; count: number }>;
     averageSpend: number;
     bookingFrequency: string;
+  }>;
+
+  // Financial Reporting System Operations
+  
+  // Expense category operations
+  getExpenseCategory(id: string): Promise<ExpenseCategory | undefined>;
+  getExpenseCategoriesBySalonId(salonId: string): Promise<ExpenseCategory[]>;
+  createExpenseCategory(category: InsertExpenseCategory): Promise<ExpenseCategory>;
+  updateExpenseCategory(id: string, salonId: string, updates: Partial<InsertExpenseCategory>): Promise<void>;
+  deleteExpenseCategory(id: string, salonId: string): Promise<void>;
+  createDefaultExpenseCategories(salonId: string): Promise<ExpenseCategory[]>;
+  
+  // Expense operations
+  getExpense(id: string): Promise<Expense | undefined>;
+  getExpensesBySalonId(salonId: string, filters?: { 
+    categoryId?: string; 
+    status?: string; 
+    startDate?: string; 
+    endDate?: string;
+    createdBy?: string;
+  }): Promise<Expense[]>;
+  createExpense(expense: InsertExpense): Promise<Expense>;
+  updateExpense(id: string, salonId: string, updates: Partial<InsertExpense>): Promise<void>;
+  approveExpense(id: string, approvedBy: string): Promise<void>;
+  rejectExpense(id: string, approvedBy: string): Promise<void>;
+  deleteExpense(id: string, salonId: string): Promise<void>;
+  getExpensesByCategory(salonId: string, categoryId: string, period?: string): Promise<Expense[]>;
+  getExpenseAnalytics(salonId: string, period: string): Promise<{
+    totalExpenses: number;
+    expensesByCategory: Array<{ categoryId: string; categoryName: string; amount: number; percentage: number }>;
+    monthlyTrend: Array<{ month: string; amount: number }>;
+    topVendors: Array<{ vendor: string; amount: number; count: number }>;
+    pendingApprovals: number;
+    taxDeductibleAmount: number;
+  }>;
+  
+  // Commission rate operations
+  getCommissionRate(id: string): Promise<CommissionRate | undefined>;
+  getCommissionRatesBySalonId(salonId: string): Promise<CommissionRate[]>;
+  getCommissionRatesByStaffId(staffId: string): Promise<CommissionRate[]>;
+  getActiveCommissionRate(salonId: string, staffId?: string, serviceId?: string): Promise<CommissionRate | undefined>;
+  createCommissionRate(rate: InsertCommissionRate): Promise<CommissionRate>;
+  updateCommissionRate(id: string, salonId: string, updates: Partial<InsertCommissionRate>): Promise<void>;
+  deactivateCommissionRate(id: string): Promise<void>;
+  
+  // Commission operations
+  getCommission(id: string): Promise<Commission | undefined>;
+  getCommissionsBySalonId(salonId: string, filters?: {
+    staffId?: string;
+    period?: string;
+    paymentStatus?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<Commission[]>;
+  getCommissionsByStaffId(staffId: string, period?: string): Promise<Commission[]>;
+  createCommission(commission: InsertCommission): Promise<Commission>;
+  updateCommission(id: string, salonId: string, updates: Partial<InsertCommission>): Promise<void>;
+  payCommissions(commissionIds: string[], paidBy: string, paymentMethod: string, paymentReference?: string): Promise<number>;
+  calculateCommissionForBooking(bookingId: string): Promise<Commission | null>;
+  getCommissionAnalytics(salonId: string, period: string): Promise<{
+    totalCommissions: number;
+    paidCommissions: number;
+    pendingCommissions: number;
+    commissionsByStaff: Array<{ staffId: string; staffName: string; earned: number; paid: number; pending: number }>;
+    monthlyTrend: Array<{ month: string; amount: number }>;
+    averageCommissionRate: number;
+  }>;
+  
+  // Budget operations
+  getBudget(id: string): Promise<Budget | undefined>;
+  getBudgetsBySalonId(salonId: string, filters?: { categoryId?: string; budgetType?: string; isActive?: boolean }): Promise<Budget[]>;
+  createBudget(budget: InsertBudget): Promise<Budget>;
+  updateBudget(id: string, salonId: string, updates: Partial<InsertBudget>): Promise<void>;
+  updateBudgetSpentAmount(salonId: string, categoryId: string, additionalSpent: number): Promise<void>;
+  deleteBudget(id: string, salonId: string): Promise<void>;
+  getBudgetAnalytics(salonId: string, period: string): Promise<{
+    totalBudget: number;
+    totalSpent: number;
+    budgetUtilization: number;
+    budgetsByCategory: Array<{
+      categoryId: string;
+      categoryName: string;
+      budgeted: number;
+      spent: number;
+      remaining: number;
+      utilization: number;
+      status: 'under' | 'on-track' | 'over';
+    }>;
+    alertingBudgets: Array<{ budgetId: string; name: string; utilization: number }>;
+  }>;
+  
+  // Financial report operations
+  getFinancialReport(id: string): Promise<FinancialReport | undefined>;
+  getFinancialReportsBySalonId(salonId: string, filters?: { reportType?: string; reportPeriod?: string }): Promise<FinancialReport[]>;
+  createFinancialReport(report: InsertFinancialReport): Promise<FinancialReport>;
+  updateFinancialReport(id: string, salonId: string, updates: Partial<InsertFinancialReport>): Promise<void>;
+  deleteFinancialReport(id: string, salonId: string): Promise<void>;
+  generateProfitLossStatement(salonId: string, startDate: string, endDate: string): Promise<{
+    period: { startDate: string; endDate: string };
+    revenue: {
+      serviceRevenue: number;
+      otherRevenue: number;
+      totalRevenue: number;
+    };
+    expenses: {
+      operatingExpenses: Array<{ categoryId: string; categoryName: string; amount: number }>;
+      totalOperatingExpenses: number;
+      commissions: number;
+      taxes: number;
+      totalExpenses: number;
+    };
+    profitLoss: {
+      grossProfit: number;
+      grossProfitMargin: number;
+      netProfit: number;
+      netProfitMargin: number;
+      ebitda: number;
+    };
+  }>;
+  generateCashFlowStatement(salonId: string, startDate: string, endDate: string): Promise<{
+    period: { startDate: string; endDate: string };
+    operatingActivities: {
+      netIncome: number;
+      adjustments: Array<{ item: string; amount: number }>;
+      totalOperatingCashFlow: number;
+    };
+    investingActivities: {
+      equipmentPurchases: number;
+      totalInvestingCashFlow: number;
+    };
+    financingActivities: {
+      ownerWithdrawals: number;
+      totalFinancingCashFlow: number;
+    };
+    netCashFlow: number;
+  }>;
+  
+  // Tax setting operations
+  getTaxSetting(id: string): Promise<TaxSetting | undefined>;
+  getTaxSettingsBySalonId(salonId: string): Promise<TaxSetting[]>;
+  getTaxSettingByType(salonId: string, taxType: string): Promise<TaxSetting | undefined>;
+  createTaxSetting(setting: InsertTaxSetting): Promise<TaxSetting>;
+  updateTaxSetting(id: string, salonId: string, updates: Partial<InsertTaxSetting>): Promise<void>;
+  deleteTaxSetting(id: string, salonId: string): Promise<void>;
+  calculateTaxLiability(salonId: string, period: string): Promise<{
+    period: string;
+    grossRevenue: number;
+    taxableRevenue: number;
+    taxBreakdown: Array<{
+      taxType: string;
+      taxName: string;
+      rate: number;
+      taxableAmount: number;
+      taxOwed: number;
+    }>;
+    totalTaxOwed: number;
+    nextFilingDates: Array<{ taxType: string; dueDate: string }>;
+  }>;
+  
+  // Comprehensive financial analytics
+  getFinancialKPIs(salonId: string, period: string): Promise<{
+    revenue: {
+      totalRevenue: number;
+      averageBookingValue: number;
+      revenuePerCustomer: number;
+      revenueGrowthRate: number;
+    };
+    expenses: {
+      totalExpenses: number;
+      expenseRatio: number;
+      costPerService: number;
+      expenseGrowthRate: number;
+    };
+    profitability: {
+      grossProfitMargin: number;
+      netProfitMargin: number;
+      breakEvenPoint: number;
+      returnOnInvestment: number;
+    };
+    efficiency: {
+      revenuePerStaff: number;
+      serviceUtilizationRate: number;
+      averageServiceTime: number;
+      staffProductivity: number;
+    };
+  }>;
+  getFinancialForecast(salonId: string, months: number): Promise<{
+    forecast: Array<{
+      month: string;
+      projectedRevenue: number;
+      projectedExpenses: number;
+      projectedProfit: number;
+      confidence: number;
+    }>;
+    assumptions: {
+      revenueGrowthRate: number;
+      seasonalFactors: Array<{ month: number; factor: number }>;
+      costInflationRate: number;
+    };
+    scenarios: {
+      optimistic: { totalRevenue: number; totalProfit: number };
+      realistic: { totalRevenue: number; totalProfit: number };
+      pessimistic: { totalRevenue: number; totalProfit: number };
+    };
   }>;
 }
 
@@ -2367,6 +2581,1287 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching customer stats:', error);
       throw error;
     }
+  }
+
+  // ===============================================
+  // FINANCIAL REPORTING SYSTEM IMPLEMENTATIONS
+  // ===============================================
+
+  // Expense category operations
+  async getExpenseCategory(id: string): Promise<ExpenseCategory | undefined> {
+    const [category] = await db.select().from(expenseCategories).where(eq(expenseCategories.id, id));
+    return category || undefined;
+  }
+
+  async getExpenseCategoriesBySalonId(salonId: string): Promise<ExpenseCategory[]> {
+    return await db.select().from(expenseCategories)
+      .where(and(eq(expenseCategories.salonId, salonId), eq(expenseCategories.isActive, 1)))
+      .orderBy(asc(expenseCategories.name));
+  }
+
+  async createExpenseCategory(category: InsertExpenseCategory): Promise<ExpenseCategory> {
+    const [newCategory] = await db.insert(expenseCategories).values(category).returning();
+    return newCategory;
+  }
+
+  async updateExpenseCategory(id: string, salonId: string, updates: Partial<InsertExpenseCategory>): Promise<void> {
+    await db.update(expenseCategories)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(expenseCategories.id, id), eq(expenseCategories.salonId, salonId)));
+  }
+
+  async deleteExpenseCategory(id: string, salonId: string): Promise<void> {
+    await db.update(expenseCategories)
+      .set({ isActive: 0 })
+      .where(and(eq(expenseCategories.id, id), eq(expenseCategories.salonId, salonId)));
+  }
+
+  async createDefaultExpenseCategories(salonId: string): Promise<ExpenseCategory[]> {
+    const defaultCategories: InsertExpenseCategory[] = [
+      { salonId, name: 'Supplies', description: 'Hair products, nail polish, tools', color: '#8B5CF6', isDefault: 1 },
+      { salonId, name: 'Utilities', description: 'Electricity, water, internet', color: '#3B82F6', isDefault: 1 },
+      { salonId, name: 'Rent', description: 'Office and salon space rental', color: '#EF4444', isDefault: 1 },
+      { salonId, name: 'Marketing', description: 'Advertising and promotional expenses', color: '#F59E0B', isDefault: 1 },
+      { salonId, name: 'Equipment', description: 'Salon equipment and maintenance', color: '#10B981', isDefault: 1 },
+      { salonId, name: 'Staff Costs', description: 'Training, uniforms, benefits', color: '#F97316', isDefault: 1 },
+      { salonId, name: 'Professional Services', description: 'Legal, accounting, consulting', color: '#6366F1', isDefault: 1 },
+      { salonId, name: 'Insurance', description: 'Business and liability insurance', color: '#8B5A2B', isDefault: 1 },
+    ];
+
+    return await db.insert(expenseCategories).values(defaultCategories).returning();
+  }
+
+  // Expense operations
+  async getExpense(id: string): Promise<Expense | undefined> {
+    const [expense] = await db.select().from(expenses).where(eq(expenses.id, id));
+    return expense || undefined;
+  }
+
+  async getExpensesBySalonId(salonId: string, filters?: { 
+    categoryId?: string; 
+    status?: string; 
+    startDate?: string; 
+    endDate?: string;
+    createdBy?: string;
+  }): Promise<Expense[]> {
+    let query = db.select().from(expenses).where(eq(expenses.salonId, salonId));
+
+    if (filters?.categoryId) {
+      query = query.where(eq(expenses.categoryId, filters.categoryId));
+    }
+    if (filters?.status) {
+      query = query.where(eq(expenses.status, filters.status));
+    }
+    if (filters?.startDate) {
+      query = query.where(gte(expenses.expenseDate, new Date(filters.startDate)));
+    }
+    if (filters?.endDate) {
+      query = query.where(lte(expenses.expenseDate, new Date(filters.endDate)));
+    }
+    if (filters?.createdBy) {
+      query = query.where(eq(expenses.createdBy, filters.createdBy));
+    }
+
+    return await query.orderBy(desc(expenses.expenseDate));
+  }
+
+  async createExpense(expense: InsertExpense): Promise<Expense> {
+    const [newExpense] = await db.insert(expenses).values(expense).returning();
+    return newExpense;
+  }
+
+  async updateExpense(id: string, salonId: string, updates: Partial<InsertExpense>): Promise<void> {
+    await db.update(expenses)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(expenses.id, id), eq(expenses.salonId, salonId)));
+  }
+
+  async approveExpense(id: string, approvedBy: string): Promise<void> {
+    await db.update(expenses)
+      .set({ 
+        status: 'approved', 
+        approvedBy, 
+        approvedAt: new Date(), 
+        updatedAt: new Date() 
+      })
+      .where(eq(expenses.id, id));
+  }
+
+  async rejectExpense(id: string, approvedBy: string): Promise<void> {
+    await db.update(expenses)
+      .set({ 
+        status: 'rejected', 
+        approvedBy, 
+        approvedAt: new Date(), 
+        updatedAt: new Date() 
+      })
+      .where(eq(expenses.id, id));
+  }
+
+  async deleteExpense(id: string, salonId: string): Promise<void> {
+    await db.delete(expenses)
+      .where(and(eq(expenses.id, id), eq(expenses.salonId, salonId)));
+  }
+
+  async getExpensesByCategory(salonId: string, categoryId: string, period?: string): Promise<Expense[]> {
+    let query = db.select().from(expenses)
+      .where(and(eq(expenses.salonId, salonId), eq(expenses.categoryId, categoryId)));
+
+    if (period) {
+      const now = new Date();
+      const startDate = new Date();
+      
+      switch (period) {
+        case 'monthly':
+          startDate.setMonth(now.getMonth() - 1);
+          break;
+        case 'quarterly':
+          startDate.setMonth(now.getMonth() - 3);
+          break;
+        case 'yearly':
+          startDate.setFullYear(now.getFullYear() - 1);
+          break;
+      }
+      
+      query = query.where(gte(expenses.expenseDate, startDate));
+    }
+
+    return await query.orderBy(desc(expenses.expenseDate));
+  }
+
+  async getExpenseAnalytics(salonId: string, period: string): Promise<{
+    totalExpenses: number;
+    expensesByCategory: Array<{ categoryId: string; categoryName: string; amount: number; percentage: number }>;
+    monthlyTrend: Array<{ month: string; amount: number }>;
+    topVendors: Array<{ vendor: string; amount: number; count: number }>;
+    pendingApprovals: number;
+    taxDeductibleAmount: number;
+  }> {
+    const now = new Date();
+    const startDate = new Date();
+    
+    switch (period) {
+      case 'monthly':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarterly':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      case 'yearly':
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+    }
+
+    // Get total expenses
+    const totalResult = await db.select({
+      total: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, startDate)
+      ));
+
+    const totalExpenses = totalResult[0]?.total || 0;
+
+    // Get expenses by category
+    const categoryResults = await db.select({
+      categoryId: expenses.categoryId,
+      categoryName: expenseCategories.name,
+      amount: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, startDate)
+      ))
+      .groupBy(expenses.categoryId, expenseCategories.name);
+
+    const expensesByCategory = categoryResults.map(cat => ({
+      ...cat,
+      percentage: totalExpenses > 0 ? (cat.amount / totalExpenses) * 100 : 0
+    }));
+
+    // Get monthly trend (last 12 months)
+    const monthlyResults = await db.select({
+      month: sql<string>`TO_CHAR(${expenses.expenseDate}, 'YYYY-MM')`,
+      amount: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, new Date(now.getFullYear() - 1, now.getMonth(), 1))
+      ))
+      .groupBy(sql`TO_CHAR(${expenses.expenseDate}, 'YYYY-MM')`)
+      .orderBy(sql`TO_CHAR(${expenses.expenseDate}, 'YYYY-MM')`);
+
+    // Get top vendors
+    const vendorResults = await db.select({
+      vendor: expenses.vendor,
+      amount: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`,
+      count: sql<number>`COUNT(*)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, startDate),
+        sql`${expenses.vendor} IS NOT NULL AND ${expenses.vendor} != ''`
+      ))
+      .groupBy(expenses.vendor)
+      .orderBy(sql`SUM(${expenses.amountPaisa}) DESC`)
+      .limit(5);
+
+    // Get pending approvals count
+    const pendingResult = await db.select({
+      count: sql<number>`COUNT(*)`
+    }).from(expenses)
+      .where(and(eq(expenses.salonId, salonId), eq(expenses.status, 'pending')));
+
+    // Get tax deductible amount
+    const taxDeductibleResult = await db.select({
+      total: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        eq(expenses.taxDeductible, 1),
+        gte(expenses.expenseDate, startDate)
+      ));
+
+    return {
+      totalExpenses,
+      expensesByCategory,
+      monthlyTrend: monthlyResults,
+      topVendors: vendorResults.map(v => ({ vendor: v.vendor!, amount: v.amount, count: v.count })),
+      pendingApprovals: pendingResult[0]?.count || 0,
+      taxDeductibleAmount: taxDeductibleResult[0]?.total || 0
+    };
+  }
+
+  // Commission rate operations
+  async getCommissionRate(id: string): Promise<CommissionRate | undefined> {
+    const [rate] = await db.select().from(commissionRates).where(eq(commissionRates.id, id));
+    return rate || undefined;
+  }
+
+  async getCommissionRatesBySalonId(salonId: string): Promise<CommissionRate[]> {
+    return await db.select().from(commissionRates)
+      .where(and(eq(commissionRates.salonId, salonId), eq(commissionRates.isActive, 1)))
+      .orderBy(desc(commissionRates.effectiveFrom));
+  }
+
+  async getCommissionRatesByStaffId(staffId: string): Promise<CommissionRate[]> {
+    return await db.select().from(commissionRates)
+      .where(and(eq(commissionRates.staffId, staffId), eq(commissionRates.isActive, 1)))
+      .orderBy(desc(commissionRates.effectiveFrom));
+  }
+
+  async getActiveCommissionRate(salonId: string, staffId?: string, serviceId?: string): Promise<CommissionRate | undefined> {
+    const now = new Date();
+    let query = db.select().from(commissionRates)
+      .where(and(
+        eq(commissionRates.salonId, salonId),
+        eq(commissionRates.isActive, 1),
+        lte(commissionRates.effectiveFrom, now),
+        sql`(${commissionRates.effectiveTo} IS NULL OR ${commissionRates.effectiveTo} >= ${now})`
+      ));
+
+    if (staffId) {
+      query = query.where(eq(commissionRates.staffId, staffId));
+    }
+    if (serviceId) {
+      query = query.where(eq(commissionRates.serviceId, serviceId));
+    }
+
+    const rates = await query.orderBy(desc(commissionRates.effectiveFrom)).limit(1);
+    return rates[0] || undefined;
+  }
+
+  async createCommissionRate(rate: InsertCommissionRate): Promise<CommissionRate> {
+    const [newRate] = await db.insert(commissionRates).values(rate).returning();
+    return newRate;
+  }
+
+  async updateCommissionRate(id: string, salonId: string, updates: Partial<InsertCommissionRate>): Promise<void> {
+    await db.update(commissionRates)
+      .set(updates)
+      .where(and(eq(commissionRates.id, id), eq(commissionRates.salonId, salonId)));
+  }
+
+  async deactivateCommissionRate(id: string): Promise<void> {
+    await db.update(commissionRates)
+      .set({ isActive: 0, effectiveTo: new Date() })
+      .where(eq(commissionRates.id, id));
+  }
+
+  // Commission operations
+  async getCommission(id: string): Promise<Commission | undefined> {
+    const [commission] = await db.select().from(commissions).where(eq(commissions.id, id));
+    return commission || undefined;
+  }
+
+  async getCommissionsBySalonId(salonId: string, filters?: {
+    staffId?: string;
+    period?: string;
+    paymentStatus?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<Commission[]> {
+    let query = db.select().from(commissions).where(eq(commissions.salonId, salonId));
+
+    if (filters?.staffId) {
+      query = query.where(eq(commissions.staffId, filters.staffId));
+    }
+    if (filters?.paymentStatus) {
+      query = query.where(eq(commissions.paymentStatus, filters.paymentStatus));
+    }
+    if (filters?.startDate) {
+      query = query.where(gte(commissions.serviceDate, new Date(filters.startDate)));
+    }
+    if (filters?.endDate) {
+      query = query.where(lte(commissions.serviceDate, new Date(filters.endDate)));
+    }
+
+    return await query.orderBy(desc(commissions.serviceDate));
+  }
+
+  async getCommissionsByStaffId(staffId: string, period?: string): Promise<Commission[]> {
+    let query = db.select().from(commissions).where(eq(commissions.staffId, staffId));
+
+    if (period) {
+      const now = new Date();
+      const startDate = new Date();
+      
+      switch (period) {
+        case 'monthly':
+          startDate.setMonth(now.getMonth() - 1);
+          break;
+        case 'quarterly':
+          startDate.setMonth(now.getMonth() - 3);
+          break;
+        case 'yearly':
+          startDate.setFullYear(now.getFullYear() - 1);
+          break;
+      }
+      
+      query = query.where(gte(commissions.serviceDate, startDate));
+    }
+
+    return await query.orderBy(desc(commissions.serviceDate));
+  }
+
+  async createCommission(commission: InsertCommission): Promise<Commission> {
+    const [newCommission] = await db.insert(commissions).values(commission).returning();
+    return newCommission;
+  }
+
+  async updateCommission(id: string, salonId: string, updates: Partial<InsertCommission>): Promise<void> {
+    await db.update(commissions)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(commissions.id, id), eq(commissions.salonId, salonId)));
+  }
+
+  async payCommissions(commissionIds: string[], paidBy: string, paymentMethod: string, paymentReference?: string): Promise<number> {
+    const result = await db.update(commissions)
+      .set({ 
+        paymentStatus: 'paid',
+        paidAt: new Date(),
+        paidBy,
+        paymentMethod,
+        paymentReference,
+        updatedAt: new Date()
+      })
+      .where(inArray(commissions.id, commissionIds));
+
+    return result.rowCount || 0;
+  }
+
+  async calculateCommissionForBooking(bookingId: string): Promise<Commission | null> {
+    // Get booking details with service and staff information
+    const booking = await db.select({
+      id: bookings.id,
+      salonId: bookings.salonId,
+      serviceId: bookings.serviceId,
+      staffId: bookings.staffId,
+      scheduledAt: bookings.scheduledAt,
+      servicePrice: services.priceInPaisa
+    }).from(bookings)
+      .innerJoin(services, eq(bookings.serviceId, services.id))
+      .where(eq(bookings.id, bookingId))
+      .limit(1);
+
+    if (!booking[0] || !booking[0].staffId) {
+      return null;
+    }
+
+    const bookingData = booking[0];
+
+    // Get active commission rate
+    const rate = await this.getActiveCommissionRate(
+      bookingData.salonId, 
+      bookingData.staffId, 
+      bookingData.serviceId
+    );
+
+    if (!rate) {
+      return null;
+    }
+
+    // Calculate commission amount
+    let commissionAmount = 0;
+    if (rate.rateType === 'percentage') {
+      commissionAmount = Math.round((bookingData.servicePrice * parseFloat(rate.rateValue)) / 100);
+    } else if (rate.rateType === 'fixed_amount') {
+      commissionAmount = Math.round(parseFloat(rate.rateValue) * 100); // Convert to paisa
+    }
+
+    // Apply min/max limits
+    if (rate.minAmount && commissionAmount < rate.minAmount) {
+      commissionAmount = rate.minAmount;
+    }
+    if (rate.maxAmount && commissionAmount > rate.maxAmount) {
+      commissionAmount = rate.maxAmount;
+    }
+
+    const serviceDate = new Date(bookingData.scheduledAt);
+    
+    const commissionData: InsertCommission = {
+      salonId: bookingData.salonId,
+      staffId: bookingData.staffId,
+      bookingId: bookingData.id,
+      serviceId: bookingData.serviceId,
+      rateId: rate.id,
+      baseAmountPaisa: bookingData.servicePrice,
+      commissionAmountPaisa: commissionAmount,
+      commissionRate: rate.rateValue,
+      serviceDate,
+      periodYear: serviceDate.getFullYear(),
+      periodMonth: serviceDate.getMonth() + 1,
+      paymentStatus: 'pending'
+    };
+
+    return await this.createCommission(commissionData);
+  }
+
+  async getCommissionAnalytics(salonId: string, period: string): Promise<{
+    totalCommissions: number;
+    paidCommissions: number;
+    pendingCommissions: number;
+    commissionsByStaff: Array<{ staffId: string; staffName: string; earned: number; paid: number; pending: number }>;
+    monthlyTrend: Array<{ month: string; amount: number }>;
+    averageCommissionRate: number;
+  }> {
+    const now = new Date();
+    const startDate = new Date();
+    
+    switch (period) {
+      case 'monthly':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarterly':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      case 'yearly':
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+    }
+
+    // Get commission totals
+    const totalsResult = await db.select({
+      total: sql<number>`COALESCE(SUM(${commissions.commissionAmountPaisa}), 0)`,
+      paid: sql<number>`COALESCE(SUM(CASE WHEN ${commissions.paymentStatus} = 'paid' THEN ${commissions.commissionAmountPaisa} ELSE 0 END), 0)`,
+      pending: sql<number>`COALESCE(SUM(CASE WHEN ${commissions.paymentStatus} = 'pending' THEN ${commissions.commissionAmountPaisa} ELSE 0 END), 0)`
+    }).from(commissions)
+      .where(and(
+        eq(commissions.salonId, salonId),
+        gte(commissions.serviceDate, startDate)
+      ));
+
+    const totals = totalsResult[0] || { total: 0, paid: 0, pending: 0 };
+
+    // Get commissions by staff
+    const staffResults = await db.select({
+      staffId: commissions.staffId,
+      staffName: sql<string>`CONCAT(${staff.firstName}, ' ', ${staff.lastName})`,
+      earned: sql<number>`COALESCE(SUM(${commissions.commissionAmountPaisa}), 0)`,
+      paid: sql<number>`COALESCE(SUM(CASE WHEN ${commissions.paymentStatus} = 'paid' THEN ${commissions.commissionAmountPaisa} ELSE 0 END), 0)`,
+      pending: sql<number>`COALESCE(SUM(CASE WHEN ${commissions.paymentStatus} = 'pending' THEN ${commissions.commissionAmountPaisa} ELSE 0 END), 0)`
+    }).from(commissions)
+      .innerJoin(staff, eq(commissions.staffId, staff.id))
+      .where(and(
+        eq(commissions.salonId, salonId),
+        gte(commissions.serviceDate, startDate)
+      ))
+      .groupBy(commissions.staffId, staff.firstName, staff.lastName);
+
+    // Get monthly trend
+    const monthlyResults = await db.select({
+      month: sql<string>`TO_CHAR(${commissions.serviceDate}, 'YYYY-MM')`,
+      amount: sql<number>`COALESCE(SUM(${commissions.commissionAmountPaisa}), 0)`
+    }).from(commissions)
+      .where(and(
+        eq(commissions.salonId, salonId),
+        gte(commissions.serviceDate, new Date(now.getFullYear() - 1, now.getMonth(), 1))
+      ))
+      .groupBy(sql`TO_CHAR(${commissions.serviceDate}, 'YYYY-MM')`)
+      .orderBy(sql`TO_CHAR(${commissions.serviceDate}, 'YYYY-MM')`);
+
+    // Get average commission rate
+    const avgRateResult = await db.select({
+      avgRate: sql<number>`COALESCE(AVG(${commissions.commissionRate}), 0)`
+    }).from(commissions)
+      .where(and(
+        eq(commissions.salonId, salonId),
+        gte(commissions.serviceDate, startDate)
+      ));
+
+    return {
+      totalCommissions: totals.total,
+      paidCommissions: totals.paid,
+      pendingCommissions: totals.pending,
+      commissionsByStaff: staffResults,
+      monthlyTrend: monthlyResults,
+      averageCommissionRate: avgRateResult[0]?.avgRate || 0
+    };
+  }
+
+  // Budget operations
+  async getBudget(id: string): Promise<Budget | undefined> {
+    const [budget] = await db.select().from(budgets).where(eq(budgets.id, id));
+    return budget || undefined;
+  }
+
+  async getBudgetsBySalonId(salonId: string, filters?: { categoryId?: string; budgetType?: string; isActive?: boolean }): Promise<Budget[]> {
+    let query = db.select().from(budgets).where(eq(budgets.salonId, salonId));
+
+    if (filters?.categoryId) {
+      query = query.where(eq(budgets.categoryId, filters.categoryId));
+    }
+    if (filters?.budgetType) {
+      query = query.where(eq(budgets.budgetType, filters.budgetType));
+    }
+    if (filters?.isActive !== undefined) {
+      query = query.where(eq(budgets.isActive, filters.isActive ? 1 : 0));
+    }
+
+    return await query.orderBy(desc(budgets.startDate));
+  }
+
+  async createBudget(budget: InsertBudget): Promise<Budget> {
+    const [newBudget] = await db.insert(budgets).values(budget).returning();
+    return newBudget;
+  }
+
+  async updateBudget(id: string, salonId: string, updates: Partial<InsertBudget>): Promise<void> {
+    await db.update(budgets)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(budgets.id, id), eq(budgets.salonId, salonId)));
+  }
+
+  async updateBudgetSpentAmount(salonId: string, categoryId: string, additionalSpent: number): Promise<void> {
+    await db.update(budgets)
+      .set({ 
+        spentAmountPaisa: sql`${budgets.spentAmountPaisa} + ${additionalSpent}`,
+        updatedAt: new Date()
+      })
+      .where(and(
+        eq(budgets.salonId, salonId),
+        eq(budgets.categoryId, categoryId),
+        eq(budgets.isActive, 1),
+        lte(budgets.startDate, new Date()),
+        gte(budgets.endDate, new Date())
+      ));
+  }
+
+  async deleteBudget(id: string, salonId: string): Promise<void> {
+    await db.update(budgets)
+      .set({ isActive: 0, updatedAt: new Date() })
+      .where(and(eq(budgets.id, id), eq(budgets.salonId, salonId)));
+  }
+
+  async getBudgetAnalytics(salonId: string, period: string): Promise<{
+    totalBudget: number;
+    totalSpent: number;
+    budgetUtilization: number;
+    budgetsByCategory: Array<{
+      categoryId: string;
+      categoryName: string;
+      budgeted: number;
+      spent: number;
+      remaining: number;
+      utilization: number;
+      status: 'under' | 'on-track' | 'over';
+    }>;
+    alertingBudgets: Array<{ budgetId: string; name: string; utilization: number }>;
+  }> {
+    const now = new Date();
+    
+    // Get active budgets
+    const budgetResults = await db.select({
+      budgetId: budgets.id,
+      budgetName: budgets.name,
+      categoryId: budgets.categoryId,
+      categoryName: expenseCategories.name,
+      budgeted: budgets.budgetAmountPaisa,
+      spent: budgets.spentAmountPaisa,
+      alertThreshold: budgets.alertThreshold
+    }).from(budgets)
+      .leftJoin(expenseCategories, eq(budgets.categoryId, expenseCategories.id))
+      .where(and(
+        eq(budgets.salonId, salonId),
+        eq(budgets.isActive, 1),
+        lte(budgets.startDate, now),
+        gte(budgets.endDate, now)
+      ));
+
+    const totalBudget = budgetResults.reduce((sum, b) => sum + b.budgeted, 0);
+    const totalSpent = budgetResults.reduce((sum, b) => sum + b.spent, 0);
+    const budgetUtilization = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+
+    const budgetsByCategory = budgetResults.map(budget => {
+      const remaining = budget.budgeted - budget.spent;
+      const utilization = budget.budgeted > 0 ? (budget.spent / budget.budgeted) * 100 : 0;
+      
+      let status: 'under' | 'on-track' | 'over' = 'under';
+      if (utilization > 100) status = 'over';
+      else if (utilization > (budget.alertThreshold || 80)) status = 'on-track';
+
+      return {
+        categoryId: budget.categoryId || '',
+        categoryName: budget.categoryName || 'Uncategorized',
+        budgeted: budget.budgeted,
+        spent: budget.spent,
+        remaining,
+        utilization,
+        status
+      };
+    });
+
+    const alertingBudgets = budgetResults
+      .filter(b => {
+        const utilization = b.budgeted > 0 ? (b.spent / b.budgeted) * 100 : 0;
+        return utilization >= (b.alertThreshold || 80);
+      })
+      .map(b => ({
+        budgetId: b.budgetId,
+        name: b.budgetName,
+        utilization: b.budgeted > 0 ? (b.spent / b.budgeted) * 100 : 0
+      }));
+
+    return {
+      totalBudget,
+      totalSpent,
+      budgetUtilization,
+      budgetsByCategory,
+      alertingBudgets
+    };
+  }
+
+  // Financial report operations
+  async getFinancialReport(id: string): Promise<FinancialReport | undefined> {
+    const [report] = await db.select().from(financialReports).where(eq(financialReports.id, id));
+    return report || undefined;
+  }
+
+  async getFinancialReportsBySalonId(salonId: string, filters?: { reportType?: string; reportPeriod?: string }): Promise<FinancialReport[]> {
+    let query = db.select().from(financialReports).where(eq(financialReports.salonId, salonId));
+
+    if (filters?.reportType) {
+      query = query.where(eq(financialReports.reportType, filters.reportType));
+    }
+    if (filters?.reportPeriod) {
+      query = query.where(eq(financialReports.reportPeriod, filters.reportPeriod));
+    }
+
+    return await query.orderBy(desc(financialReports.createdAt));
+  }
+
+  async createFinancialReport(report: InsertFinancialReport): Promise<FinancialReport> {
+    const [newReport] = await db.insert(financialReports).values(report).returning();
+    return newReport;
+  }
+
+  async updateFinancialReport(id: string, salonId: string, updates: Partial<InsertFinancialReport>): Promise<void> {
+    await db.update(financialReports)
+      .set(updates)
+      .where(and(eq(financialReports.id, id), eq(financialReports.salonId, salonId)));
+  }
+
+  async deleteFinancialReport(id: string, salonId: string): Promise<void> {
+    await db.delete(financialReports)
+      .where(and(eq(financialReports.id, id), eq(financialReports.salonId, salonId)));
+  }
+
+  async generateProfitLossStatement(salonId: string, startDate: string, endDate: string): Promise<{
+    period: { startDate: string; endDate: string };
+    revenue: {
+      serviceRevenue: number;
+      otherRevenue: number;
+      totalRevenue: number;
+    };
+    expenses: {
+      operatingExpenses: Array<{ categoryId: string; categoryName: string; amount: number }>;
+      totalOperatingExpenses: number;
+      commissions: number;
+      taxes: number;
+      totalExpenses: number;
+    };
+    profitLoss: {
+      grossProfit: number;
+      grossProfitMargin: number;
+      netProfit: number;
+      netProfitMargin: number;
+      ebitda: number;
+    };
+  }> {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Get service revenue from completed bookings
+    const revenueResult = await db.select({
+      serviceRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
+    }).from(bookings)
+      .innerJoin(services, eq(bookings.serviceId, services.id))
+      .where(and(
+        eq(bookings.salonId, salonId),
+        eq(bookings.status, 'completed'),
+        gte(bookings.scheduledAt, start),
+        lte(bookings.scheduledAt, end)
+      ));
+
+    const serviceRevenue = revenueResult[0]?.serviceRevenue || 0;
+    const otherRevenue = 0; // For future expansion
+    const totalRevenue = serviceRevenue + otherRevenue;
+
+    // Get operating expenses by category
+    const expenseResults = await db.select({
+      categoryId: expenses.categoryId,
+      categoryName: expenseCategories.name,
+      amount: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, start),
+        lte(expenses.expenseDate, end)
+      ))
+      .groupBy(expenses.categoryId, expenseCategories.name);
+
+    const totalOperatingExpenses = expenseResults.reduce((sum, exp) => sum + exp.amount, 0);
+
+    // Get commission expenses
+    const commissionResult = await db.select({
+      commissions: sql<number>`COALESCE(SUM(${commissions.commissionAmountPaisa}), 0)`
+    }).from(commissions)
+      .where(and(
+        eq(commissions.salonId, salonId),
+        gte(commissions.serviceDate, start),
+        lte(commissions.serviceDate, end)
+      ));
+
+    const commissionsExpense = commissionResult[0]?.commissions || 0;
+
+    // Get tax expenses
+    const taxResult = await db.select({
+      taxes: sql<number>`COALESCE(SUM(${expenses.taxAmountPaisa}), 0)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, start),
+        lte(expenses.expenseDate, end)
+      ));
+
+    const taxes = taxResult[0]?.taxes || 0;
+    const totalExpenses = totalOperatingExpenses + commissionsExpense + taxes;
+
+    // Calculate profit metrics
+    const grossProfit = totalRevenue - totalOperatingExpenses;
+    const grossProfitMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    const netProfit = totalRevenue - totalExpenses;
+    const netProfitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+    const ebitda = grossProfit; // Simplified for salon business
+
+    return {
+      period: { startDate, endDate },
+      revenue: {
+        serviceRevenue,
+        otherRevenue,
+        totalRevenue
+      },
+      expenses: {
+        operatingExpenses: expenseResults,
+        totalOperatingExpenses,
+        commissions: commissionsExpense,
+        taxes,
+        totalExpenses
+      },
+      profitLoss: {
+        grossProfit,
+        grossProfitMargin,
+        netProfit,
+        netProfitMargin,
+        ebitda
+      }
+    };
+  }
+
+  async generateCashFlowStatement(salonId: string, startDate: string, endDate: string): Promise<{
+    period: { startDate: string; endDate: string };
+    operatingActivities: {
+      netIncome: number;
+      adjustments: Array<{ item: string; amount: number }>;
+      totalOperatingCashFlow: number;
+    };
+    investingActivities: {
+      equipmentPurchases: number;
+      totalInvestingCashFlow: number;
+    };
+    financingActivities: {
+      ownerWithdrawals: number;
+      totalFinancingCashFlow: number;
+    };
+    netCashFlow: number;
+  }> {
+    const plStatement = await this.generateProfitLossStatement(salonId, startDate, endDate);
+    const netIncome = plStatement.profitLoss.netProfit;
+
+    // Get equipment purchases from expenses
+    const equipmentResult = await db.select({
+      equipment: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        eq(expenseCategories.name, 'Equipment'),
+        gte(expenses.expenseDate, new Date(startDate)),
+        lte(expenses.expenseDate, new Date(endDate))
+      ));
+
+    const equipmentPurchases = -(equipmentResult[0]?.equipment || 0); // Negative because it's cash outflow
+
+    // Simplified cash flow adjustments
+    const adjustments = [
+      { item: 'Depreciation', amount: 0 }, // Would need asset tracking
+      { item: 'Accounts Receivable Changes', amount: 0 }
+    ];
+
+    const totalOperatingCashFlow = netIncome + adjustments.reduce((sum, adj) => sum + adj.amount, 0);
+    const totalInvestingCashFlow = equipmentPurchases;
+    const ownerWithdrawals = 0; // Would need owner withdrawal tracking
+    const totalFinancingCashFlow = ownerWithdrawals;
+    const netCashFlow = totalOperatingCashFlow + totalInvestingCashFlow + totalFinancingCashFlow;
+
+    return {
+      period: { startDate, endDate },
+      operatingActivities: {
+        netIncome,
+        adjustments,
+        totalOperatingCashFlow
+      },
+      investingActivities: {
+        equipmentPurchases,
+        totalInvestingCashFlow
+      },
+      financingActivities: {
+        ownerWithdrawals,
+        totalFinancingCashFlow
+      },
+      netCashFlow
+    };
+  }
+
+  // Tax setting operations
+  async getTaxSetting(id: string): Promise<TaxSetting | undefined> {
+    const [setting] = await db.select().from(taxSettings).where(eq(taxSettings.id, id));
+    return setting || undefined;
+  }
+
+  async getTaxSettingsBySalonId(salonId: string): Promise<TaxSetting[]> {
+    return await db.select().from(taxSettings)
+      .where(and(eq(taxSettings.salonId, salonId), eq(taxSettings.isActive, 1)))
+      .orderBy(asc(taxSettings.taxType));
+  }
+
+  async getTaxSettingByType(salonId: string, taxType: string): Promise<TaxSetting | undefined> {
+    const [setting] = await db.select().from(taxSettings)
+      .where(and(
+        eq(taxSettings.salonId, salonId),
+        eq(taxSettings.taxType, taxType),
+        eq(taxSettings.isActive, 1)
+      ));
+    return setting || undefined;
+  }
+
+  async createTaxSetting(setting: InsertTaxSetting): Promise<TaxSetting> {
+    const [newSetting] = await db.insert(taxSettings).values(setting).returning();
+    return newSetting;
+  }
+
+  async updateTaxSetting(id: string, salonId: string, updates: Partial<InsertTaxSetting>): Promise<void> {
+    await db.update(taxSettings)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(taxSettings.id, id), eq(taxSettings.salonId, salonId)));
+  }
+
+  async deleteTaxSetting(id: string, salonId: string): Promise<void> {
+    await db.update(taxSettings)
+      .set({ isActive: 0, updatedAt: new Date() })
+      .where(and(eq(taxSettings.id, id), eq(taxSettings.salonId, salonId)));
+  }
+
+  async calculateTaxLiability(salonId: string, period: string): Promise<{
+    period: string;
+    grossRevenue: number;
+    taxableRevenue: number;
+    taxBreakdown: Array<{
+      taxType: string;
+      taxName: string;
+      rate: number;
+      taxableAmount: number;
+      taxOwed: number;
+    }>;
+    totalTaxOwed: number;
+    nextFilingDates: Array<{ taxType: string; dueDate: string }>;
+  }> {
+    const now = new Date();
+    const startDate = new Date();
+    
+    switch (period) {
+      case 'monthly':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarterly':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      case 'yearly':
+        startDate.setFullYear(now.getFullYear() - 1);
+        break;
+    }
+
+    // Get gross revenue
+    const revenueResult = await db.select({
+      grossRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
+    }).from(bookings)
+      .innerJoin(services, eq(bookings.serviceId, services.id))
+      .where(and(
+        eq(bookings.salonId, salonId),
+        eq(bookings.status, 'completed'),
+        gte(bookings.scheduledAt, startDate)
+      ));
+
+    const grossRevenue = revenueResult[0]?.grossRevenue || 0;
+    const taxableRevenue = grossRevenue; // Simplified - would need deduction logic
+
+    // Get active tax settings
+    const taxSettingsResults = await this.getTaxSettingsBySalonId(salonId);
+    
+    const taxBreakdown = taxSettingsResults.map(setting => {
+      const rate = parseFloat(setting.taxRate);
+      const taxableAmount = taxableRevenue;
+      const taxOwed = Math.round((taxableAmount * rate) / 100);
+
+      return {
+        taxType: setting.taxType,
+        taxName: setting.taxName,
+        rate,
+        taxableAmount,
+        taxOwed
+      };
+    });
+
+    const totalTaxOwed = taxBreakdown.reduce((sum, tax) => sum + tax.taxOwed, 0);
+
+    // Calculate next filing dates
+    const nextFilingDates = taxSettingsResults
+      .filter(setting => setting.nextFilingDate)
+      .map(setting => ({
+        taxType: setting.taxType,
+        dueDate: setting.nextFilingDate!.toISOString().split('T')[0]
+      }));
+
+    return {
+      period,
+      grossRevenue,
+      taxableRevenue,
+      taxBreakdown,
+      totalTaxOwed,
+      nextFilingDates
+    };
+  }
+
+  // Comprehensive financial analytics
+  async getFinancialKPIs(salonId: string, period: string): Promise<{
+    revenue: {
+      totalRevenue: number;
+      averageBookingValue: number;
+      revenuePerCustomer: number;
+      revenueGrowthRate: number;
+    };
+    expenses: {
+      totalExpenses: number;
+      expenseRatio: number;
+      costPerService: number;
+      expenseGrowthRate: number;
+    };
+    profitability: {
+      grossProfitMargin: number;
+      netProfitMargin: number;
+      breakEvenPoint: number;
+      returnOnInvestment: number;
+    };
+    efficiency: {
+      revenuePerStaff: number;
+      serviceUtilizationRate: number;
+      averageServiceTime: number;
+      staffProductivity: number;
+    };
+  }> {
+    const now = new Date();
+    const startDate = new Date();
+    const prevStartDate = new Date();
+    
+    switch (period) {
+      case 'monthly':
+        startDate.setMonth(now.getMonth() - 1);
+        prevStartDate.setMonth(now.getMonth() - 2);
+        break;
+      case 'quarterly':
+        startDate.setMonth(now.getMonth() - 3);
+        prevStartDate.setMonth(now.getMonth() - 6);
+        break;
+      case 'yearly':
+        startDate.setFullYear(now.getFullYear() - 1);
+        prevStartDate.setFullYear(now.getFullYear() - 2);
+        break;
+    }
+
+    // Revenue KPIs
+    const revenueResults = await db.select({
+      totalRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`,
+      bookingCount: sql<number>`COUNT(*)`,
+      uniqueCustomers: sql<number>`COUNT(DISTINCT ${bookings.customerEmail})`
+    }).from(bookings)
+      .innerJoin(services, eq(bookings.serviceId, services.id))
+      .where(and(
+        eq(bookings.salonId, salonId),
+        eq(bookings.status, 'completed'),
+        gte(bookings.scheduledAt, startDate)
+      ));
+
+    const currentRevenue = revenueResults[0]?.totalRevenue || 0;
+    const bookingCount = revenueResults[0]?.bookingCount || 0;
+    const uniqueCustomers = revenueResults[0]?.uniqueCustomers || 0;
+
+    // Previous period revenue for growth calculation
+    const prevRevenueResults = await db.select({
+      prevRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
+    }).from(bookings)
+      .innerJoin(services, eq(bookings.serviceId, services.id))
+      .where(and(
+        eq(bookings.salonId, salonId),
+        eq(bookings.status, 'completed'),
+        gte(bookings.scheduledAt, prevStartDate),
+        lte(bookings.scheduledAt, startDate)
+      ));
+
+    const prevRevenue = prevRevenueResults[0]?.prevRevenue || 0;
+    const revenueGrowthRate = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / prevRevenue) * 100 : 0;
+
+    // Expense KPIs
+    const expenseResults = await db.select({
+      totalExpenses: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, startDate)
+      ));
+
+    const totalExpenses = expenseResults[0]?.totalExpenses || 0;
+
+    // Previous period expenses
+    const prevExpenseResults = await db.select({
+      prevExpenses: sql<number>`COALESCE(SUM(${expenses.amountPaisa}), 0)`
+    }).from(expenses)
+      .where(and(
+        eq(expenses.salonId, salonId),
+        eq(expenses.status, 'approved'),
+        gte(expenses.expenseDate, prevStartDate),
+        lte(expenses.expenseDate, startDate)
+      ));
+
+    const prevExpenses = prevExpenseResults[0]?.prevExpenses || 0;
+    const expenseGrowthRate = prevExpenses > 0 ? ((totalExpenses - prevExpenses) / prevExpenses) * 100 : 0;
+
+    // Staff count for efficiency metrics
+    const staffResults = await db.select({
+      staffCount: sql<number>`COUNT(*)`
+    }).from(staff)
+      .where(and(eq(staff.salonId, salonId), eq(staff.isActive, 1)));
+
+    const staffCount = staffResults[0]?.staffCount || 1;
+
+    // Service duration for efficiency
+    const avgServiceResults = await db.select({
+      avgDuration: sql<number>`COALESCE(AVG(${services.durationMinutes}), 0)`
+    }).from(services)
+      .where(and(eq(services.salonId, salonId), eq(services.isActive, 1)));
+
+    const averageServiceTime = avgServiceResults[0]?.avgDuration || 0;
+
+    // Calculate KPIs
+    const averageBookingValue = bookingCount > 0 ? currentRevenue / bookingCount : 0;
+    const revenuePerCustomer = uniqueCustomers > 0 ? currentRevenue / uniqueCustomers : 0;
+    const expenseRatio = currentRevenue > 0 ? (totalExpenses / currentRevenue) * 100 : 0;
+    const costPerService = bookingCount > 0 ? totalExpenses / bookingCount : 0;
+    const grossProfitMargin = currentRevenue > 0 ? ((currentRevenue - totalExpenses) / currentRevenue) * 100 : 0;
+    const netProfitMargin = grossProfitMargin; // Simplified
+    const breakEvenPoint = averageBookingValue > 0 ? totalExpenses / averageBookingValue : 0;
+    const returnOnInvestment = totalExpenses > 0 ? ((currentRevenue - totalExpenses) / totalExpenses) * 100 : 0;
+    const revenuePerStaff = staffCount > 0 ? currentRevenue / staffCount : 0;
+    const serviceUtilizationRate = 80; // Would need time slot analysis
+    const staffProductivity = staffCount > 0 ? bookingCount / staffCount : 0;
+
+    return {
+      revenue: {
+        totalRevenue: currentRevenue,
+        averageBookingValue,
+        revenuePerCustomer,
+        revenueGrowthRate
+      },
+      expenses: {
+        totalExpenses,
+        expenseRatio,
+        costPerService,
+        expenseGrowthRate
+      },
+      profitability: {
+        grossProfitMargin,
+        netProfitMargin,
+        breakEvenPoint,
+        returnOnInvestment
+      },
+      efficiency: {
+        revenuePerStaff,
+        serviceUtilizationRate,
+        averageServiceTime,
+        staffProductivity
+      }
+    };
+  }
+
+  async getFinancialForecast(salonId: string, months: number): Promise<{
+    forecast: Array<{
+      month: string;
+      projectedRevenue: number;
+      projectedExpenses: number;
+      projectedProfit: number;
+      confidence: number;
+    }>;
+    assumptions: {
+      revenueGrowthRate: number;
+      seasonalFactors: Array<{ month: number; factor: number }>;
+      costInflationRate: number;
+    };
+    scenarios: {
+      optimistic: { totalRevenue: number; totalProfit: number };
+      realistic: { totalRevenue: number; totalProfit: number };
+      pessimistic: { totalRevenue: number; totalProfit: number };
+    };
+  }> {
+    // Get historical data for trend analysis (last 12 months)
+    const historicalResults = await db.select({
+      month: sql<string>`TO_CHAR(${bookings.scheduledAt}, 'YYYY-MM')`,
+      revenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
+    }).from(bookings)
+      .innerJoin(services, eq(bookings.serviceId, services.id))
+      .where(and(
+        eq(bookings.salonId, salonId),
+        eq(bookings.status, 'completed'),
+        gte(bookings.scheduledAt, new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1))
+      ))
+      .groupBy(sql`TO_CHAR(${bookings.scheduledAt}, 'YYYY-MM')`)
+      .orderBy(sql`TO_CHAR(${bookings.scheduledAt}, 'YYYY-MM')`);
+
+    // Calculate growth rate from historical data
+    const revenues = historicalResults.map(r => r.revenue);
+    const revenueGrowthRate = revenues.length > 1 
+      ? ((revenues[revenues.length - 1] - revenues[0]) / revenues[0]) * 100 / revenues.length
+      : 5; // Default 5% monthly growth
+
+    // Get expense ratio
+    const kpis = await this.getFinancialKPIs(salonId, 'monthly');
+    const expenseRatio = kpis.expenses.expenseRatio / 100;
+    const costInflationRate = 3; // Default 3% inflation
+
+    // Generate seasonal factors (simplified)
+    const seasonalFactors = [
+      { month: 1, factor: 0.9 }, { month: 2, factor: 0.95 }, { month: 3, factor: 1.1 },
+      { month: 4, factor: 1.05 }, { month: 5, factor: 1.15 }, { month: 6, factor: 1.2 },
+      { month: 7, factor: 1.1 }, { month: 8, factor: 1.05 }, { month: 9, factor: 1.0 },
+      { month: 10, factor: 1.1 }, { month: 11, factor: 1.2 }, { month: 12, factor: 1.3 }
+    ];
+
+    // Generate forecast
+    const baseRevenue = kpis.revenue.totalRevenue;
+    const forecast = [];
+
+    for (let i = 1; i <= months; i++) {
+      const futureDate = new Date();
+      futureDate.setMonth(futureDate.getMonth() + i);
+      const monthNumber = futureDate.getMonth() + 1;
+      const seasonalFactor = seasonalFactors.find(f => f.month === monthNumber)?.factor || 1;
+      
+      const growthFactor = Math.pow(1 + (revenueGrowthRate / 100), i);
+      const projectedRevenue = Math.round(baseRevenue * growthFactor * seasonalFactor);
+      
+      const expenseGrowthFactor = Math.pow(1 + (costInflationRate / 100), i);
+      const projectedExpenses = Math.round(baseRevenue * expenseRatio * expenseGrowthFactor);
+      
+      const projectedProfit = projectedRevenue - projectedExpenses;
+      const confidence = Math.max(50, 95 - (i * 5)); // Confidence decreases over time
+
+      forecast.push({
+        month: futureDate.toISOString().substring(0, 7),
+        projectedRevenue,
+        projectedExpenses,
+        projectedProfit,
+        confidence
+      });
+    }
+
+    // Calculate scenarios
+    const totalProjectedRevenue = forecast.reduce((sum, f) => sum + f.projectedRevenue, 0);
+    const totalProjectedProfit = forecast.reduce((sum, f) => sum + f.projectedProfit, 0);
+
+    const scenarios = {
+      optimistic: {
+        totalRevenue: Math.round(totalProjectedRevenue * 1.2),
+        totalProfit: Math.round(totalProjectedProfit * 1.3)
+      },
+      realistic: {
+        totalRevenue: totalProjectedRevenue,
+        totalProfit: totalProjectedProfit
+      },
+      pessimistic: {
+        totalRevenue: Math.round(totalProjectedRevenue * 0.8),
+        totalProfit: Math.round(totalProjectedProfit * 0.6)
+      }
+    };
+
+    return {
+      forecast,
+      assumptions: {
+        revenueGrowthRate,
+        seasonalFactors,
+        costInflationRate
+      },
+      scenarios
+    };
   }
 }
 

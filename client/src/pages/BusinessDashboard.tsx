@@ -26,6 +26,7 @@ import {
 import { Link } from "wouter";
 import type { Salon } from "@/../../shared/schema";
 import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
+import FinancialReportingDashboard from "@/components/FinancialReportingDashboard";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -799,6 +800,19 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle financials tab
+    if (activeTab === "financials") {
+      return (
+        <div className="p-6">
+          <FinancialReportingDashboard 
+            salonId={salonId || ''} 
+            selectedPeriod={selectedPeriod}
+            onPeriodChange={setSelectedPeriod}
+          />
+        </div>
+      );
+    }
+
     const Component = components[activeTab as keyof typeof components];
     if (Component && salonId) {
       return (
@@ -950,6 +964,21 @@ export default function BusinessDashboard() {
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
                 Advanced Analytics
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("financials")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "financials" 
+                  ? "border-blue-500 text-blue-600" 
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+              data-testid="tab-financials"
+            >
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4" />
+                Financial Reports
               </div>
             </button>
 

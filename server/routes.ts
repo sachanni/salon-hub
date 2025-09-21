@@ -30,6 +30,14 @@ import {
   validateStatusTransition,
   // Customer profile validation schemas
   updateCustomerNotesSchema,
+  // Financial system validation schemas
+  insertExpenseCategorySchema,
+  insertExpenseSchema,
+  insertCommissionRateSchema,
+  insertCommissionSchema,
+  insertBudgetSchema,
+  insertFinancialReportSchema,
+  insertTaxSettingSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
 
@@ -2491,6 +2499,597 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching dashboard completion:', error);
       res.status(500).json({ error: 'Failed to fetch dashboard completion status' });
+    }
+  });
+
+  // ===============================================
+  // FINANCIAL REPORTING SYSTEM API ENDPOINTS
+  // ===============================================
+
+  // Expense Category Endpoints
+  app.get('/api/salons/:salonId/expense-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const categories = await storage.getExpenseCategoriesBySalonId(salonId);
+      res.json(categories);
+    } catch (error) {
+      console.error('Error fetching expense categories:', error);
+      res.status(500).json({ error: 'Failed to fetch expense categories' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/expense-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertExpenseCategorySchema.safeParse({ ...req.body, salonId });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const category = await storage.createExpenseCategory(validationResult.data);
+      res.status(201).json(category);
+    } catch (error) {
+      console.error('Error creating expense category:', error);
+      res.status(500).json({ error: 'Failed to create expense category' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/expense-categories/:categoryId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, categoryId } = req.params;
+      const partialSchema = insertExpenseCategorySchema.omit({ salonId: true }).partial();
+      const validationResult = partialSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      await storage.updateExpenseCategory(categoryId, salonId, validationResult.data);
+      const updatedCategory = await storage.getExpenseCategory(categoryId);
+      res.json(updatedCategory);
+    } catch (error) {
+      console.error('Error updating expense category:', error);
+      res.status(500).json({ error: 'Failed to update expense category' });
+    }
+  });
+
+  app.delete('/api/salons/:salonId/expense-categories/:categoryId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, categoryId } = req.params;
+      await storage.deleteExpenseCategory(categoryId, salonId);
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error deleting expense category:', error);
+      res.status(500).json({ error: 'Failed to delete expense category' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/expense-categories/default', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const categories = await storage.createDefaultExpenseCategories(salonId);
+      res.status(201).json(categories);
+    } catch (error) {
+      console.error('Error creating default expense categories:', error);
+      res.status(500).json({ error: 'Failed to create default expense categories' });
+    }
+  });
+
+  // Expense Endpoints
+  app.get('/api/salons/:salonId/expenses', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { categoryId, status, startDate, endDate, createdBy } = req.query;
+      const filters = {
+        categoryId: categoryId as string,
+        status: status as string,
+        startDate: startDate as string,
+        endDate: endDate as string,
+        createdBy: createdBy as string,
+      };
+      
+      const expenses = await storage.getExpensesBySalonId(salonId, filters);
+      res.json(expenses);
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+      res.status(500).json({ error: 'Failed to fetch expenses' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/expenses', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertExpenseSchema.safeParse({ 
+        ...req.body, 
+        salonId,
+        createdBy: req.user.id 
+      });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const expense = await storage.createExpense(validationResult.data);
+      res.status(201).json(expense);
+    } catch (error) {
+      console.error('Error creating expense:', error);
+      res.status(500).json({ error: 'Failed to create expense' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/expenses/:expenseId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, expenseId } = req.params;
+      const partialSchema = insertExpenseSchema.omit({ salonId: true, createdBy: true }).partial();
+      const validationResult = partialSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      await storage.updateExpense(expenseId, salonId, validationResult.data);
+      const updatedExpense = await storage.getExpense(expenseId);
+      res.json(updatedExpense);
+    } catch (error) {
+      console.error('Error updating expense:', error);
+      res.status(500).json({ error: 'Failed to update expense' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/expenses/:expenseId/approve', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, expenseId } = req.params;
+      await storage.approveExpense(expenseId, req.user.id);
+      const updatedExpense = await storage.getExpense(expenseId);
+      res.json(updatedExpense);
+    } catch (error) {
+      console.error('Error approving expense:', error);
+      res.status(500).json({ error: 'Failed to approve expense' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/expenses/:expenseId/reject', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, expenseId } = req.params;
+      await storage.rejectExpense(expenseId, req.user.id);
+      const updatedExpense = await storage.getExpense(expenseId);
+      res.json(updatedExpense);
+    } catch (error) {
+      console.error('Error rejecting expense:', error);
+      res.status(500).json({ error: 'Failed to reject expense' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/expenses/analytics', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const analytics = await storage.getExpenseAnalytics(salonId, period as string);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching expense analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch expense analytics' });
+    }
+  });
+
+  // Commission Rate Endpoints
+  app.get('/api/salons/:salonId/commission-rates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const rates = await storage.getCommissionRatesBySalonId(salonId);
+      res.json(rates);
+    } catch (error) {
+      console.error('Error fetching commission rates:', error);
+      res.status(500).json({ error: 'Failed to fetch commission rates' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/commission-rates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertCommissionRateSchema.safeParse({ ...req.body, salonId });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const rate = await storage.createCommissionRate(validationResult.data);
+      res.status(201).json(rate);
+    } catch (error) {
+      console.error('Error creating commission rate:', error);
+      res.status(500).json({ error: 'Failed to create commission rate' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/commission-rates/:rateId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, rateId } = req.params;
+      const partialSchema = insertCommissionRateSchema.omit({ salonId: true }).partial();
+      const validationResult = partialSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      await storage.updateCommissionRate(rateId, salonId, validationResult.data);
+      const updatedRate = await storage.getCommissionRate(rateId);
+      res.json(updatedRate);
+    } catch (error) {
+      console.error('Error updating commission rate:', error);
+      res.status(500).json({ error: 'Failed to update commission rate' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/commission-rates/:rateId/deactivate', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { rateId } = req.params;
+      await storage.deactivateCommissionRate(rateId);
+      const updatedRate = await storage.getCommissionRate(rateId);
+      res.json(updatedRate);
+    } catch (error) {
+      console.error('Error deactivating commission rate:', error);
+      res.status(500).json({ error: 'Failed to deactivate commission rate' });
+    }
+  });
+
+  // Commission Endpoints
+  app.get('/api/salons/:salonId/commissions', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { staffId, period, paymentStatus, startDate, endDate } = req.query;
+      const filters = {
+        staffId: staffId as string,
+        period: period as string,
+        paymentStatus: paymentStatus as string,
+        startDate: startDate as string,
+        endDate: endDate as string,
+      };
+      
+      const commissions = await storage.getCommissionsBySalonId(salonId, filters);
+      res.json(commissions);
+    } catch (error) {
+      console.error('Error fetching commissions:', error);
+      res.status(500).json({ error: 'Failed to fetch commissions' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/commissions', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertCommissionSchema.safeParse({ ...req.body, salonId });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const commission = await storage.createCommission(validationResult.data);
+      res.status(201).json(commission);
+    } catch (error) {
+      console.error('Error creating commission:', error);
+      res.status(500).json({ error: 'Failed to create commission' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/commissions/pay-bulk', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { commissionIds, paymentMethod, paymentReference } = req.body;
+      if (!Array.isArray(commissionIds) || commissionIds.length === 0) {
+        return res.status(400).json({ error: 'Commission IDs are required' });
+      }
+      
+      const paidCount = await storage.payCommissions(
+        commissionIds, 
+        req.user.id, 
+        paymentMethod, 
+        paymentReference
+      );
+      res.json({ paidCount, message: `${paidCount} commissions paid successfully` });
+    } catch (error) {
+      console.error('Error paying commissions:', error);
+      res.status(500).json({ error: 'Failed to pay commissions' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/commissions/analytics', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const analytics = await storage.getCommissionAnalytics(salonId, period as string);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching commission analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch commission analytics' });
+    }
+  });
+
+  // Budget Endpoints
+  app.get('/api/salons/:salonId/budgets', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { categoryId, budgetType, isActive } = req.query;
+      const filters = {
+        categoryId: categoryId as string,
+        budgetType: budgetType as string,
+        isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
+      };
+      
+      const budgets = await storage.getBudgetsBySalonId(salonId, filters);
+      res.json(budgets);
+    } catch (error) {
+      console.error('Error fetching budgets:', error);
+      res.status(500).json({ error: 'Failed to fetch budgets' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/budgets', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertBudgetSchema.safeParse({ 
+        ...req.body, 
+        salonId,
+        createdBy: req.user.id 
+      });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const budget = await storage.createBudget(validationResult.data);
+      res.status(201).json(budget);
+    } catch (error) {
+      console.error('Error creating budget:', error);
+      res.status(500).json({ error: 'Failed to create budget' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/budgets/:budgetId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, budgetId } = req.params;
+      const partialSchema = insertBudgetSchema.omit({ salonId: true, createdBy: true }).partial();
+      const validationResult = partialSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      await storage.updateBudget(budgetId, salonId, validationResult.data);
+      const updatedBudget = await storage.getBudget(budgetId);
+      res.json(updatedBudget);
+    } catch (error) {
+      console.error('Error updating budget:', error);
+      res.status(500).json({ error: 'Failed to update budget' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/budgets/analytics', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const analytics = await storage.getBudgetAnalytics(salonId, period as string);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching budget analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch budget analytics' });
+    }
+  });
+
+  // Financial Analytics Endpoints
+  app.get('/api/salons/:salonId/financial-analytics/kpis/:period', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, period } = req.params;
+      const kpis = await storage.getFinancialKPIs(salonId, period);
+      res.json(kpis);
+    } catch (error) {
+      console.error('Error fetching financial KPIs:', error);
+      res.status(500).json({ error: 'Failed to fetch financial KPIs' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/financial-analytics/forecast/:months', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, months } = req.params;
+      const monthsNum = parseInt(months);
+      if (isNaN(monthsNum) || monthsNum < 1 || monthsNum > 24) {
+        return res.status(400).json({ error: 'Months must be a number between 1 and 24' });
+      }
+      
+      const forecast = await storage.getFinancialForecast(salonId, monthsNum);
+      res.json(forecast);
+    } catch (error) {
+      console.error('Error fetching financial forecast:', error);
+      res.status(500).json({ error: 'Failed to fetch financial forecast' });
+    }
+  });
+
+  // Financial Report Endpoints
+  app.get('/api/salons/:salonId/financial-reports', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { reportType, reportPeriod } = req.query;
+      const filters = {
+        reportType: reportType as string,
+        reportPeriod: reportPeriod as string,
+      };
+      
+      const reports = await storage.getFinancialReportsBySalonId(salonId, filters);
+      res.json(reports);
+    } catch (error) {
+      console.error('Error fetching financial reports:', error);
+      res.status(500).json({ error: 'Failed to fetch financial reports' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/financial-reports', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertFinancialReportSchema.safeParse({ 
+        ...req.body, 
+        salonId,
+        generatedBy: req.user.id 
+      });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const report = await storage.createFinancialReport(validationResult.data);
+      res.status(201).json(report);
+    } catch (error) {
+      console.error('Error creating financial report:', error);
+      res.status(500).json({ error: 'Failed to create financial report' });
+    }
+  });
+
+  // P&L endpoint with query parameters (existing)
+  app.get('/api/salons/:salonId/financial-reports/profit-loss', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { startDate, endDate } = req.query;
+      
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'Start date and end date are required' });
+      }
+      
+      const plStatement = await storage.generateProfitLossStatement(
+        salonId, 
+        startDate as string, 
+        endDate as string
+      );
+      res.json(plStatement);
+    } catch (error) {
+      console.error('Error generating P&L statement:', error);
+      res.status(500).json({ error: 'Failed to generate P&L statement' });
+    }
+  });
+
+  // P&L endpoint with URL parameters (for frontend compatibility)
+  app.get('/api/salons/:salonId/financial-reports/profit-loss/:startDate/:endDate', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, startDate, endDate } = req.params;
+      
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'Start date and end date are required' });
+      }
+      
+      const plStatement = await storage.generateProfitLossStatement(
+        salonId, 
+        startDate, 
+        endDate
+      );
+      res.json(plStatement);
+    } catch (error) {
+      console.error('Error generating P&L statement:', error);
+      res.status(500).json({ error: 'Failed to generate P&L statement' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/financial-reports/cash-flow', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { startDate, endDate } = req.query;
+      
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'Start date and end date are required' });
+      }
+      
+      const cashFlowStatement = await storage.generateCashFlowStatement(
+        salonId, 
+        startDate as string, 
+        endDate as string
+      );
+      res.json(cashFlowStatement);
+    } catch (error) {
+      console.error('Error generating cash flow statement:', error);
+      res.status(500).json({ error: 'Failed to generate cash flow statement' });
+    }
+  });
+
+  // Tax Setting Endpoints
+  app.get('/api/salons/:salonId/tax-settings', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const settings = await storage.getTaxSettingsBySalonId(salonId);
+      res.json(settings);
+    } catch (error) {
+      console.error('Error fetching tax settings:', error);
+      res.status(500).json({ error: 'Failed to fetch tax settings' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/tax-settings', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertTaxSettingSchema.safeParse({ ...req.body, salonId });
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const setting = await storage.createTaxSetting(validationResult.data);
+      res.status(201).json(setting);
+    } catch (error) {
+      console.error('Error creating tax setting:', error);
+      res.status(500).json({ error: 'Failed to create tax setting' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/tax-settings/liability', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const liability = await storage.calculateTaxLiability(salonId, period as string);
+      res.json(liability);
+    } catch (error) {
+      console.error('Error calculating tax liability:', error);
+      res.status(500).json({ error: 'Failed to calculate tax liability' });
+    }
+  });
+
+  // Financial Analytics Endpoints
+  app.get('/api/salons/:salonId/financial-analytics/kpis', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const kpis = await storage.getFinancialKPIs(salonId, period as string);
+      res.json(kpis);
+    } catch (error) {
+      console.error('Error fetching financial KPIs:', error);
+      res.status(500).json({ error: 'Failed to fetch financial KPIs' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/financial-analytics/forecast', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { months = 12 } = req.query;
+      const forecast = await storage.getFinancialForecast(salonId, parseInt(months as string));
+      res.json(forecast);
+    } catch (error) {
+      console.error('Error fetching financial forecast:', error);
+      res.status(500).json({ error: 'Failed to fetch financial forecast' });
     }
   });
 

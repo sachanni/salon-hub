@@ -893,3 +893,446 @@ export const updateCustomerNotesSchema = z.object({
 });
 
 export type UpdateCustomerNotesInput = z.infer<typeof updateCustomerNotesSchema>;
+
+// ===============================================
+// FINANCIAL REPORTING SYSTEM TABLES
+// ===============================================
+
+// Expense categories for organizing business expenses
+export const expenseCategories = pgTable("expense_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  color: varchar("color", { length: 7 }).default('#6366f1'), // Hex color for UI
+  isDefault: integer("is_default").notNull().default(0), // System default categories
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("expense_categories_salon_idx").on(table.salonId),
+  unique("expense_categories_salon_name_unique").on(table.salonId, table.name),
+  check("is_default_valid", sql`is_default IN (0,1)`),
+  check("is_active_valid", sql`is_active IN (0,1)`),
+]);
+
+// Business expenses tracking
+export const expenses = pgTable("expenses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  categoryId: varchar("category_id").notNull().references(() => expenseCategories.id, { onDelete: "restrict" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description"),
+  amountPaisa: integer("amount_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  expenseDate: timestamp("expense_date").notNull(),
+  receiptUrl: text("receipt_url"), // URL to uploaded receipt
+  receiptNumber: varchar("receipt_number", { length: 100 }),
+  vendor: varchar("vendor", { length: 200 }),
+  isRecurring: integer("is_recurring").notNull().default(0),
+  recurringFrequency: varchar("recurring_frequency", { length: 20 }), // monthly, quarterly, yearly
+  taxDeductible: integer("tax_deductible").notNull().default(0),
+  taxAmountPaisa: integer("tax_amount_paisa").default(0),
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, approved, rejected
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  tags: jsonb("tags").default(sql`'[]'::jsonb`),
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("expenses_salon_idx").on(table.salonId),
+  index("expenses_category_idx").on(table.categoryId),
+  index("expenses_date_idx").on(table.expenseDate),
+  index("expenses_status_idx").on(table.status),
+  check("is_recurring_valid", sql`is_recurring IN (0,1)`),
+  check("tax_deductible_valid", sql`tax_deductible IN (0,1)`),
+  check("status_valid", sql`status IN ('pending', 'approved', 'rejected')`),
+  check("recurring_frequency_valid", sql`recurring_frequency IS NULL OR recurring_frequency IN ('monthly', 'quarterly', 'yearly')`),
+]);
+
+// Commission rate configurations for staff
+export const commissionRates = pgTable("commission_rates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").references(() => staff.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").references(() => services.id, { onDelete: "cascade" }),
+  rateType: varchar("rate_type", { length: 20 }).notNull(), // percentage, fixed_amount, tiered
+  rateValue: decimal("rate_value", { precision: 10, scale: 4 }).notNull(), // % or fixed amount
+  minAmount: integer("min_amount_paisa"), // Minimum earning threshold
+  maxAmount: integer("max_amount_paisa"), // Maximum earning cap
+  isDefault: integer("is_default").notNull().default(0), // Default rate for new staff/services
+  isActive: integer("is_active").notNull().default(1),
+  effectiveFrom: timestamp("effective_from").notNull().defaultNow(),
+  effectiveTo: timestamp("effective_to"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("commission_rates_salon_idx").on(table.salonId),
+  index("commission_rates_staff_idx").on(table.staffId),
+  index("commission_rates_service_idx").on(table.serviceId),
+  index("commission_rates_effective_idx").on(table.effectiveFrom, table.effectiveTo),
+  check("rate_type_valid", sql`rate_type IN ('percentage', 'fixed_amount', 'tiered')`),
+  check("is_default_valid", sql`is_default IN (0,1)`),
+  check("is_active_valid", sql`is_active IN (0,1)`),
+]);
+
+// Staff commission calculations and tracking
+export const commissions = pgTable("commissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  serviceId: varchar("service_id").references(() => services.id, { onDelete: "set null" }),
+  rateId: varchar("rate_id").references(() => commissionRates.id, { onDelete: "set null" }),
+  baseAmountPaisa: integer("base_amount_paisa").notNull(), // Service amount
+  commissionAmountPaisa: integer("commission_amount_paisa").notNull(), // Calculated commission
+  commissionRate: decimal("commission_rate", { precision: 10, scale: 4 }).notNull(), // Applied rate
+  serviceDate: timestamp("service_date").notNull(),
+  periodYear: integer("period_year").notNull(),
+  periodMonth: integer("period_month").notNull(),
+  paymentStatus: varchar("payment_status", { length: 20 }).notNull().default('pending'), // pending, paid, cancelled
+  paidAt: timestamp("paid_at"),
+  paidBy: varchar("paid_by").references(() => users.id),
+  paymentMethod: varchar("payment_method", { length: 50 }),
+  paymentReference: varchar("payment_reference", { length: 100 }),
+  notes: text("notes"),
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("commissions_salon_idx").on(table.salonId),
+  index("commissions_staff_idx").on(table.staffId),
+  index("commissions_booking_idx").on(table.bookingId),
+  index("commissions_period_idx").on(table.periodYear, table.periodMonth),
+  index("commissions_payment_status_idx").on(table.paymentStatus),
+  index("commissions_service_date_idx").on(table.serviceDate),
+  check("payment_status_valid", sql`payment_status IN ('pending', 'paid', 'cancelled')`),
+  check("period_month_valid", sql`period_month >= 1 AND period_month <= 12`),
+  check("period_year_valid", sql`period_year >= 2020`),
+]);
+
+// Budget planning and tracking
+export const budgets = pgTable("budgets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  categoryId: varchar("category_id").references(() => expenseCategories.id, { onDelete: "set null" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description"),
+  budgetType: varchar("budget_type", { length: 20 }).notNull(), // category, overall, department
+  budgetAmountPaisa: integer("budget_amount_paisa").notNull(),
+  spentAmountPaisa: integer("spent_amount_paisa").notNull().default(0),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  budgetPeriod: varchar("budget_period", { length: 20 }).notNull(), // monthly, quarterly, yearly
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  alertThreshold: integer("alert_threshold").default(80), // Alert when % of budget used
+  isActive: integer("is_active").notNull().default(1),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("budgets_salon_idx").on(table.salonId),
+  index("budgets_category_idx").on(table.categoryId),
+  index("budgets_period_idx").on(table.startDate, table.endDate),
+  check("budget_type_valid", sql`budget_type IN ('category', 'overall', 'department')`),
+  check("budget_period_valid", sql`budget_period IN ('monthly', 'quarterly', 'yearly')`),
+  check("is_active_valid", sql`is_active IN (0,1)`),
+  check("alert_threshold_valid", sql`alert_threshold >= 0 AND alert_threshold <= 100`),
+]);
+
+// Generated financial reports storage
+export const financialReports = pgTable("financial_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  reportType: varchar("report_type", { length: 50 }).notNull(), // pl_statement, cash_flow, commission_report, expense_report
+  reportTitle: varchar("report_title", { length: 200 }).notNull(),
+  reportPeriod: varchar("report_period", { length: 20 }).notNull(), // monthly, quarterly, yearly, custom
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  reportData: jsonb("report_data").notNull(), // Structured report data
+  summary: jsonb("summary").default(sql`'{}'::jsonb`), // Key metrics summary
+  generatedBy: varchar("generated_by").notNull().references(() => users.id),
+  exportedAt: timestamp("exported_at"),
+  exportFormat: varchar("export_format", { length: 20 }), // pdf, excel, csv
+  isScheduled: integer("is_scheduled").notNull().default(0),
+  scheduleFrequency: varchar("schedule_frequency", { length: 20 }),
+  nextScheduledAt: timestamp("next_scheduled_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("financial_reports_salon_idx").on(table.salonId),
+  index("financial_reports_type_idx").on(table.reportType),
+  index("financial_reports_period_idx").on(table.startDate, table.endDate),
+  check("report_type_valid", sql`report_type IN ('pl_statement', 'cash_flow', 'commission_report', 'expense_report', 'tax_report', 'budget_report')`),
+  check("report_period_valid", sql`report_period IN ('monthly', 'quarterly', 'yearly', 'custom')`),
+  check("export_format_valid", sql`export_format IS NULL OR export_format IN ('pdf', 'excel', 'csv')`),
+  check("is_scheduled_valid", sql`is_scheduled IN (0,1)`),
+  check("schedule_frequency_valid", sql`schedule_frequency IS NULL OR schedule_frequency IN ('weekly', 'monthly', 'quarterly')`),
+]);
+
+// Tax settings and configurations
+export const taxSettings = pgTable("tax_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  taxType: varchar("tax_type", { length: 50 }).notNull(), // gst, vat, sales_tax, income_tax
+  taxName: varchar("tax_name", { length: 100 }).notNull(),
+  taxRate: decimal("tax_rate", { precision: 10, scale: 4 }).notNull(), // Tax percentage
+  isInclusive: integer("is_inclusive").notNull().default(0), // Tax included in price or added
+  isActive: integer("is_active").notNull().default(1),
+  applicableFrom: timestamp("applicable_from").notNull().defaultNow(),
+  applicableTo: timestamp("applicable_to"),
+  taxAuthority: varchar("tax_authority", { length: 200 }),
+  registrationNumber: varchar("registration_number", { length: 100 }),
+  filingFrequency: varchar("filing_frequency", { length: 20 }), // monthly, quarterly, yearly
+  nextFilingDate: timestamp("next_filing_date"),
+  autoCalculate: integer("auto_calculate").notNull().default(1),
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("tax_settings_salon_idx").on(table.salonId),
+  index("tax_settings_type_idx").on(table.taxType),
+  unique("tax_settings_salon_type_unique").on(table.salonId, table.taxType),
+  check("tax_type_valid", sql`tax_type IN ('gst', 'vat', 'sales_tax', 'income_tax', 'service_tax')`),
+  check("is_inclusive_valid", sql`is_inclusive IN (0,1)`),
+  check("is_active_valid", sql`is_active IN (0,1)`),
+  check("auto_calculate_valid", sql`auto_calculate IN (0,1)`),
+  check("filing_frequency_valid", sql`filing_frequency IS NULL OR filing_frequency IN ('monthly', 'quarterly', 'yearly')`),
+]);
+
+// Financial data relations
+export const expenseCategoriesRelations = relations(expenseCategories, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [expenseCategories.salonId],
+    references: [salons.id],
+  }),
+  expenses: many(expenses),
+  budgets: many(budgets),
+}));
+
+export const expensesRelations = relations(expenses, ({ one }) => ({
+  salon: one(salons, {
+    fields: [expenses.salonId],
+    references: [salons.id],
+  }),
+  category: one(expenseCategories, {
+    fields: [expenses.categoryId],
+    references: [expenseCategories.id],
+  }),
+  createdByUser: one(users, {
+    fields: [expenses.createdBy],
+    references: [users.id],
+  }),
+  approvedByUser: one(users, {
+    fields: [expenses.approvedBy],
+    references: [users.id],
+  }),
+}));
+
+export const commissionRatesRelations = relations(commissionRates, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [commissionRates.salonId],
+    references: [salons.id],
+  }),
+  staff: one(staff, {
+    fields: [commissionRates.staffId],
+    references: [staff.id],
+  }),
+  service: one(services, {
+    fields: [commissionRates.serviceId],
+    references: [services.id],
+  }),
+  commissions: many(commissions),
+}));
+
+export const commissionsRelations = relations(commissions, ({ one }) => ({
+  salon: one(salons, {
+    fields: [commissions.salonId],
+    references: [salons.id],
+  }),
+  staff: one(staff, {
+    fields: [commissions.staffId],
+    references: [staff.id],
+  }),
+  booking: one(bookings, {
+    fields: [commissions.bookingId],
+    references: [bookings.id],
+  }),
+  service: one(services, {
+    fields: [commissions.serviceId],
+    references: [services.id],
+  }),
+  rate: one(commissionRates, {
+    fields: [commissions.rateId],
+    references: [commissionRates.id],
+  }),
+  paidByUser: one(users, {
+    fields: [commissions.paidBy],
+    references: [users.id],
+  }),
+}));
+
+export const budgetsRelations = relations(budgets, ({ one }) => ({
+  salon: one(salons, {
+    fields: [budgets.salonId],
+    references: [salons.id],
+  }),
+  category: one(expenseCategories, {
+    fields: [budgets.categoryId],
+    references: [expenseCategories.id],
+  }),
+  createdByUser: one(users, {
+    fields: [budgets.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const financialReportsRelations = relations(financialReports, ({ one }) => ({
+  salon: one(salons, {
+    fields: [financialReports.salonId],
+    references: [salons.id],
+  }),
+  generatedByUser: one(users, {
+    fields: [financialReports.generatedBy],
+    references: [users.id],
+  }),
+}));
+
+export const taxSettingsRelations = relations(taxSettings, ({ one }) => ({
+  salon: one(salons, {
+    fields: [taxSettings.salonId],
+    references: [salons.id],
+  }),
+}));
+
+// Financial schema validations and types
+export const insertExpenseCategorySchema = createInsertSchema(expenseCategories).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertExpenseSchema = createInsertSchema(expenses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  approvedAt: true,
+}).extend({
+  expenseDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertCommissionRateSchema = createInsertSchema(commissionRates).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  effectiveFrom: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+  effectiveTo: z.union([z.date(), z.string().datetime()]).optional().transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertCommissionSchema = createInsertSchema(commissions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  paidAt: true,
+}).extend({
+  serviceDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertBudgetSchema = createInsertSchema(budgets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  startDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+  endDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertFinancialReportSchema = createInsertSchema(financialReports).omit({
+  id: true,
+  createdAt: true,
+  exportedAt: true,
+  nextScheduledAt: true,
+}).extend({
+  startDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+  endDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertTaxSettingSchema = createInsertSchema(taxSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  nextFilingDate: true,
+}).extend({
+  applicableFrom: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+  applicableTo: z.union([z.date(), z.string().datetime()]).optional().transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+// Financial types exports
+export type ExpenseCategory = typeof expenseCategories.$inferSelect;
+export type InsertExpenseCategory = z.infer<typeof insertExpenseCategorySchema>;
+
+export type Expense = typeof expenses.$inferSelect;
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+
+export type CommissionRate = typeof commissionRates.$inferSelect;
+export type InsertCommissionRate = z.infer<typeof insertCommissionRateSchema>;
+
+export type Commission = typeof commissions.$inferSelect;
+export type InsertCommission = z.infer<typeof insertCommissionSchema>;
+
+export type Budget = typeof budgets.$inferSelect;
+export type InsertBudget = z.infer<typeof insertBudgetSchema>;
+
+export type FinancialReport = typeof financialReports.$inferSelect;
+export type InsertFinancialReport = z.infer<typeof insertFinancialReportSchema>;
+
+export type TaxSetting = typeof taxSettings.$inferSelect;
+export type InsertTaxSetting = z.infer<typeof insertTaxSettingSchema>;
