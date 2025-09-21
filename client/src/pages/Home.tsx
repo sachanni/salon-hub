@@ -18,7 +18,7 @@ export default function Home() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
-  // Auto-detect business owners and redirect to setup
+  // Auto-detect business owners and redirect appropriately
   useEffect(() => {
     if (isLoading) return; // Wait for auth to load
     
@@ -33,6 +33,11 @@ export default function Home() {
         if (!hasCompletedSetup) {
           console.log('Business owner detected without setup, redirecting to business setup');
           setLocation('/business/setup');
+          return;
+        } else {
+          // Business owner with completed setup should go to dashboard, not customer home page
+          console.log('Business owner with completed setup, redirecting to dashboard');
+          setLocation('/business/dashboard');
           return;
         }
       }
