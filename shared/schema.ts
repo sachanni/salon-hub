@@ -663,11 +663,15 @@ export const mediaAssets = pgTable("media_assets", {
   url: text("url").notNull(),
   altText: text("alt_text"),
   displayOrder: integer("display_order").default(0),
+  isPrimary: integer("is_primary").notNull().default(0),
   isActive: integer("is_active").notNull().default(1),
   uploadedAt: timestamp("uploaded_at").defaultNow(),
 }, (table) => [
   index("media_assets_salon_idx").on(table.salonId),
   index("media_assets_salon_type_order_idx").on(table.salonId, table.assetType, table.displayOrder),
+  // Only one primary media asset per salon
+  uniqueIndex("media_assets_primary_unique").on(table.salonId).where(sql`is_primary = 1`),
+  check("is_primary_valid", sql`is_primary IN (0,1)`),
   check("is_active_valid", sql`is_active IN (0,1)`),
   check("asset_type_valid", sql`asset_type IN ('logo', 'cover', 'gallery', 'video')`),
 ]);

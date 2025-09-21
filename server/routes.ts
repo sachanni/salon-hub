@@ -1756,6 +1756,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Set primary media asset endpoint
+  app.put('/api/salons/:salonId/media-assets/:mediaId/set-primary', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, mediaId } = req.params;
+      
+      // Validate parameters
+      if (!salonId || !mediaId) {
+        return res.status(400).json({ error: 'Salon ID and Media ID are required' });
+      }
+      
+      // Check if the media asset exists before setting as primary
+      const existingAsset = await storage.getMediaAsset(mediaId);
+      if (!existingAsset) {
+        return res.status(404).json({ error: 'Media asset not found' });
+      }
+      
+      // Verify the asset belongs to the salon
+      if (existingAsset.salonId !== salonId) {
+        return res.status(403).json({ error: 'Media asset does not belong to this salon' });
+      }
+      
+      // Set as primary media asset (this also handles single-primary constraint)
+      const updatedAsset = await storage.setPrimaryMediaAsset(salonId, mediaId);
+      
+      res.json(updatedAsset);
+    } catch (error) {
+      console.error('Error setting primary media asset:', error);
+      if (error instanceof Error && error.message === 'Media asset not found') {
+        return res.status(404).json({ error: 'Media asset not found' });
+      }
+      res.status(500).json({ error: 'Failed to set primary media asset' });
+    }
+  });
+
   // Tax Rates Management
   app.get('/api/salons/:salonId/tax-rates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {

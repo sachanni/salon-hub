@@ -162,6 +162,7 @@ export interface IStorage {
   getMediaAssetsByType(salonId: string, assetType: string): Promise<MediaAsset[]>;
   createMediaAsset(asset: InsertMediaAsset): Promise<MediaAsset>;
   updateMediaAsset(id: string, salonId: string, updates: Partial<InsertMediaAsset>): Promise<void>;
+  setPrimaryMediaAsset(salonId: string, assetId: string): Promise<MediaAsset>;
   deleteMediaAsset(id: string, salonId: string): Promise<void>;
   
   // Tax rate operations
@@ -797,6 +798,26 @@ export class DatabaseStorage implements IStorage {
     await db.update(mediaAssets).set(updates).where(and(eq(mediaAssets.id, id), eq(mediaAssets.salonId, salonId)));
   }
 
+  async setPrimaryMediaAsset(salonId: string, assetId: string): Promise<MediaAsset> {
+    // Use transaction to ensure atomicity and prevent split-brain primaries
+    return await db.transaction(async (tx) => {
+      // First, remove primary from all existing assets for this salon
+      await tx.update(mediaAssets).set({ isPrimary: 0 }).where(eq(mediaAssets.salonId, salonId));
+      // Then set the specified asset as primary (with salon validation)
+      await tx.update(mediaAssets).set({ isPrimary: 1 }).where(
+        and(eq(mediaAssets.id, assetId), eq(mediaAssets.salonId, salonId))
+      );
+      // Return the updated asset
+      const [updatedAsset] = await tx.select().from(mediaAssets).where(
+        and(eq(mediaAssets.id, assetId), eq(mediaAssets.salonId, salonId))
+      );
+      if (!updatedAsset) {
+        throw new Error('Media asset not found');
+      }
+      return updatedAsset;
+    });
+  }
+
   async deleteMediaAsset(id: string, salonId: string): Promise<void> {
     await db.delete(mediaAssets).where(and(eq(mediaAssets.id, id), eq(mediaAssets.salonId, salonId)));
   }
@@ -1161,6 +1182,11 @@ class MemStorage {
       ...salon,
       description: salon.description || null,
       website: salon.website || null,
+      imageUrl: salon.imageUrl || null,
+      openTime: salon.openTime || null,
+      closeTime: salon.closeTime || null,
+      ownerId: salon.ownerId || null,
+      orgId: salon.orgId || null,
       isActive: salon.isActive ?? 1,
       rating: "0.00",
       reviewCount: 0,
@@ -1217,7 +1243,6 @@ class MemStorage {
       timeSlotId: booking.timeSlotId || null,
       guestSessionId: booking.guestSessionId || null,
       salonName: booking.salonName || null,
-      serviceName: booking.serviceName || null,
       notes: booking.notes || null,
       createdAt: new Date(),
     };
