@@ -323,6 +323,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!hasCompletedSetup) {
             redirectUrl = '/business/setup';
+          } else {
+            redirectUrl = '/business/dashboard';
           }
         }
 
