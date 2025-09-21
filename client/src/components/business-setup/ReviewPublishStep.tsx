@@ -534,7 +534,7 @@ export default function ReviewPublishStep({
         {publishState?.isPublished && (
           <Button
             variant="outline"
-            onClick={() => window.open('/', '_blank')}
+            onClick={() => window.open(`/salon/${salonId}`, '_blank')}
             data-testid="button-view-salon"
           >
             View Your Salon
