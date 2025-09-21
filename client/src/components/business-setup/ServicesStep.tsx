@@ -85,13 +85,33 @@ export default function ServicesStep({
       return response.json();
     },
     onSuccess: (data) => {
-      setServices(prev => [...prev, data]);
+      // Convert backend response to frontend format before updating local state
+      const frontendService = {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        duration: data.durationMinutes, // Convert field name
+        price: data.priceInPaisa / 100, // Convert paisa to rupees
+        category: data.category
+      };
+      setServices(prev => [...prev, frontendService]);
       setNewService({ name: "", description: "", duration: 60, price: 0, category: "Hair" });
       setIsAddingService(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Service Added",
-        description: "Service has been added to your catalog.",
+        title: "Service Added!",
+        description: `${data.name} is now available for customers to book on your salon profile.`,
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to add service:', error);
+      toast({
+        title: "Failed to Add Service",
+        description: "Unable to add service. Please check your connection and try again.",
+        variant: "destructive",
       });
     }
   });
@@ -115,12 +135,32 @@ export default function ServicesStep({
       return response.json();
     },
     onSuccess: (data) => {
-      setServices(prev => prev.map(s => s.id === data.id ? data : s));
+      // Convert backend response to frontend format before updating local state
+      const frontendService = {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        duration: data.durationMinutes, // Convert field name
+        price: data.priceInPaisa / 100, // Convert paisa to rupees
+        category: data.category
+      };
+      setServices(prev => prev.map(s => s.id === data.id ? frontendService : s));
       setEditingService(null);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Service Updated",
-        description: "Service has been updated successfully.",
+        title: "Service Updated!",
+        description: `${data.name} has been updated and changes are immediately visible to customers.`,
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to update service:', error);
+      toast({
+        title: "Failed to Update Service",
+        description: "Unable to update service. Please check your connection and try again.",
+        variant: "destructive",
       });
     }
   });
@@ -132,11 +172,23 @@ export default function ServicesStep({
       return response.json();
     },
     onSuccess: (_, serviceId) => {
+      const removedService = services.find(s => s.id === serviceId);
       setServices(prev => prev.filter(s => s.id !== serviceId));
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Service Deleted",
-        description: "Service has been removed from your catalog.",
+        title: "Service Removed",
+        description: `${removedService?.name || 'Service'} is no longer available for booking.`,
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to delete service:', error);
+      toast({
+        title: "Failed to Delete Service",
+        description: "Unable to delete service. Please check your connection and try again.",
+        variant: "destructive",
       });
     }
   });

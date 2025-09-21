@@ -97,9 +97,20 @@ export default function StaffStep({
       setNewStaff({ name: "", email: "", phone: "", role: "Stylist", specialties: "" });
       setIsAddingStaff(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'staff'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Staff Member Added",
-        description: "Team member has been added successfully.",
+        title: "Team Member Added!",
+        description: `${data.name} has been added to your team and is now visible to customers for bookings.`,
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to add staff member:', error);
+      toast({
+        title: "Failed to Add Team Member",
+        description: "Unable to add team member. Please check your connection and try again.",
+        variant: "destructive",
       });
     }
   });
@@ -122,9 +133,20 @@ export default function StaffStep({
       setStaff(prev => prev.map(s => s.id === data.id ? data : s));
       setEditingStaff(null);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'staff'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Staff Member Updated",
-        description: "Team member has been updated successfully.",
+        title: "Team Member Updated!",
+        description: `${data.name}'s profile has been updated and changes are now live on your salon page.`,
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to update staff member:', error);
+      toast({
+        title: "Failed to Update Team Member",
+        description: "Unable to update team member. Please check your connection and try again.",
+        variant: "destructive",
       });
     }
   });
@@ -136,11 +158,23 @@ export default function StaffStep({
       return response.json();
     },
     onSuccess: (_, staffId) => {
+      const removedStaff = staff.find(s => s.id === staffId);
       setStaff(prev => prev.filter(s => s.id !== staffId));
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'staff'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Staff Member Removed",
-        description: "Team member has been removed.",
+        title: "Team Member Removed",
+        description: `${removedStaff?.name || 'Team member'} has been removed from your salon profile.`,
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to delete staff member:', error);
+      toast({
+        title: "Failed to Delete Team Member",
+        description: "Unable to delete team member. Please check your connection and try again.",
+        variant: "destructive",
       });
     }
   });

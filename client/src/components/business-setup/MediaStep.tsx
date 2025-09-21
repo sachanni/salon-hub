@@ -74,9 +74,11 @@ export default function MediaStep({
       setIsAddingMedia(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Photo Added Successfully",
-        description: "Your photo has been added to the gallery and is now visible to customers.",
+        title: "Photo Added!",
+        description: `${data.caption || 'New photo'} has been added to your gallery and is now visible to customers.`,
       });
     },
     onError: (error) => {
@@ -96,12 +98,15 @@ export default function MediaStep({
       return response.json();
     },
     onSuccess: (_, mediaId) => {
+      const deletedMedia = mediaAssets.find(m => m.id === mediaId);
       setMediaAssets(prev => prev.filter(m => m.id !== mediaId));
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
-        title: "Photo Deleted",
-        description: "Media has been removed from your gallery.",
+        title: "Photo Removed",
+        description: `${deletedMedia?.caption || 'Photo'} has been removed from your salon profile.`,
       });
     },
     onError: (error) => {
@@ -132,16 +137,39 @@ export default function MediaStep({
     await addMediaMutation.mutateAsync(newMedia);
   };
 
+  // Set primary media mutation
+  const setPrimaryMediaMutation = useMutation({
+    mutationFn: async (mediaId: string) => {
+      const response = await apiRequest('PUT', `/api/salons/${salonId}/media-assets/${mediaId}/set-primary`);
+      return response.json();
+    },
+    onSuccess: (data, mediaId) => {
+      // Update local state to reflect the change
+      setMediaAssets(prev => prev.map(asset => ({
+        ...asset,
+        isPrimary: asset.id === mediaId
+      })));
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      // Also invalidate salon profile to ensure immediate updates
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
+      toast({
+        title: "Primary Photo Set",
+        description: "This photo will be shown as your main salon image.",
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to set primary media:', error);
+      toast({
+        title: "Failed to Set Primary",
+        description: "Unable to set primary photo. Please try again.",
+        variant: "destructive",
+      });
+    }
+  });
+
   const handleSetPrimary = (mediaId: string) => {
-    setMediaAssets(prev => prev.map(asset => ({
-      ...asset,
-      isPrimary: asset.id === mediaId
-    })));
-    
-    toast({
-      title: "Primary Photo Set",
-      description: "This photo will be shown as your main salon image.",
-    });
+    setPrimaryMediaMutation.mutate(mediaId);
   };
 
   const handleContinue = () => {
@@ -191,9 +219,10 @@ export default function MediaStep({
                         size="sm"
                         variant="secondary"
                         onClick={() => media.id && handleSetPrimary(media.id)}
+                        disabled={setPrimaryMediaMutation.isPending}
                         data-testid={`button-set-primary-${media.id}`}
                       >
-                        Set Primary
+                        {setPrimaryMediaMutation.isPending ? "Setting..." : "Set Primary"}
                       </Button>
                     )}
                     <Button
