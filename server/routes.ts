@@ -257,6 +257,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update salon information (for business setup)
+  app.put('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      // Validate input using Zod schema (partial updates allowed)
+      const partialSchema = insertSalonSchema.partial();
+      const validationResult = partialSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+      
+      await storage.updateSalon(salonId, validationResult.data);
+      
+      // Return updated salon
+      const updatedSalon = await storage.getSalon(salonId);
+      res.json(updatedSalon);
+    } catch (error) {
+      console.error('Error updating salon:', error);
+      res.status(500).json({ error: 'Failed to update salon' });
+    }
+  });
+
   // Email verification endpoint
   app.get('/verify-email', async (req, res) => {
     try {

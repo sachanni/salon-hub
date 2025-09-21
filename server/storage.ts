@@ -71,6 +71,7 @@ export interface IStorage {
   getSalon(id: string): Promise<Salon | undefined>;
   getAllSalons(): Promise<Salon[]>;
   createSalon(salon: InsertSalon): Promise<Salon>;
+  updateSalon(id: string, updates: Partial<InsertSalon>): Promise<void>;
   
   // Service operations
   getService(id: string): Promise<Service | undefined>;
@@ -326,6 +327,10 @@ export class DatabaseStorage implements IStorage {
   async createSalon(salon: InsertSalon): Promise<Salon> {
     const [newSalon] = await db.insert(salons).values(salon).returning();
     return newSalon;
+  }
+
+  async updateSalon(id: string, updates: Partial<InsertSalon>): Promise<void> {
+    await db.update(salons).set(updates).where(eq(salons.id, id));
   }
 
   // Service operations
@@ -1034,6 +1039,13 @@ class MemStorage {
     };
     this.salons.push(newSalon);
     return newSalon;
+  }
+
+  async updateSalon(id: string, updates: Partial<InsertSalon>): Promise<void> {
+    const index = this.salons.findIndex(s => s.id === id);
+    if (index !== -1) {
+      this.salons[index] = { ...this.salons[index], ...updates };
+    }
   }
 
   async getService(id: string): Promise<Service | undefined> {
