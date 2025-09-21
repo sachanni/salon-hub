@@ -198,10 +198,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Logout endpoint
+  app.post('/api/logout', (req: any, res) => {
+    if (req.session) {
+      req.session.destroy((err: any) => {
+        if (err) {
+          console.error("Logout error:", err);
+          return res.status(500).json({ error: "Failed to logout" });
+        }
+        res.json({ success: true, message: "Logged out successfully" });
+      });
+    } else {
+      res.json({ success: true, message: "Already logged out" });
+    }
+  });
+
   // Organization endpoints
   app.post('/api/organizations', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const { name, description } = req.body;
 
       // Validate required fields
@@ -231,7 +246,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         state: "Please update", 
         zipCode: "00000",
         phone: "Please update your phone",
-        email: req.user.claims.email || "Please update",
+        email: req.user.email || "Please update",
         category: "hair_salon",
         priceRange: "$$",
         orgId: newOrg.id,
