@@ -243,7 +243,7 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
   // Mutations
   const createTemplateMutation = useMutation({
     mutationFn: async (data: z.infer<typeof messageTemplateSchema>) => {
-      return await apiRequest(`/api/salons/${salonId}/message-templates`, 'POST', data);
+      return await apiRequest('POST', `/api/salons/${salonId}/message-templates`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'message-templates'] });
@@ -258,7 +258,7 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
 
   const createSegmentMutation = useMutation({
     mutationFn: async (data: z.infer<typeof customerSegmentSchema>) => {
-      return await apiRequest(`/api/salons/${salonId}/customer-segments`, 'POST', data);
+      return await apiRequest('POST', `/api/salons/${salonId}/customer-segments`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'customer-segments'] });
@@ -273,7 +273,7 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
 
   const createCampaignMutation = useMutation({
     mutationFn: async (data: z.infer<typeof campaignSchema>) => {
-      return await apiRequest(`/api/salons/${salonId}/communication-campaigns`, 'POST', data);
+      return await apiRequest('POST', `/api/salons/${salonId}/communication-campaigns`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'communication-campaigns'] });
@@ -288,7 +288,7 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
 
   const createDefaultTemplatesMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest(`/api/salons/${salonId}/message-templates/defaults`, 'POST');
+      return await apiRequest('POST', `/api/salons/${salonId}/message-templates/defaults`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'message-templates'] });
