@@ -57,12 +57,42 @@ export default function BookingSettingsStep({
     enabled: !!salonId,
   });
 
+  // Mapping functions to convert between database and form formats
+  const mapDatabaseToForm = (dbData: any): Partial<BookingFormData> => {
+    if (!dbData) return {};
+    
+    return {
+      advanceBookingDays: dbData.maxAdvanceBookingDays ?? 30,
+      cancellationHours: dbData.cancelWindowMinutes ? Math.round(dbData.cancelWindowMinutes / 60) : 24,
+      bookingBufferMinutes: dbData.bufferMinutes ?? 15,
+      requireDeposit: (dbData.depositPercentage ?? 0) > 0,
+      depositAmount: dbData.depositPercentage ?? 0,
+      depositType: "percentage", // Default to percentage since DB stores depositPercentage
+      allowOnlineBooking: dbData.autoConfirm === 1,
+      maxConcurrentBookings: 1, // Not in DB schema, keep default
+      requireCustomerInfo: true, // Not in DB schema, keep default
+    };
+  };
+
+  const mapFormToDatabase = (formData: BookingFormData) => {
+    return {
+      maxAdvanceBookingDays: formData.advanceBookingDays,
+      cancelWindowMinutes: formData.cancellationHours * 60, // Convert hours to minutes
+      bufferMinutes: formData.bookingBufferMinutes,
+      depositPercentage: formData.requireDeposit ? formData.depositAmount : 0,
+      autoConfirm: formData.allowOnlineBooking ? 1 : 0,
+      allowCancellation: 1, // Default to allowing cancellations
+      allowRescheduling: 1, // Default to allowing rescheduling
+    };
+  };
+
   // Populate form with existing data
   useEffect(() => {
     if (bookingSettings) {
+      const mappedData = mapDatabaseToForm(bookingSettings);
       setFormData((prev: BookingFormData) => ({
         ...prev,
-        ...bookingSettings
+        ...mappedData
       }));
     }
   }, [bookingSettings]);
@@ -70,15 +100,17 @@ export default function BookingSettingsStep({
   // Save booking settings mutation
   const saveSettingsMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const response = await apiRequest('POST', `/api/salons/${salonId}/booking-settings`, data);
+      const dbFormatData = mapFormToDatabase(data);
+      const response = await apiRequest('POST', `/api/salons/${salonId}/booking-settings`, dbFormatData);
       return response.json();
     },
     onSuccess: (savedData) => {
       queryClient.invalidateQueries({ 
         queryKey: ['/api/salons', salonId, 'booking-settings'] 
       });
-      // Update local state with saved data to ensure UI reflects what was actually saved
-      setFormData((prev: BookingFormData) => ({ ...prev, ...savedData }));
+      // Update local state with saved data mapped back to form format
+      const mappedSavedData = mapDatabaseToForm(savedData);
+      setFormData((prev: BookingFormData) => ({ ...prev, ...mappedSavedData }));
       onComplete(savedData);
       toast({
         title: "Booking Settings Saved",
