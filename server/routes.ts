@@ -175,51 +175,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const verificationToken = await storage.createVerificationToken(newUser.email || '', newUser.id);
       const emailSent = await sendVerificationEmail(newUser.email || '', newUser.firstName || 'User', verificationToken);
 
-      // AUTHENTICATION FIX: Establish passport session after successful registration
-      const sessionUser = {
-        claims: {
-          sub: newUser.id,
-          email: newUser.email,
-          first_name: newUser.firstName,
-          last_name: newUser.lastName,
-          profile_image_url: newUser.profileImageUrl,
-          exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days from now
-        },
-        access_token: `manual_registration_${newUser.id}`, // Dummy token for manual registration
-        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days from now
-      };
+      // Establish session after successful registration
+      req.session.userId = newUser.id;
 
-      // Establish session using passport's login function
-      req.logIn(sessionUser, async (err: any) => {
-        if (err) {
-          console.error("Session establishment failed after registration:", err);
-          // Still return success since user was created, but without session
-          const { password: _, ...userResponse } = newUser;
-          return res.status(200).json({
-            success: true,
-            user: userResponse,
-            message: "Account created successfully! Please check your email to verify your account.",
-            emailSent: emailSent,
-            requiresVerification: true,
-            sessionError: "Failed to establish session"
-          });
-        }
+      console.log("Session established successfully after registration for user:", newUser.id);
 
-        console.log("Session established successfully after registration for user:", newUser.id);
-
-        // Business owners will be redirected to dashboard where they can complete profile setup
-
-        // Success with session established (customers or completed business owners)
-        const { password: _, ...userResponse } = newUser;
-        res.status(200).json({
-          success: true,
-          user: userResponse,
-          message: "Account created successfully! Please check your email to verify your account.",
-          emailSent: emailSent,
-          requiresVerification: true,
-          authenticated: true,
-          redirect: '/'  // Frontend will handle this redirect
-        });
+      // Success with session established
+      const { password: _, ...userResponse } = newUser;
+      res.status(200).json({
+        success: true,
+        user: userResponse,
+        message: "Account created successfully! Please check your email to verify your account.",
+        emailSent: emailSent,
+        requiresVerification: true,
+        authenticated: true,
+        redirect: '/'  // Frontend will handle this redirect
       });
 
     } catch (error) {
@@ -317,46 +287,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Email verification is now optional - users can login without verification
       // We'll show a banner in the dashboard encouraging verification for enhanced security
 
-      // Create session user object (same format as Replit Auth)
-      const sessionUser = {
-        claims: {
-          sub: user.id,
-          email: user.email,
-          first_name: user.firstName,
-          last_name: user.lastName,
-          profile_image_url: user.profileImageUrl,
-          exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days from now
-        },
-        access_token: `manual_login_${user.id}`,
-        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
-      };
+      // Establish session after successful login
+      req.session.userId = user.id;
 
-      // Establish session using passport's login function
-      req.logIn(sessionUser, async (err: any) => {
-        if (err) {
-          console.error("Failed to establish session:", err);
-          return res.status(500).json({ error: "Failed to create session" });
-        }
+      // Check user role for redirect
+      const roles = await storage.getUserRoles(user.id);
+      const isOwner = roles.some(role => role.name === 'owner');
+      
+      let redirectUrl = '/';
+      if (isOwner) {
+        // Always redirect business owners to dashboard - dashboard handles setup within tabs
+        redirectUrl = '/business/dashboard';
+      }
 
-        // Check user role for redirect
-        const roles = await storage.getUserRoles(user.id);
-        const isOwner = roles.some(role => role.name === 'owner');
-        
-        let redirectUrl = '/';
-        if (isOwner) {
-          // Always redirect business owners to dashboard - dashboard handles setup within tabs
-          redirectUrl = '/business/dashboard';
-        }
-
-        // Success response
-        const { password: _, ...userResponse } = user;
-        res.json({
-          success: true,
-          user: userResponse,
-          message: "Login successful",
-          authenticated: true,
-          redirect: redirectUrl
-        });
+      // Success response
+      const { password: _, ...userResponse } = user;
+      res.json({
+        success: true,
+        user: userResponse,
+        message: "Login successful",
+        authenticated: true,
+        redirect: redirectUrl
       });
 
     } catch (error) {
