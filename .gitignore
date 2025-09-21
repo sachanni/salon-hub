@@ -4,3 +4,17 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Session cookies - never commit these  
+cookies*.txt
+**/cookies*.txt
+*.cookies
+
+# Other security-sensitive files
+.env.local
+.env.production
+*.key
+*.pem
+*.p12
+*.pfx
+.secret
