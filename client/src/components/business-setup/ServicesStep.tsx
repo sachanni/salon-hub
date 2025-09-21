@@ -55,14 +55,33 @@ export default function ServicesStep({
   // Update local services state when query data changes
   useEffect(() => {
     if (existingServices && Array.isArray(existingServices)) {
-      setServices(existingServices);
+      // Convert backend format to frontend format
+      const convertedServices = existingServices.map((service: any) => ({
+        id: service.id,
+        name: service.name,
+        description: service.description,
+        duration: service.durationMinutes, // Convert field name
+        price: service.priceInPaisa / 100, // Convert paisa to rupees
+        category: service.category
+      }));
+      setServices(convertedServices);
     }
   }, [existingServices]);
 
   // Add service mutation
   const addServiceMutation = useMutation({
     mutationFn: async (service: Service) => {
-      const response = await apiRequest('POST', `/api/salons/${salonId}/services`, service);
+      // Convert frontend format to backend format
+      const serviceData = {
+        name: service.name,
+        description: service.description,
+        durationMinutes: service.duration, // Fix field name
+        priceInPaisa: Math.round(service.price * 100), // Convert price to paisa
+        currency: 'INR',
+        category: service.category,
+        isActive: 1
+      };
+      const response = await apiRequest('POST', `/api/salons/${salonId}/services`, serviceData);
       return response.json();
     },
     onSuccess: (data) => {
@@ -82,7 +101,17 @@ export default function ServicesStep({
     mutationFn: async (service: Service) => {
       if (!service.id) throw new Error('Service ID required for update');
       
-      const response = await apiRequest('PUT', `/api/salons/${salonId}/services/${service.id}`, service);
+      // Convert frontend format to backend format
+      const serviceData = {
+        name: service.name,
+        description: service.description,
+        durationMinutes: service.duration, // Fix field name
+        priceInPaisa: Math.round(service.price * 100), // Convert price to paisa
+        currency: 'INR',
+        category: service.category,
+        isActive: 1
+      };
+      const response = await apiRequest('PUT', `/api/salons/${salonId}/services/${service.id}`, serviceData);
       return response.json();
     },
     onSuccess: (data) => {
@@ -176,7 +205,7 @@ export default function ServicesStep({
                             {service.duration} min
                           </span>
                           <span className="font-medium text-primary">
-                            ${service.price}
+                            ₹{service.price}
                           </span>
                         </div>
                       </div>
@@ -266,7 +295,7 @@ export default function ServicesStep({
                 </div>
                 
                 <div>
-                  <Label htmlFor="service-price">Price ($) *</Label>
+                  <Label htmlFor="service-price">Price (₹) *</Label>
                   <Input
                     id="service-price"
                     type="number"
@@ -355,7 +384,7 @@ export default function ServicesStep({
                 </div>
                 
                 <div>
-                  <Label htmlFor="edit-service-price">Price ($) *</Label>
+                  <Label htmlFor="edit-service-price">Price (₹) *</Label>
                   <Input
                     id="edit-service-price"
                     type="number"
