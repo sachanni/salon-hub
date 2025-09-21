@@ -13,6 +13,7 @@ import {
   type CreatePaymentOrderInput,
   type VerifyPaymentInput,
   // Business profile validation schemas
+  insertSalonSchema,
   insertBookingSettingsSchema,
   insertStaffServiceSchema,
   insertResourceSchema,
