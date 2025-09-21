@@ -24,7 +24,7 @@ import {
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, isNull, gte, lte, desc, asc, sql } from "drizzle-orm";
+import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
@@ -85,8 +85,9 @@ export interface IStorage {
   // Booking operations
   getBooking(id: string): Promise<Booking | undefined>;
   createBooking(booking: InsertBooking): Promise<Booking>;
-  updateBookingStatus(id: string, status: string): Promise<void>;
-  updateBookingNotes(id: string, notes: string): Promise<void>;
+  updateBookingStatus(id: string, status: string): Promise<number>;
+  updateBookingNotes(id: string, notes: string): Promise<number>;
+  bulkUpdateBookingStatus(bookingIds: string[], status: string, salonId: string): Promise<number>;
   getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]>;
   getCustomersBySalonId(salonId: string): Promise<any[]>;
   getSalonAnalytics(salonId: string, period: string): Promise<any>;
@@ -398,12 +399,25 @@ export class DatabaseStorage implements IStorage {
     return newBooking;
   }
 
-  async updateBookingStatus(id: string, status: string): Promise<void> {
-    await db.update(bookings).set({ status }).where(eq(bookings.id, id));
+  async updateBookingStatus(id: string, status: string): Promise<number> {
+    const result = await db.update(bookings).set({ status }).where(eq(bookings.id, id));
+    return result.rowCount || 0;
   }
 
-  async updateBookingNotes(id: string, notes: string): Promise<void> {
-    await db.update(bookings).set({ notes }).where(eq(bookings.id, id));
+  async updateBookingNotes(id: string, notes: string): Promise<number> {
+    const result = await db.update(bookings).set({ notes }).where(eq(bookings.id, id));
+    return result.rowCount || 0;
+  }
+
+  async bulkUpdateBookingStatus(bookingIds: string[], status: string, salonId: string): Promise<number> {
+    const result = await db
+      .update(bookings)
+      .set({ status })
+      .where(and(
+        inArray(bookings.id, bookingIds),
+        eq(bookings.salonId, salonId) // Security: ensure bookings belong to the salon
+      ));
+    return result.rowCount || 0;
   }
 
   async getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]> {
@@ -1458,11 +1472,34 @@ class MemStorage {
     return newBooking;
   }
 
-  async updateBookingStatus(id: string, status: string): Promise<void> {
+  async updateBookingStatus(id: string, status: string): Promise<number> {
     const booking = this.bookings.find(b => b.id === id);
     if (booking) {
       booking.status = status;
+      return 1;
     }
+    return 0;
+  }
+
+  async updateBookingNotes(id: string, notes: string): Promise<number> {
+    const booking = this.bookings.find(b => b.id === id);
+    if (booking) {
+      booking.notes = notes;
+      return 1;
+    }
+    return 0;
+  }
+
+  async bulkUpdateBookingStatus(bookingIds: string[], status: string, salonId: string): Promise<number> {
+    let updatedCount = 0;
+    for (const bookingId of bookingIds) {
+      const booking = this.bookings.find(b => b.id === bookingId && b.salonId === salonId);
+      if (booking) {
+        booking.status = status;
+        updatedCount++;
+      }
+    }
+    return updatedCount;
   }
 
   async getPayment(id: string): Promise<Payment | undefined> {

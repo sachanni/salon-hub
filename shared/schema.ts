@@ -495,9 +495,49 @@ export const verifyPaymentSchema = z.object({
   razorpay_signature: z.string(),
 });
 
+// Booking status enum for validation
+const bookingStatusEnum = z.enum(['pending', 'confirmed', 'cancelled', 'completed']);
+
+// Single booking update schema - status and optional notes
+export const updateBookingSchema = z.object({
+  status: bookingStatusEnum,
+  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional(),
+});
+
+// Bulk booking update schema - multiple booking IDs and status
+export const bulkUpdateBookingSchema = z.object({
+  bookingIds: z.array(z.string().uuid()).min(1, "At least one booking ID is required"),
+  status: bookingStatusEnum,
+});
+
+// Status transition validation function
+export const validateStatusTransition = (currentStatus: string, newStatus: string): { isValid: boolean, error?: string } => {
+  const validTransitions: Record<string, string[]> = {
+    pending: ['confirmed', 'cancelled'],
+    confirmed: ['completed', 'cancelled'],
+    completed: [], // Cannot transition from completed
+    cancelled: []  // Cannot transition from cancelled
+  };
+
+  if (!validTransitions[currentStatus]) {
+    return { isValid: false, error: `Invalid current status: ${currentStatus}` };
+  }
+
+  if (!validTransitions[currentStatus].includes(newStatus)) {
+    return { 
+      isValid: false, 
+      error: `Invalid status transition: ${currentStatus} → ${newStatus}. Valid transitions are: ${validTransitions[currentStatus].join(', ') || 'none'}` 
+    };
+  }
+
+  return { isValid: true };
+};
+
 export type CreatePaymentOrderInput = z.infer<typeof createPaymentOrderSchema>;
 export type VerifyPaymentInput = z.infer<typeof verifyPaymentSchema>;
 export type CreateSalonInput = z.infer<typeof createSalonSchema>;
+export type UpdateBookingInput = z.infer<typeof updateBookingSchema>;
+export type BulkUpdateBookingInput = z.infer<typeof bulkUpdateBookingSchema>;
 
 // Staff relations
 export const staffRelations = relations(staff, ({ one, many }) => ({

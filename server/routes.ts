@@ -22,6 +22,12 @@ import {
   insertTaxRateSchema,
   insertPayoutAccountSchema,
   insertPublishStateSchema,
+  // Booking validation schemas
+  updateBookingSchema,
+  bulkUpdateBookingSchema,
+  type UpdateBookingInput,
+  type BulkUpdateBookingInput,
+  validateStatusTransition,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
 
@@ -937,11 +943,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put('/api/salons/:salonId/bookings/:bookingId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, bookingId } = req.params;
-      const { status, notes } = req.body;
       
-      if (!status || !['pending', 'confirmed', 'cancelled', 'completed'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid status' });
+      // Validate input using Zod schema
+      const validationResult = updateBookingSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
       }
+
+      const input: UpdateBookingInput = validationResult.data;
       
       // SECURITY: First fetch the booking to verify it belongs to the salon
       const booking = await storage.getBooking(bookingId);
@@ -955,17 +967,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Booking not found' });
       }
       
-      await storage.updateBookingStatus(bookingId, status);
-      
-      // If notes provided, update booking notes
-      if (notes) {
-        await storage.updateBookingNotes(bookingId, notes);
+      // Validate status transition
+      const transitionValidation = validateStatusTransition(booking.status, input.status);
+      if (!transitionValidation.isValid) {
+        return res.status(400).json({ error: transitionValidation.error });
       }
       
-      res.json({ success: true, message: 'Booking updated successfully' });
+      // Update booking status and track affected rows
+      const statusUpdateCount = await storage.updateBookingStatus(bookingId, input.status);
+      
+      let notesUpdateCount = 0;
+      // If notes provided, update booking notes
+      if (input.notes !== undefined) {
+        notesUpdateCount = await storage.updateBookingNotes(bookingId, input.notes);
+      }
+      
+      // Return affected row count for accurate UX feedback
+      const totalAffectedRows = Math.max(statusUpdateCount, notesUpdateCount);
+      res.json({ 
+        success: true, 
+        message: 'Booking updated successfully',
+        affectedRows: totalAffectedRows
+      });
     } catch (error) {
       console.error('Error updating booking:', error);
       res.status(500).json({ error: 'Failed to update booking' });
+    }
+  });
+
+  // Bulk update booking status
+  app.put('/api/salons/:salonId/bookings/bulk-update', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      // Validate input using Zod schema
+      const validationResult = bulkUpdateBookingSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+
+      const input: BulkUpdateBookingInput = validationResult.data;
+      
+      // Validate status transitions for each booking
+      const bookingsToUpdate = [];
+      for (const bookingId of input.bookingIds) {
+        const booking = await storage.getBooking(bookingId);
+        if (!booking) {
+          return res.status(404).json({ error: `Booking ${bookingId} not found` });
+        }
+        
+        // SECURITY: Verify booking belongs to the specified salon
+        if (booking.salonId !== salonId) {
+          return res.status(404).json({ error: `Booking ${bookingId} not found` });
+        }
+        
+        // Validate status transition
+        const transitionValidation = validateStatusTransition(booking.status, input.status);
+        if (!transitionValidation.isValid) {
+          return res.status(400).json({ 
+            error: `Invalid transition for booking ${bookingId}: ${transitionValidation.error}`
+          });
+        }
+        
+        bookingsToUpdate.push(booking);
+      }
+      
+      // Update all bookings and get affected row count
+      const affectedRows = await storage.bulkUpdateBookingStatus(input.bookingIds, input.status, salonId);
+      
+      res.json({ 
+        success: true, 
+        message: `${affectedRows} booking(s) updated successfully to ${input.status}`,
+        affectedRows: affectedRows,
+        requestedCount: input.bookingIds.length
+      });
+    } catch (error) {
+      console.error('Error bulk updating bookings:', error);
+      res.status(500).json({ error: 'Failed to update bookings' });
     }
   });
   

@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Calendar, Clock, Users, Plus, Edit, Trash2, Settings, CheckCircle, XCircle, Lock } from "lucide-react";
 import { Link } from "wouter";
 import BookingCalendarView from "@/components/BookingCalendarView";
+import BookingListView from "@/components/BookingListView";
 
 interface Staff {
   id: string;
@@ -400,10 +401,14 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
       </div>
 
       <Tabs defaultValue="calendar" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="calendar" data-testid="tab-calendar">
             <Calendar className="h-4 w-4 mr-2" />
             Booking Calendar
+          </TabsTrigger>
+          <TabsTrigger value="bookings" data-testid="tab-bookings">
+            <Users className="h-4 w-4 mr-2" />
+            Booking List
           </TabsTrigger>
           <TabsTrigger value="staff" data-testid="tab-staff">
             <Users className="h-4 w-4 mr-2" />
@@ -427,6 +432,10 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
               <BookingCalendarView salonId={salonId} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="bookings">
+          <BookingListView salonId={salonId} />
         </TabsContent>
 
         <TabsContent value="staff">
