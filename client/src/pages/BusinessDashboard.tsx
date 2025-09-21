@@ -58,7 +58,7 @@ export default function BusinessDashboard() {
 
   // Select salon ID from accessible salons only
   useEffect(() => {
-    if (accessibleSalons?.length > 0 && !salonId) {
+    if (Array.isArray(accessibleSalons) && accessibleSalons.length > 0 && !salonId) {
       setSalonId(accessibleSalons[0].id);
     }
   }, [accessibleSalons, salonId]);
