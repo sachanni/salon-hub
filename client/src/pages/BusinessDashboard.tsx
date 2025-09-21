@@ -50,34 +50,18 @@ export default function BusinessDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [salonId, setSalonId] = useState<string | null>(null);
 
-  // Fetch user's salon information from auth user endpoint
-  const { data: authUser, isLoading: authLoading } = useQuery({
-    queryKey: ['/api/auth/user'],
-    enabled: isAuthenticated && !!user,
+  // Fetch user's accessible salons (authoritative source)
+  const { data: accessibleSalons, isLoading: salonsLoading } = useQuery({
+    queryKey: ['/api/my/salons'],
+    enabled: isAuthenticated,
   });
 
-  // Fallback: Fetch salons directly if orgMemberships doesn't have salon data
-  const { data: salons, isLoading: salonsLoading } = useQuery({
-    queryKey: ['/api/salons'],
-    enabled: isAuthenticated && !salonId,
-  });
-
-  // Get salon ID from auth user or fallback to first available salon
+  // Select salon ID from accessible salons only
   useEffect(() => {
-    if (authUser?.orgMemberships?.length > 0) {
-      // Try to get salon from org memberships first
-      const orgSalonId = authUser.orgMemberships[0].salon?.id;
-      if (orgSalonId) {
-        setSalonId(orgSalonId);
-        return;
-      }
+    if (accessibleSalons?.length > 0 && !salonId) {
+      setSalonId(accessibleSalons[0].id);
     }
-    
-    // Fallback: Use first salon if available
-    if (salons?.length > 0) {
-      setSalonId(salons[0].id);
-    }
-  }, [authUser, salons]);
+  }, [accessibleSalons, salonId]);
 
   // Fetch salon details
   const { data: salon, isLoading: salonLoading } = useQuery({
