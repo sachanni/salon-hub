@@ -217,6 +217,29 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
 
   const now = Math.floor(Date.now() / 1000);
   if (now <= user.expires_at) {
+    // Populate user data with roles and organization memberships for authorization
+    try {
+      const userId = user.claims?.sub;
+      if (userId) {
+        const dbUser = await storage.getUserById(userId);
+        if (dbUser) {
+          const userRoles = await storage.getUserRoles(userId);
+          const orgMemberships = await storage.getUserOrganizations(userId);
+          
+          // Enhance the req.user object with role and org data
+          (req as any).user = {
+            ...user,
+            id: userId,
+            email: user.claims?.email,
+            roles: userRoles.map(role => role.name),
+            orgMemberships
+          };
+        }
+      }
+    } catch (error) {
+      console.error("Failed to populate user data:", error);
+      // Continue even if we can't populate extra data
+    }
     return next();
   }
 
@@ -230,6 +253,30 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     const config = await getOidcConfig();
     const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
     updateUserSession(user, tokenResponse);
+    
+    // Populate user data after token refresh
+    try {
+      const userId = user.claims?.sub;
+      if (userId) {
+        const dbUser = await storage.getUserById(userId);
+        if (dbUser) {
+          const userRoles = await storage.getUserRoles(userId);
+          const orgMemberships = await storage.getUserOrganizations(userId);
+          
+          // Enhance the req.user object with role and org data
+          (req as any).user = {
+            ...user,
+            id: userId,
+            email: user.claims?.email,
+            roles: userRoles.map(role => role.name),
+            orgMemberships
+          };
+        }
+      }
+    } catch (error) {
+      console.error("Failed to populate user data after refresh:", error);
+    }
+    
     return next();
   } catch (error) {
     res.status(401).json({ message: "Unauthorized" });
