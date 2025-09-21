@@ -28,8 +28,7 @@ import {
 import { Link } from "wouter";
 
 // Import existing business setup components
-import BusinessInfoStep from "@/components/business-setup/BusinessInfoStep";
-import LocationContactStep from "@/components/business-setup/LocationContactStep";
+import ProfileStep from "@/components/business-setup/ProfileStep";
 import ServicesStep from "@/components/business-setup/ServicesStep";
 import StaffStep from "@/components/business-setup/StaffStep";
 import ResourcesStep from "@/components/business-setup/ResourcesStep";
@@ -94,7 +93,7 @@ export default function BusinessDashboard() {
 
   // Fetch salon details
   const { data: salon, isLoading: salonLoading } = useQuery({
-    queryKey: [`/api/salons/${salonId}`],
+    queryKey: ['/api/salons', salonId],
     enabled: !!salonId,
   });
 
@@ -499,39 +498,24 @@ export default function BusinessDashboard() {
 
           {/* Profile Tab */}
           <TabsContent value="profile" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Building2 className="h-5 w-5" />
-                    Business Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <BusinessInfoStep 
-                    salonId={salonId} 
-                    onComplete={() => handleSectionComplete('profile')} 
-                    isCompleted={completionStatus.profile}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <MapPin className="h-5 w-5" />
-                    Location & Contact
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <LocationContactStep 
-                    salonId={salonId} 
-                    onComplete={() => handleSectionComplete('profile')} 
-                    isCompleted={completionStatus.profile}
-                  />
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5" />
+                  Business Profile
+                </CardTitle>
+                <CardDescription>
+                  Complete your business information and location details
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ProfileStep 
+                  salonId={salonId} 
+                  onComplete={() => handleSectionComplete('profile')} 
+                  isCompleted={completionStatus.profile}
+                />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Services Tab */}
