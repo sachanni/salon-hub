@@ -1,7 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import session from "express-session";
+import connectPg from "connect-pg-simple";
 import { requireSalonAccess, requireStaffAccess, type AuthenticatedRequest } from "./middleware/auth";
 import Razorpay from "razorpay";
 import crypto from "crypto";
@@ -27,8 +28,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database services
   await initializeServices();
   
-  // Setup Replit Auth (replaces custom OAuth)
-  await setupAuth(app);
+  // Setup session-based authentication
+  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+  const pgStore = connectPg(session);
+  const sessionStore = new pgStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: false,
+    ttl: sessionTtl,
+    tableName: "sessions",
+  });
+  
+  app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-session-secret-key',
+    store: sessionStore,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: sessionTtl,
+    },
+  }));
   
   // Initialize Razorpay (optional in development)
   let razorpay: Razorpay | null = null;
@@ -42,10 +62,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.warn('Razorpay keys not configured - payment functionality disabled');
   }
 
-  // Auth routes - using Replit Auth
+  // Session-based authentication middleware
+  const isAuthenticated = async (req: any, res: any, next: any) => {
+    const userId = req.session?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+      // Populate user data with roles and organization memberships for authorization
+      const user = await storage.getUserById(userId);
+      if (!user) {
+        return res.status(401).json({ message: "User not found" });
+      }
+
+      const userRoles = await storage.getUserRoles(userId);
+      const orgMemberships = await storage.getUserOrganizations(userId);
+      
+      // Set user data on request for authorization middleware
+      req.user = {
+        id: userId,
+        email: user.email,
+        roles: userRoles.map(role => role.name),
+        orgMemberships
+      };
+
+      next();
+    } catch (error) {
+      console.error("Authentication error:", error);
+      return res.status(401).json({ message: "Authentication failed" });
+    }
+  };
+
+  // Auth routes - using session-based auth
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const user = await storage.getUser(userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
