@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,6 @@ import {
   Scissors, 
   Users, 
   Settings, 
-  CreditCard,
   Camera,
   Globe
 } from "lucide-react";
@@ -240,6 +239,40 @@ export default function ReviewPublishStep({
     ? (dashboardCompletion as any).overallProgress 
     : ((publishStatus.completedSections / publishStatus.totalSections) * 100);
 
+  // Calculate correct completion count using dashboard data when available
+  const actualCompletedSections = useMemo(() => {
+    if (dashboardCompletion && typeof dashboardCompletion === 'object') {
+      let completed = 0;
+      // Count each section using same logic as individual section display
+      SETUP_SECTIONS.forEach(section => {
+        let isCompleted = false;
+        switch (section.id) {
+          case 'business_info':
+          case 'location_contact':
+            isCompleted = (dashboardCompletion as any).profile?.isComplete ?? false;
+            break;
+          case 'services':
+            isCompleted = (dashboardCompletion as any).services?.isComplete ?? false;
+            break;
+          case 'staff':
+            isCompleted = (dashboardCompletion as any).staff?.isComplete ?? false;
+            break;
+          case 'booking_settings':
+            isCompleted = (dashboardCompletion as any).settings?.isComplete ?? false;
+            break;
+          case 'media':
+            isCompleted = (dashboardCompletion as any).media?.isComplete ?? false;
+            break;
+          default:
+            isCompleted = false;
+        }
+        if (isCompleted) completed++;
+      });
+      return completed;
+    }
+    return publishStatus.completedSections;
+  }, [dashboardCompletion, publishStatus.completedSections]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3 mb-6">
@@ -257,8 +290,8 @@ export default function ReviewPublishStep({
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             Setup Progress
-            <Badge variant={publishStatus.canPublish ? "default" : "secondary"}>
-              {publishStatus.completedSections}/{publishStatus.totalSections} Complete
+            <Badge variant={actualCompletedSections >= SETUP_SECTIONS.length ? "default" : "secondary"}>
+              {actualCompletedSections}/{SETUP_SECTIONS.length} Complete
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -411,7 +444,7 @@ export default function ReviewPublishStep({
                 
                 <Button
                   onClick={handlePublish}
-                  disabled={!publishStatus.canPublish || isPublishing || publishSalonMutation.isPending}
+                  disabled={actualCompletedSections < SETUP_SECTIONS.length || isPublishing || publishSalonMutation.isPending}
                   size="lg"
                   className="w-full md:w-auto"
                   data-testid="button-publish-salon"
@@ -419,7 +452,7 @@ export default function ReviewPublishStep({
                   {isPublishing || publishSalonMutation.isPending ? "Publishing..." : "🚀 Publish My Salon"}
                 </Button>
 
-                {!publishStatus.canPublish && (
+                {actualCompletedSections < SETUP_SECTIONS.length && (
                   <p className="text-sm text-amber-600">
                     Complete the core sections to publish your salon
                   </p>
