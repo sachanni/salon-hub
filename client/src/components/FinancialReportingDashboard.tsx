@@ -58,7 +58,8 @@ import {
   Building2,
   PieChart as PieChartIcon,
   BarChart3,
-  Activity
+  Activity,
+  Settings
 } from "lucide-react";
 
 // Financial data type definitions
