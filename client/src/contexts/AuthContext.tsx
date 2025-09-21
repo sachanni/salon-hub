@@ -72,29 +72,47 @@ export function AuthProvider({ children }: AuthProviderProps) {
     window.location.href = '/api/login';
   };
 
-  // Redirect to Replit Auth logout
-  const logout = () => {
-    window.location.href = '/api/logout';
+  // Session-based logout
+  const logout = async () => {
+    try {
+      const response = await fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        // Clear user data from cache
+        queryClientInstance.setQueryData(['/api/auth/user'], null);
+        window.location.href = '/';
+      } else {
+        console.error('Logout failed');
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Force logout on client side even if server call fails
+      queryClientInstance.setQueryData(['/api/auth/user'], null);
+      window.location.href = '/';
+    }
   };
 
   const hasRole = (role: string): boolean => {
-    return user?.roles.includes(role) ?? false;
+    return (user as any)?.roles?.includes(role) ?? false;
   };
 
   const hasOrgRole = (orgId: string, role: string): boolean => {
-    return user?.orgMemberships.some(
-      membership => membership.orgId === orgId && membership.orgRole === role
+    return (user as any)?.orgMemberships?.some(
+      (membership: any) => membership.orgId === orgId && membership.orgRole === role
     ) ?? false;
   };
 
-  const isBusinessUser = user?.orgMemberships.some(
-    membership => ['owner', 'manager', 'staff'].includes(membership.orgRole)
+  const isBusinessUser = (user as any)?.orgMemberships?.some(
+    (membership: any) => ['owner', 'manager', 'staff'].includes(membership.orgRole)
   ) ?? false;
 
   // Get salons the user has access to (for business users)
-  const userSalons = user?.orgMemberships
-    .filter(membership => ['owner', 'manager', 'staff'].includes(membership.orgRole))
-    .map(membership => ({
+  const userSalons = (user as any)?.orgMemberships
+    ?.filter((membership: any) => ['owner', 'manager', 'staff'].includes(membership.orgRole))
+    ?.map((membership: any) => ({
       id: membership.organization.id, // This would be the salon ID
       name: membership.organization.name,
       orgId: membership.orgId,
