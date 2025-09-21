@@ -193,9 +193,9 @@ export default function BusinessSetup() {
     },
   });
 
-  // Auto-save when step changes (debounced)
+  // Auto-save when step changes or completion status changes (debounced)
   useEffect(() => {
-    if (currentSalon?.id && currentStep > 1) {
+    if (currentSalon?.id && (currentStep > 1 || completedSteps.length > 0)) {
       const timer = setTimeout(() => {
         saveProgressMutation.mutate({
           step: currentStep,
