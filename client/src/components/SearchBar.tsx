@@ -1,4 +1,4 @@
-import { Search, MapPin, Calendar, Scissors, Paintbrush2, Sparkles, Dumbbell, Heart, Star, SlidersHorizontal, LayoutGrid, ChevronDown, Zap, Smile, User, Stethoscope, Brain } from "lucide-react";
+import { Search, MapPin, Calendar, Scissors, Paintbrush2, Sparkles, Dumbbell, Heart, Star, SlidersHorizontal, LayoutGrid, ChevronDown, Zap, Smile, User, Stethoscope, Brain, ArrowUpDown, Clock, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +6,9 @@ import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useState, useEffect } from "react";
 
 const serviceCategories = [
   // Popular categories (shown in top row)
@@ -40,13 +42,34 @@ export default function SearchBar() {
   const [location, setLocation] = useState("");
   const [date, setDate] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [priceRange, setPriceRange] = useState([0, 500]);
+  const [priceRange, setPriceRange] = useState([0, 5000]);
   const [minRating, setMinRating] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [showMoreCategories, setShowMoreCategories] = useState(false);
+  const [sortBy, setSortBy] = useState("");
+  const [availableToday, setAvailableToday] = useState(false);
+  const [specificServices, setSpecificServices] = useState<string[]>([]);
+  const [allServices, setAllServices] = useState<any[]>([]);
+  const [showServicesFilter, setShowServicesFilter] = useState(false);
 
   const popularCategories = serviceCategories.filter(cat => cat.popular);
   const hiddenCategoriesCount = serviceCategories.filter(cat => !cat.popular).length;
+
+  // Fetch all services for specific services filter
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        const response = await fetch('/api/services');
+        if (response.ok) {
+          const services = await response.json();
+          setAllServices(services);
+        }
+      } catch (error) {
+        console.error('Error fetching services:', error);
+      }
+    };
+    fetchServices();
+  }, []);
 
   const handleCategoryToggle = (categoryId: string) => {
     setSelectedCategories(prev => 
@@ -82,12 +105,24 @@ export default function SearchBar() {
         searchParams.append('minPrice', priceRange[0].toString());
       }
       
-      if (priceRange[1] < 500) {
+      if (priceRange[1] < 5000) {
         searchParams.append('maxPrice', priceRange[1].toString());
       }
       
       if (minRating > 0) {
         searchParams.append('minRating', minRating.toString());
+      }
+
+      if (sortBy) {
+        searchParams.append('sortBy', sortBy);
+      }
+
+      if (availableToday) {
+        searchParams.append('availableToday', 'true');
+      }
+
+      if (specificServices.length > 0) {
+        searchParams.append('services', specificServices.join(','));
       }
 
       // Make the search API call
@@ -114,11 +149,14 @@ export default function SearchBar() {
 
   const clearFilters = () => {
     setSelectedCategories([]);
-    setPriceRange([0, 500]);
+    setPriceRange([0, 5000]);
     setMinRating(0);
+    setSortBy("");
+    setAvailableToday(false);
+    setSpecificServices([]);
   };
 
-  const hasActiveFilters = selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 500 || minRating > 0;
+  const hasActiveFilters = selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || sortBy || availableToday || specificServices.length > 0;
 
   return (
     <div className="bg-white dark:bg-card p-6 rounded-xl shadow-lg max-w-6xl mx-auto space-y-6">
@@ -304,7 +342,12 @@ export default function SearchBar() {
                 Filters
                 {hasActiveFilters && (
                   <Badge variant="secondary" className="ml-1 h-5 w-5 rounded-full p-0 text-xs">
-                    {selectedCategories.length + (priceRange[0] > 0 || priceRange[1] < 500 ? 1 : 0) + (minRating > 0 ? 1 : 0)}
+                    {selectedCategories.length + 
+                     (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
+                     (minRating > 0 ? 1 : 0) + 
+                     (sortBy ? 1 : 0) + 
+                     (availableToday ? 1 : 0) + 
+                     specificServices.length}
                   </Badge>
                 )}
               </Button>
@@ -332,19 +375,19 @@ export default function SearchBar() {
                     <Slider
                       value={priceRange}
                       onValueChange={setPriceRange}
-                      max={500}
-                      step={10}
+                      max={5000}
+                      step={50}
                       className="w-full"
                       data-testid="slider-price-range"
                     />
                   </div>
                   <div className="flex justify-between text-sm text-muted-foreground">
                     <span>₹{priceRange[0]}</span>
-                    <span>₹{priceRange[1]}{priceRange[1] === 500 ? '+' : ''}</span>
+                    <span>₹{priceRange[1]}{priceRange[1] === 5000 ? '+' : ''}</span>
                   </div>
                 </div>
 
-                {/* Rating Filter */}
+                {/* Enhanced Rating Filter */}
                 <div className="space-y-3">
                   <label className="text-sm font-medium">Minimum rating</label>
                   <div className="flex gap-1">
@@ -357,11 +400,139 @@ export default function SearchBar() {
                         className="flex-1 gap-1"
                         data-testid={`button-rating-${rating}`}
                       >
-                        <Star className="h-3 w-3" />
+                        <Star className={`h-3 w-3 ${minRating >= rating ? 'fill-current' : ''}`} />
                         {rating}
                       </Button>
                     ))}
                   </div>
+                  {minRating > 0 && (
+                    <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
+                      <div className="flex">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star 
+                            key={star} 
+                            className={`h-3 w-3 ${star <= minRating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`} 
+                          />
+                        ))}
+                      </div>
+                      <span>and above</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sorting Options */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium">Sort by</label>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger data-testid="select-sort-by">
+                      <SelectValue placeholder="Choose sorting..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Best match</SelectItem>
+                      <SelectItem value="price-low">Price: Low to High</SelectItem>
+                      <SelectItem value="price-high">Price: High to Low</SelectItem>
+                      <SelectItem value="rating">Highest Rated</SelectItem>
+                      <SelectItem value="newest">Newest First</SelectItem>
+                      <SelectItem value="distance">Nearest First</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Availability Filter */}
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="available-today" 
+                      checked={availableToday}
+                      onCheckedChange={setAvailableToday}
+                      data-testid="checkbox-available-today"
+                    />
+                    <label htmlFor="available-today" className="text-sm font-medium flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Available today
+                    </label>
+                  </div>
+                </div>
+
+                {/* Specific Services Filter */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium">Specific services</label>
+                  <Popover open={showServicesFilter} onOpenChange={setShowServicesFilter}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between" data-testid="button-specific-services">
+                        <span>
+                          {specificServices.length > 0 
+                            ? `${specificServices.length} service${specificServices.length > 1 ? 's' : ''} selected`
+                            : 'Select services...'
+                          }
+                        </span>
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search services..." data-testid="input-service-search" />
+                        <CommandList>
+                          <CommandEmpty>No services found.</CommandEmpty>
+                          <ScrollArea className="max-h-60">
+                            <CommandGroup>
+                              {allServices.map((service) => {
+                                const isSelected = specificServices.includes(service.id);
+                                return (
+                                  <CommandItem
+                                    key={service.id}
+                                    onSelect={() => {
+                                      setSpecificServices(prev => 
+                                        isSelected 
+                                          ? prev.filter(id => id !== service.id)
+                                          : [...prev, service.id]
+                                      );
+                                    }}
+                                    data-testid={`command-item-service-${service.id}`}
+                                    className="flex items-center gap-2"
+                                  >
+                                    <div className={`flex items-center justify-center w-4 h-4 rounded border ${
+                                      isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/30'
+                                    }`}>
+                                      {isSelected && <CheckCircle className="h-3 w-3 text-primary-foreground" />}
+                                    </div>
+                                    <div className="flex-1">
+                                      <div className="font-medium">{service.name}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        ₹{Math.round(service.priceInPaisa / 100)} • {service.durationMinutes}min
+                                        {service.category && ` • ${service.category}`}
+                                      </div>
+                                    </div>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </ScrollArea>
+                        </CommandList>
+                        <div className="p-3 border-t">
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setSpecificServices([])}
+                              className="flex-1"
+                              data-testid="button-clear-services"
+                            >
+                              Clear all
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => setShowServicesFilter(false)}
+                              className="flex-1"
+                              data-testid="button-apply-services"
+                            >
+                              Done ({specificServices.length})
+                            </Button>
+                          </div>
+                        </div>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
             </PopoverContent>
@@ -407,16 +578,68 @@ export default function SearchBar() {
               </Badge>
             );
           })}
-          {(priceRange[0] > 0 || priceRange[1] < 500) && (
+          {(priceRange[0] > 0 || priceRange[1] < 5000) && (
             <Badge variant="secondary" className="gap-1" data-testid="badge-active-price">
-              ₹{priceRange[0]} - ₹{priceRange[1]}{priceRange[1] === 500 ? '+' : ''}
+              ₹{priceRange[0]} - ₹{priceRange[1]}{priceRange[1] === 5000 ? '+' : ''}
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-4 w-4 p-0 hover:bg-transparent"
-                onClick={() => setPriceRange([0, 500])}
+                onClick={() => setPriceRange([0, 5000])}
                 data-testid="button-remove-price"
                 aria-label="Remove price filter"
+              >
+                ×
+              </Button>
+            </Badge>
+          )}
+          {sortBy && (
+            <Badge variant="secondary" className="gap-1" data-testid="badge-active-sort">
+              <ArrowUpDown className="h-3 w-3" />
+              Sort: {sortBy === 'price-low' ? 'Price Low' : 
+                     sortBy === 'price-high' ? 'Price High' : 
+                     sortBy === 'rating' ? 'Rating' : 
+                     sortBy === 'newest' ? 'Newest' : 
+                     sortBy === 'distance' ? 'Distance' : sortBy}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-4 w-4 p-0 hover:bg-transparent"
+                onClick={() => setSortBy("")}
+                data-testid="button-remove-sort"
+                aria-label="Remove sort filter"
+              >
+                ×
+              </Button>
+            </Badge>
+          )}
+          {availableToday && (
+            <Badge variant="secondary" className="gap-1" data-testid="badge-active-availability">
+              <Clock className="h-3 w-3" />
+              Available today
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-4 w-4 p-0 hover:bg-transparent"
+                onClick={() => setAvailableToday(false)}
+                data-testid="button-remove-availability"
+                aria-label="Remove availability filter"
+              >
+                ×
+              </Button>
+            </Badge>
+          )}
+          {specificServices.length > 0 && (
+            <Badge variant="secondary" className="gap-1" data-testid="badge-active-services">
+              <CheckCircle className="h-3 w-3" />
+              {specificServices.length} service{specificServices.length > 1 ? 's' : ''}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-4 w-4 p-0 hover:bg-transparent"
+                onClick={() => setSpecificServices([])}
+                data-testid="button-remove-services"
+                aria-label="Remove services filter"
               >
                 ×
               </Button>
