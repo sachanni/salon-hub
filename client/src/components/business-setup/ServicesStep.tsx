@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,12 +47,17 @@ export default function ServicesStep({
 
   // Load existing services
   const { data: existingServices } = useQuery({
-    queryKey: ['/api/salons', salonId, 'services'],
+    queryKey: ['services-step-data', salonId, 'services'],
     enabled: !!salonId,
-    onSuccess: (data) => {
-      setServices(data || []);
-    }
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
+
+  // Update local services state when query data changes
+  useEffect(() => {
+    if (existingServices) {
+      setServices(existingServices || []);
+    }
+  }, [existingServices]);
 
   // Add service mutation
   const addServiceMutation = useMutation({
@@ -64,7 +69,7 @@ export default function ServicesStep({
       setServices(prev => [...prev, data]);
       setNewService({ name: "", description: "", duration: 60, price: 0, category: "Hair" });
       setIsAddingService(false);
-      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['services-step-data', salonId, 'services'] });
       toast({
         title: "Service Added",
         description: "Service has been added to your catalog.",
@@ -83,7 +88,7 @@ export default function ServicesStep({
     onSuccess: (data) => {
       setServices(prev => prev.map(s => s.id === data.id ? data : s));
       setEditingService(null);
-      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['services-step-data', salonId, 'services'] });
       toast({
         title: "Service Updated",
         description: "Service has been updated successfully.",
@@ -99,7 +104,7 @@ export default function ServicesStep({
     },
     onSuccess: (_, serviceId) => {
       setServices(prev => prev.filter(s => s.id !== serviceId));
-      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['services-step-data', salonId, 'services'] });
       toast({
         title: "Service Deleted",
         description: "Service has been removed from your catalog.",
