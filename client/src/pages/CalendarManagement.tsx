@@ -18,6 +18,7 @@ import { Calendar, Clock, Users, Plus, Edit, Trash2, Settings, CheckCircle, XCir
 import { Link } from "wouter";
 import BookingCalendarView from "@/components/BookingCalendarView";
 import BookingListView from "@/components/BookingListView";
+import CustomerProfilesView from "@/components/CustomerProfilesView";
 
 interface Staff {
   id: string;
@@ -401,7 +402,7 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
       </div>
 
       <Tabs defaultValue="calendar" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="calendar" data-testid="tab-calendar">
             <Calendar className="h-4 w-4 mr-2" />
             Booking Calendar
@@ -417,6 +418,10 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
           <TabsTrigger value="patterns" data-testid="tab-patterns">
             <Clock className="h-4 w-4 mr-2" />
             Availability Patterns
+          </TabsTrigger>
+          <TabsTrigger value="customers" data-testid="tab-customers">
+            <Users className="h-4 w-4 mr-2" />
+            Customer Profiles
           </TabsTrigger>
         </TabsList>
 
@@ -803,6 +808,10 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="customers">
+          <CustomerProfilesView salonId={salonId} />
         </TabsContent>
       </Tabs>
     </div>

@@ -122,7 +122,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     })) ?? [];
 
   const value: AuthContextType = {
-    user,
+    user: user as User | null,
     isLoading,
     isAuthenticated: !!user,
     login,

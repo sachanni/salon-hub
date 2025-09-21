@@ -28,6 +28,8 @@ import {
   type UpdateBookingInput,
   type BulkUpdateBookingInput,
   validateStatusTransition,
+  // Customer profile validation schemas
+  updateCustomerNotesSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
 
@@ -1075,6 +1077,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching customers:', error);
       res.status(500).json({ error: 'Failed to fetch customers' });
+    }
+  });
+  
+  // Get detailed customer profile with booking history and stats
+  app.get('/api/salons/:salonId/customers/:customerEmail', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, customerEmail } = req.params;
+      const decodedEmail = decodeURIComponent(customerEmail);
+      
+      // Get or create customer profile
+      let customerProfile = await storage.getCustomerProfile(salonId, decodedEmail);
+      if (!customerProfile) {
+        // Optimized: Direct query for customer booking instead of O(n) scan
+        customerProfile = await storage.getOrCreateCustomerProfile(salonId, decodedEmail);
+        if (!customerProfile) {
+          return res.status(404).json({ error: 'Customer not found' });
+        }
+      }
+      
+      // Get booking history and stats
+      const [bookingHistory, customerStats] = await Promise.all([
+        storage.getCustomerBookingHistory(salonId, decodedEmail),
+        storage.getCustomerStats(salonId, decodedEmail)
+      ]);
+      
+      res.json({
+        profile: customerProfile,
+        bookingHistory,
+        stats: customerStats
+      });
+    } catch (error) {
+      console.error('Error fetching customer profile:', error);
+      res.status(500).json({ error: 'Failed to fetch customer profile' });
+    }
+  });
+  
+  // Update customer profile notes and preferences
+  app.put('/api/salons/:salonId/customers/:customerEmail', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, customerEmail } = req.params;
+      const decodedEmail = decodeURIComponent(customerEmail);
+      
+      // Validate request body using zod schema - whitelist only allowed fields
+      const validation = updateCustomerNotesSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+      
+      // Check for unknown keys not in the schema
+      const allowedFields = ['notes', 'preferences', 'isVip', 'tags'];
+      const providedFields = Object.keys(req.body);
+      const unknownFields = providedFields.filter(field => !allowedFields.includes(field));
+      
+      if (unknownFields.length > 0) {
+        return res.status(400).json({ 
+          error: 'Unknown fields provided', 
+          unknownFields 
+        });
+      }
+      
+      // Get existing profile
+      let customerProfile = await storage.getCustomerProfile(salonId, decodedEmail);
+      if (!customerProfile) {
+        return res.status(404).json({ error: 'Customer profile not found' });
+      }
+      
+      // Update the profile with validated data
+      await storage.updateCustomerProfile(customerProfile.id, salonId, validation.data);
+      
+      res.json({ success: true, message: 'Customer profile updated successfully' });
+    } catch (error) {
+      console.error('Error updating customer profile:', error);
+      res.status(500).json({ error: 'Failed to update customer profile' });
     }
   });
 

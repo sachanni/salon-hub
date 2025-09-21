@@ -455,6 +455,41 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
   }),
 }));
 
+// Customer profiles table - for customer-specific notes and preferences
+export const customerProfiles = pgTable("customer_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerEmail: varchar("customer_email").notNull(),
+  customerName: varchar("customer_name").notNull(),
+  customerPhone: varchar("customer_phone"),
+  notes: text("notes"), // Customer-specific notes
+  preferences: jsonb("preferences"), // Customer preferences as JSON
+  isVip: integer("is_vip").notNull().default(0),
+  tags: text("tags").array(), // Array of tags for customer categorization
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Unique constraint for customer per salon
+  unique("customer_profiles_salon_email_unique").on(table.salonId, table.customerEmail),
+]);
+
+export const insertCustomerProfileSchema = createInsertSchema(customerProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCustomerProfile = z.infer<typeof insertCustomerProfileSchema>;
+export type CustomerProfile = typeof customerProfiles.$inferSelect;
+
+// Customer profile relations
+export const customerProfilesRelations = relations(customerProfiles, ({ one }) => ({
+  salon: one(salons, {
+    fields: [customerProfiles.salonId],
+    references: [salons.id],
+  }),
+}));
+
 // Input validation schemas for API endpoints
 export const createPaymentOrderSchema = z.object({
   salonId: z.string().uuid(),
@@ -848,3 +883,13 @@ export type InsertPayoutAccount = z.infer<typeof insertPayoutAccountSchema>;
 
 export type PublishState = typeof publishState.$inferSelect;
 export type InsertPublishState = z.infer<typeof insertPublishStateSchema>;
+
+// Customer profile validation schemas
+export const updateCustomerNotesSchema = z.object({
+  notes: z.string().max(1000, "Notes cannot exceed 1000 characters").optional(),
+  preferences: z.record(z.any()).optional(), // JSON object for preferences
+  isVip: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export type UpdateCustomerNotesInput = z.infer<typeof updateCustomerNotesSchema>;

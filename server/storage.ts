@@ -19,9 +19,10 @@ import {
   type TaxRate, type InsertTaxRate,
   type PayoutAccount, type InsertPayoutAccount,
   type PublishState, type InsertPublishState,
+  type CustomerProfile, type InsertCustomerProfile, type UpdateCustomerNotesInput,
   users, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
-  bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState
+  bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
@@ -201,6 +202,22 @@ export interface IStorage {
     media: { isComplete: boolean; count: number };
     overallProgress: number;
     nextStep?: string;
+  }>;
+  
+  // Customer profile operations
+  getCustomerProfile(salonId: string, customerEmail: string): Promise<CustomerProfile | undefined>;
+  getCustomerProfileById(id: string): Promise<CustomerProfile | undefined>;
+  getOrCreateCustomerProfile(salonId: string, customerEmail: string): Promise<CustomerProfile | undefined>;
+  createCustomerProfile(profile: InsertCustomerProfile): Promise<CustomerProfile>;
+  updateCustomerProfile(id: string, salonId: string, updates: UpdateCustomerNotesInput): Promise<void>;
+  getCustomerBookingHistory(salonId: string, customerEmail: string): Promise<any[]>;
+  getCustomerStats(salonId: string, customerEmail: string): Promise<{
+    totalBookings: number;
+    totalSpent: number;
+    lastVisit: string | null;
+    favoriteServices: Array<{ serviceId: string; serviceName: string; count: number }>;
+    averageSpend: number;
+    bookingFrequency: string;
   }>;
 }
 
@@ -1297,6 +1314,237 @@ export class DatabaseStorage implements IStorage {
       overallProgress,
       nextStep
     };
+  }
+  
+  // Customer Profile Operations
+  async getCustomerProfile(salonId: string, customerEmail: string): Promise<CustomerProfile | undefined> {
+    try {
+      const [profile] = await db
+        .select()
+        .from(customerProfiles)
+        .where(and(
+          eq(customerProfiles.salonId, salonId),
+          eq(customerProfiles.customerEmail, customerEmail)
+        ));
+      return profile || undefined;
+    } catch (error) {
+      console.error('Error fetching customer profile:', error);
+      throw error;
+    }
+  }
+  
+  async getOrCreateCustomerProfile(salonId: string, customerEmail: string): Promise<CustomerProfile | undefined> {
+    try {
+      // First try to get existing profile
+      const existingProfile = await this.getCustomerProfile(salonId, customerEmail);
+      if (existingProfile) {
+        return existingProfile;
+      }
+      
+      // If no profile exists, find customer data from their most recent booking
+      // Direct query instead of O(n) scan
+      const [customerBooking] = await db
+        .select({
+          customerName: bookings.customerName,
+          customerPhone: bookings.customerPhone,
+          customerEmail: bookings.customerEmail
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          eq(bookings.customerEmail, customerEmail)
+        ))
+        .orderBy(desc(bookings.createdAt))
+        .limit(1);
+      
+      if (!customerBooking) {
+        return undefined; // Customer not found
+      }
+      
+      // Use INSERT...ON CONFLICT for safe profile creation
+      try {
+        const [created] = await db
+          .insert(customerProfiles)
+          .values({
+            salonId,
+            customerEmail: customerEmail,
+            customerName: customerBooking.customerName,
+            customerPhone: customerBooking.customerPhone,
+            notes: '',
+            preferences: {},
+            isVip: 0,
+            tags: []
+          })
+          .onConflictDoNothing()
+          .returning();
+        
+        // If conflict occurred (profile already exists), fetch the existing one
+        if (!created) {
+          return await this.getCustomerProfile(salonId, customerEmail);
+        }
+        
+        return created;
+      } catch (error) {
+        // Handle unique constraint violations gracefully
+        console.warn('Profile creation conflict, fetching existing profile:', error);
+        return await this.getCustomerProfile(salonId, customerEmail);
+      }
+      
+    } catch (error) {
+      console.error('Error getting or creating customer profile:', error);
+      throw error;
+    }
+  }
+  
+  async getCustomerProfileById(id: string): Promise<CustomerProfile | undefined> {
+    try {
+      const [profile] = await db
+        .select()
+        .from(customerProfiles)
+        .where(eq(customerProfiles.id, id));
+      return profile || undefined;
+    } catch (error) {
+      console.error('Error fetching customer profile by ID:', error);
+      throw error;
+    }
+  }
+  
+  async createCustomerProfile(profile: InsertCustomerProfile): Promise<CustomerProfile> {
+    try {
+      const [created] = await db
+        .insert(customerProfiles)
+        .values(profile)
+        .returning();
+      return created;
+    } catch (error) {
+      console.error('Error creating customer profile:', error);
+      throw error;
+    }
+  }
+  
+  async updateCustomerProfile(id: string, salonId: string, updates: UpdateCustomerNotesInput): Promise<void> {
+    try {
+      // Build update object - only include isVip if explicitly provided
+      const updateData: any = {
+        ...updates,
+        updatedAt: new Date()
+      };
+      
+      // Fix: Only update isVip if explicitly provided, preserve existing value otherwise
+      if (updates.isVip !== undefined) {
+        updateData.isVip = updates.isVip ? 1 : 0;
+      }
+      
+      await db
+        .update(customerProfiles)
+        .set(updateData)
+        .where(and(
+          eq(customerProfiles.id, id),
+          eq(customerProfiles.salonId, salonId)
+        ));
+    } catch (error) {
+      console.error('Error updating customer profile:', error);
+      throw error;
+    }
+  }
+  
+  async getCustomerBookingHistory(salonId: string, customerEmail: string): Promise<any[]> {
+    try {
+      const bookingHistory = await db
+        .select({
+          id: bookings.id,
+          serviceId: bookings.serviceId,
+          bookingDate: bookings.bookingDate,
+          bookingTime: bookings.bookingTime,
+          status: bookings.status,
+          totalAmountPaisa: bookings.totalAmountPaisa,
+          currency: bookings.currency,
+          notes: bookings.notes,
+          createdAt: bookings.createdAt,
+          serviceName: services.name,
+          serviceDuration: services.durationMinutes,
+          staffName: staff.name
+        })
+        .from(bookings)
+        .leftJoin(services, eq(bookings.serviceId, services.id))
+        .leftJoin(staff, eq(bookings.staffId, staff.id))
+        .where(and(
+          eq(bookings.salonId, salonId),
+          eq(bookings.customerEmail, customerEmail)
+        ))
+        .orderBy(desc(bookings.createdAt));
+        
+      return bookingHistory;
+    } catch (error) {
+      console.error('Error fetching customer booking history:', error);
+      throw error;
+    }
+  }
+  
+  async getCustomerStats(salonId: string, customerEmail: string): Promise<{
+    totalBookings: number;
+    totalSpent: number;
+    lastVisit: string | null;
+    favoriteServices: Array<{ serviceId: string; serviceName: string; count: number }>;
+    averageSpend: number;
+    bookingFrequency: string;
+  }> {
+    try {
+      // Get basic stats
+      const [stats] = await db
+        .select({
+          totalBookings: sql<number>`count(*)`,
+          totalSpent: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          lastVisit: sql<string>`max(${bookings.bookingDate})`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          eq(bookings.customerEmail, customerEmail)
+        ));
+        
+      // Get favorite services
+      const favoriteServices = await db
+        .select({
+          serviceId: bookings.serviceId,
+          serviceName: services.name,
+          count: sql<number>`count(*)`
+        })
+        .from(bookings)
+        .leftJoin(services, eq(bookings.serviceId, services.id))
+        .where(and(
+          eq(bookings.salonId, salonId),
+          eq(bookings.customerEmail, customerEmail)
+        ))
+        .groupBy(bookings.serviceId, services.name)
+        .orderBy(desc(sql`count(*)`));
+        
+      const totalBookings = Number(stats?.totalBookings) || 0;
+      const totalSpent = Number(stats?.totalSpent) || 0;
+      const averageSpend = totalBookings > 0 ? totalSpent / totalBookings : 0;
+      
+      // Calculate booking frequency
+      let bookingFrequency = 'New Customer';
+      if (totalBookings >= 10) {
+        bookingFrequency = 'Frequent';
+      } else if (totalBookings >= 5) {
+        bookingFrequency = 'Regular';
+      } else if (totalBookings >= 2) {
+        bookingFrequency = 'Returning';
+      }
+      
+      return {
+        totalBookings,
+        totalSpent,
+        lastVisit: stats?.lastVisit || null,
+        favoriteServices: favoriteServices || [],
+        averageSpend,
+        bookingFrequency
+      };
+    } catch (error) {
+      console.error('Error fetching customer stats:', error);
+      throw error;
+    }
   }
 }
 
