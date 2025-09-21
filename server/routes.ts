@@ -1924,6 +1924,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { salonId } = req.params;
       const state = await storage.getPublishState(salonId);
+      if (!state) {
+        return res.status(404).json({ error: 'Publish state not found' });
+      }
       res.json(state);
     } catch (error) {
       console.error('Error fetching publish state:', error);

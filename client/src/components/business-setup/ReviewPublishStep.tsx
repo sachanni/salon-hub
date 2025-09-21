@@ -137,11 +137,26 @@ export default function ReviewPublishStep({
   // Publish salon mutation
   const publishSalonMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, {
+      const publishData = {
         isPublished: 1,
         canAcceptBookings: 1,
         publishedAt: new Date().toISOString()
-      });
+      };
+
+      // Try to update first
+      let response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, publishData);
+      
+      // If no state exists (404), create it first then update
+      if (response.status === 404) {
+        // Create with default values
+        await apiRequest('POST', `/api/salons/${salonId}/publish-state`, {
+          salonId,
+          ...publishData
+        });
+        // Then update (though POST already set the values, this ensures consistency)
+        response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, publishData);
+      }
+      
       return response.json();
     },
     onSuccess: () => {
