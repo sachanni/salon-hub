@@ -287,13 +287,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
-      // Check if email is verified
-      if (user.emailVerified === 0) {
-        return res.status(401).json({ 
-          error: "Please verify your email address before logging in",
-          requiresVerification: true 
-        });
-      }
+      // Email verification is now optional - users can login without verification
+      // We'll show a banner in the dashboard encouraging verification for enhanced security
 
       // Create session user object (same format as Replit Auth)
       const sessionUser = {
