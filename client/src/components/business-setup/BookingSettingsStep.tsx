@@ -17,13 +17,25 @@ interface BookingSettingsStepProps {
   isCompleted: boolean;
 }
 
+interface BookingFormData {
+  advanceBookingDays: number;
+  cancellationHours: number;
+  requireDeposit: boolean;
+  depositAmount: number;
+  depositType: string;
+  allowOnlineBooking: boolean;
+  bookingBufferMinutes: number;
+  maxConcurrentBookings: number;
+  requireCustomerInfo: boolean;
+}
+
 export default function BookingSettingsStep({ 
   salonId, 
   initialData, 
   onComplete, 
   isCompleted 
 }: BookingSettingsStepProps) {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<BookingFormData>({
     advanceBookingDays: 30,
     cancellationHours: 24,
     requireDeposit: false,
@@ -40,7 +52,7 @@ export default function BookingSettingsStep({
   const queryClient = useQueryClient();
 
   // Load existing booking settings
-  const { data: bookingSettings } = useQuery({
+  const { data: bookingSettings, isLoading: isLoadingSettings } = useQuery({
     queryKey: ['/api/salons', salonId, 'booking-settings'],
     enabled: !!salonId,
   });
@@ -48,7 +60,7 @@ export default function BookingSettingsStep({
   // Populate form with existing data
   useEffect(() => {
     if (bookingSettings) {
-      setFormData(prev => ({
+      setFormData((prev: BookingFormData) => ({
         ...prev,
         ...bookingSettings
       }));
@@ -61,11 +73,13 @@ export default function BookingSettingsStep({
       const response = await apiRequest('POST', `/api/salons/${salonId}/booking-settings`, data);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (savedData) => {
       queryClient.invalidateQueries({ 
         queryKey: ['/api/salons', salonId, 'booking-settings'] 
       });
-      onComplete(formData);
+      // Update local state with saved data to ensure UI reflects what was actually saved
+      setFormData((prev: BookingFormData) => ({ ...prev, ...savedData }));
+      onComplete(savedData);
       toast({
         title: "Booking Settings Saved",
         description: "Your booking policies have been updated successfully.",
@@ -83,13 +97,37 @@ export default function BookingSettingsStep({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    await saveSettingsMutation.mutateAsync(formData);
-    setIsLoading(false);
+    try {
+      await saveSettingsMutation.mutateAsync(formData);
+    } catch (error) {
+      console.error('Failed to save booking settings:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev: BookingFormData) => ({ ...prev, [field]: value }));
   };
+
+  if (isLoadingSettings) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Settings className="h-6 w-6 text-primary" />
+          <div>
+            <h3 className="text-lg font-semibold">Set your booking policies</h3>
+            <p className="text-muted-foreground">Loading your current settings...</p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="h-32 bg-muted/50 rounded-lg animate-pulse" />
+          <div className="h-48 bg-muted/50 rounded-lg animate-pulse" />
+          <div className="h-32 bg-muted/50 rounded-lg animate-pulse" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

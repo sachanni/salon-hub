@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,19 +20,16 @@ interface MediaStepProps {
 interface MediaAsset {
   id?: string;
   url: string;
-  type: string;
+  assetType: string;
   caption: string;
   isPrimary: boolean;
 }
 
 const MEDIA_TYPES = [
-  { value: "salon_interior", label: "Salon Interior" },
-  { value: "service_photo", label: "Service Photo" },
-  { value: "staff_photo", label: "Staff Photo" },
-  { value: "before_after", label: "Before & After" },
-  { value: "product", label: "Product" },
-  { value: "logo", label: "Logo" },
-  { value: "other", label: "Other" }
+  { value: "cover", label: "Cover Photo (Main salon image)" },
+  { value: "gallery", label: "Gallery (Services, staff, before/after)" },
+  { value: "logo", label: "Business Logo" },
+  { value: "video", label: "Video Content" }
 ];
 
 export default function MediaStep({ 
@@ -45,7 +42,7 @@ export default function MediaStep({
   const [isAddingMedia, setIsAddingMedia] = useState(false);
   const [newMedia, setNewMedia] = useState<MediaAsset>({
     url: "",
-    type: "salon_interior",
+    assetType: "cover",
     caption: "",
     isPrimary: false
   });
@@ -53,13 +50,17 @@ export default function MediaStep({
   const queryClient = useQueryClient();
 
   // Load existing media assets
-  const { data: existingMedia } = useQuery({
+  const { data: existingMedia, isLoading: isLoadingMedia } = useQuery({
     queryKey: ['/api/salons', salonId, 'media-assets'],
     enabled: !!salonId,
-    onSuccess: (data) => {
-      setMediaAssets(data || []);
-    }
   });
+
+  // Update media assets when data loads
+  useEffect(() => {
+    if (existingMedia) {
+      setMediaAssets(Array.isArray(existingMedia) ? existingMedia : []);
+    }
+  }, [existingMedia]);
 
   // Add media asset mutation
   const addMediaMutation = useMutation({
@@ -69,12 +70,20 @@ export default function MediaStep({
     },
     onSuccess: (data) => {
       setMediaAssets(prev => [...prev, data]);
-      setNewMedia({ url: "", type: "salon_interior", caption: "", isPrimary: false });
+      setNewMedia({ url: "", assetType: "cover", caption: "", isPrimary: false });
       setIsAddingMedia(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
       toast({
-        title: "Photo Added",
-        description: "Media has been added to your gallery.",
+        title: "Photo Added Successfully",
+        description: "Your photo has been added to the gallery and is now visible to customers.",
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to add media asset:', error);
+      toast({
+        title: "Upload Failed",
+        description: "Unable to add photo. Please check the image URL and try again.",
+        variant: "destructive",
       });
     }
   });
@@ -91,6 +100,14 @@ export default function MediaStep({
       toast({
         title: "Photo Deleted",
         description: "Media has been removed from your gallery.",
+      });
+    },
+    onError: (error) => {
+      console.error('Failed to delete media asset:', error);
+      toast({
+        title: "Delete Failed",
+        description: "Unable to delete photo. Please try again.",
+        variant: "destructive",
       });
     }
   });
@@ -191,7 +208,7 @@ export default function MediaStep({
                 <CardContent className="p-3">
                   <p className="text-sm font-medium">{media.caption || 'Untitled'}</p>
                   <Badge variant="outline" className="mt-1">
-                    {MEDIA_TYPES.find(t => t.value === media.type)?.label || media.type}
+                    {MEDIA_TYPES.find(t => t.value === media.assetType)?.label || media.assetType}
                   </Badge>
                 </CardContent>
               </Card>
@@ -251,8 +268,8 @@ export default function MediaStep({
                 <div>
                   <Label htmlFor="media-type">Photo Type</Label>
                   <Select 
-                    value={newMedia.type} 
-                    onValueChange={(value) => setNewMedia(prev => ({ ...prev, type: value }))}
+                    value={newMedia.assetType} 
+                    onValueChange={(value) => setNewMedia(prev => ({ ...prev, assetType: value }))}
                   >
                     <SelectTrigger data-testid="select-media-type">
                       <SelectValue />
@@ -348,22 +365,22 @@ export default function MediaStep({
               {
                 url: "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=500",
                 caption: "Modern Salon Interior",
-                type: "salon_interior"
+                assetType: "cover"
               },
               {
                 url: "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=500",
                 caption: "Hair Styling Service",
-                type: "service_photo"
+                assetType: "gallery"
               },
               {
                 url: "https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=500",
                 caption: "Nail Art Service",
-                type: "service_photo"
+                assetType: "gallery"
               },
               {
                 url: "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=500",
                 caption: "Spa Treatment Room",
-                type: "salon_interior"
+                assetType: "cover"
               }
             ].map((sample, index) => (
               <div key={index} className="relative">
@@ -371,7 +388,7 @@ export default function MediaStep({
                   onClick={() => setNewMedia({
                     url: sample.url,
                     caption: sample.caption,
-                    type: sample.type,
+                    assetType: sample.assetType,
                     isPrimary: index === 0 && mediaAssets.length === 0
                   })}
                   className="w-full aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors"
