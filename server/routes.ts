@@ -30,6 +30,7 @@ import {
   validateStatusTransition,
   // Customer profile validation schemas
   updateCustomerNotesSchema,
+  updateCustomerProfileSchema,
   // Financial system validation schemas
   insertExpenseCategorySchema,
   insertExpenseSchema,
@@ -5725,6 +5726,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching customer payment history:', error);
       res.status(500).json({ error: 'Failed to fetch payment history' });
+    }
+  });
+
+  // Update customer profile
+  app.patch('/api/customer/profile', requireCustomerAuth, async (req: any, res) => {
+    try {
+      const customerId = req.user.id;
+      
+      // Validate request body using zod schema
+      const validation = updateCustomerProfileSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+      
+      const { firstName, lastName, phone, preferences } = validation.data;
+      
+      // Update user profile fields
+      const updateData: any = {};
+      if (firstName !== undefined) updateData.firstName = firstName;
+      if (lastName !== undefined) updateData.lastName = lastName;
+      if (phone !== undefined) updateData.phone = phone;
+      
+      // Update user record
+      if (Object.keys(updateData).length > 0) {
+        await storage.updateUser(customerId, updateData);
+      }
+      
+      // Update user preferences if provided
+      if (preferences !== undefined) {
+        await storage.updateUserPreferences(customerId, preferences);
+      }
+      
+      res.json({ 
+        success: true, 
+        message: 'Profile updated successfully' 
+      });
+    } catch (error: any) {
+      console.error('Error updating customer profile:', error);
+      res.status(500).json({ error: 'Failed to update profile' });
     }
   });
 

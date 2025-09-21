@@ -51,6 +51,23 @@ export const insertUserSchema = createInsertSchema(users).pick({
   username: z.string().optional(), // Username is optional, auto-generated if not provided
 });
 
+// Profile update schema for customer profile management
+export const profileUpdateSchema = createInsertSchema(users).pick({
+  firstName: true,
+  lastName: true,
+  phone: true
+});
+
+// Preferences schema for customer preferences
+export const preferencesSchema = z.object({
+  emailNotifications: z.boolean().default(true),
+  smsNotifications: z.boolean().default(false),
+  marketingComms: z.boolean().default(false),
+  preferredTimes: z.array(z.string()).default([]),
+  preferredDays: z.array(z.string()).default([]),
+  preferredCommunicationMethod: z.enum(['email', 'sms', 'both']).default('email')
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
@@ -893,6 +910,23 @@ export const updateCustomerNotesSchema = z.object({
 });
 
 export type UpdateCustomerNotesInput = z.infer<typeof updateCustomerNotesSchema>;
+
+// Customer profile update schema for /api/customer/profile endpoint
+export const updateCustomerProfileSchema = z.object({
+  firstName: z.string().min(1, "First name is required").max(50, "First name cannot exceed 50 characters").optional(),
+  lastName: z.string().min(1, "Last name is required").max(50, "Last name cannot exceed 50 characters").optional(),
+  phone: z.string().max(20, "Phone number cannot exceed 20 characters").optional().nullable(),
+  preferences: z.object({
+    emailNotifications: z.boolean().default(true),
+    smsNotifications: z.boolean().default(false),
+    marketingComms: z.boolean().default(false),
+    preferredTimes: z.array(z.enum(['morning', 'afternoon', 'evening'])).default([]),
+    preferredDays: z.array(z.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])).default([]),
+    preferredCommunicationMethod: z.enum(['email', 'sms', 'both']).default('email')
+  }).optional()
+});
+
+export type UpdateCustomerProfileInput = z.infer<typeof updateCustomerProfileSchema>;
 
 // ===============================================
 // FINANCIAL REPORTING SYSTEM TABLES

@@ -1,4 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { profileUpdateSchema, preferencesSchema } from "@shared/schema";
+import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -10,6 +15,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import BookingModal from "@/components/BookingModal";
@@ -39,7 +48,17 @@ import {
   MessageCircle,
   Filter,
   Search,
-  RefreshCcw
+  RefreshCcw,
+  Edit,
+  Save,
+  X as Cancel,
+  Heart,
+  Users,
+  Shield,
+  Bell,
+  Smartphone,
+  MessageSquare,
+  CheckCircle
 } from "lucide-react";
 
 // Server response types (what the backend actually returns)
@@ -167,12 +186,16 @@ const mapPaymentData = (serverData: ServerPaymentRecord): PaymentRecord => ({
 const mapDashboardStats = (profile: ServerCustomerProfile): DashboardStats => ({
   upcomingAppointments: 0, // Will be calculated from upcoming appointments query
   totalAppointments: profile.stats.totalBookings,
-  totalSpent: profile.stats.totalSpentPaisa,
+  totalSpent: Math.floor(profile.stats.totalSpentPaisa / 100), // CRITICAL FIX: Convert paisa to rupees
   favoriteServices: profile.stats.favoriteServices.map(service => ({
     serviceName: service.serviceName,
     count: service.count
   }))
 });
+
+// Use shared schemas from @shared/schema for consistency
+type ProfileFormData = z.infer<typeof profileUpdateSchema>;
+type PreferencesFormData = z.infer<typeof preferencesSchema>;
 
 export default function CustomerDashboard() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -181,6 +204,17 @@ export default function CustomerDashboard() {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleAppointment, setRescheduleAppointment] = useState<Appointment | null>(null);
+
+  // Profile management state
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [preferencesData, setPreferencesData] = useState({
+    emailNotifications: true,
+    smsNotifications: false,
+    marketingComms: false,
+    preferredTimes: [] as string[],
+    preferredDays: [] as string[],
+    preferredCommunicationMethod: 'email' as 'email' | 'sms' | 'both'
+  });
 
   // History filtering and search state
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
@@ -297,6 +331,67 @@ export default function CustomerDashboard() {
 
   const statsLoading = profileLoading;
 
+  // Profile form setup
+  const profileForm = useForm<ProfileFormData>({
+    resolver: zodResolver(profileUpdateSchema),
+    defaultValues: {
+      firstName: '',
+      lastName: '',
+      phone: '',
+    }
+  });
+
+  // Update form when authoritative profile data changes
+  useEffect(() => {
+    if (customerProfile && !profileLoading) {
+      profileForm.reset({
+        firstName: customerProfile.firstName || '',
+        lastName: customerProfile.lastName || '',
+        phone: customerProfile.phone || '',
+      });
+    }
+  }, [customerProfile, profileLoading, profileForm]);
+
+  // Hydrate preferences from server data to prevent data loss
+  useEffect(() => {
+    if (customerProfile?.preferences) {
+      setPreferencesData({
+        emailNotifications: customerProfile.preferences.emailNotifications ?? true,
+        smsNotifications: customerProfile.preferences.smsNotifications ?? false,
+        marketingComms: customerProfile.preferences.marketingComms ?? false,
+        preferredTimes: customerProfile.preferences.preferredTimes ?? [],
+        preferredDays: customerProfile.preferences.preferredDays ?? [],
+        preferredCommunicationMethod: customerProfile.preferences.preferredCommunicationMethod ?? 'email'
+      });
+    }
+  }, [customerProfile]);
+
+  // Profile update mutation
+  const updateProfileMutation = useMutation({
+    mutationFn: async (profileData: { firstName?: string; lastName?: string; phone?: string; preferences?: any }) => {
+      return apiRequest('/api/customer/profile', {
+        method: 'PATCH',
+        body: profileData
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/customer/profile'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] }); // Refresh user data
+      toast({ 
+        title: "Profile updated successfully",
+        description: "Your changes have been saved."
+      });
+      setIsEditingProfile(false);
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Failed to update profile", 
+        description: error.message || "Please try again later.", 
+        variant: "destructive" 
+      });
+    }
+  });
+
   // Cancel appointment mutation
   const cancelAppointmentMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
@@ -321,6 +416,36 @@ export default function CustomerDashboard() {
       });
     },
   });
+
+  // Form handlers
+  const handleProfileSubmit = async (values: ProfileFormData) => {
+    await updateProfileMutation.mutateAsync({
+      firstName: values.firstName,
+      lastName: values.lastName,
+      phone: values.phone || null,
+    });
+  };
+
+  const handlePreferencesUpdate = async (newPreferences: Partial<typeof preferencesData>) => {
+    const updatedPreferences = { ...preferencesData, ...newPreferences };
+    setPreferencesData(updatedPreferences);
+    await updateProfileMutation.mutateAsync({
+      preferences: updatedPreferences
+    });
+  };
+
+  const handleEditProfile = () => {
+    setIsEditingProfile(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingProfile(false);
+    profileForm.reset({
+      firstName: customerProfile?.firstName || '',
+      lastName: customerProfile?.lastName || '',
+      phone: customerProfile?.phone || '',
+    });
+  };
 
   // Helper functions
   const formatCurrency = (paisa: number) => {
@@ -1134,76 +1259,351 @@ export default function CustomerDashboard() {
           </TabsContent>
 
           {/* Profile Tab */}
-          <TabsContent value="profile" className="space-y-4" data-testid="content-profile">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Profile Information</h2>
-              <Button variant="outline" disabled data-testid="button-edit-profile">
-                <Settings className="h-4 w-4 mr-2" />
-                Edit Profile
-              </Button>
+          <TabsContent value="profile" className="space-y-6" data-testid="content-profile">
+            {/* Profile Header */}
+            <div className="profile-header mb-8" data-testid="profile-header">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-20 w-20">
+                    <AvatarImage 
+                      src={user?.profileImageUrl} 
+                      alt={`${user?.firstName || ''} ${user?.lastName || ''}`} 
+                    />
+                    <AvatarFallback className="text-xl font-semibold">
+                      {getInitials(user?.firstName, user?.lastName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100" data-testid="text-profile-name">
+                      {user?.firstName && user?.lastName 
+                        ? `${user.firstName} ${user.lastName}` 
+                        : user?.firstName || user?.lastName || 'Customer'
+                      }
+                    </h2>
+                    <p className="text-muted-foreground flex items-center gap-2" data-testid="text-profile-email">
+                      <Mail className="h-4 w-4" />
+                      {user?.email}
+                    </p>
+                    {customerProfile && (
+                      <p className="text-sm text-muted-foreground" data-testid="text-member-since">
+                        Member since {format(new Date(customerProfile.stats?.memberSince || new Date()), 'MMMM yyyy')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {isEditingProfile ? (
+                    <>
+                      <Button 
+                        variant="outline" 
+                        onClick={handleCancelEdit}
+                        disabled={updateProfileMutation.isPending}
+                        data-testid="button-cancel-edit"
+                      >
+                        <Cancel className="h-4 w-4 mr-2" />
+                        Cancel
+                      </Button>
+                      <Button 
+                        onClick={profileForm.handleSubmit(handleProfileSubmit)}
+                        disabled={updateProfileMutation.isPending}
+                        data-testid="button-save-profile"
+                      >
+                        {updateProfileMutation.isPending ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        Save Changes
+                      </Button>
+                    </>
+                  ) : (
+                    <Button onClick={handleEditProfile} data-testid="button-edit-profile">
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit Profile
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card data-testid="card-personal-info">
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              {/* Personal Information */}
+              <Card className="xl:col-span-2" data-testid="card-personal-info">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <User className="h-5 w-5" />
                     Personal Information
                   </CardTitle>
                 </CardHeader>
+                <CardContent>
+                  <Form {...profileForm}>
+                    <form onSubmit={profileForm.handleSubmit(handleProfileSubmit)} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormField
+                          control={profileForm.control}
+                          name="firstName"
+                          render={({ field }) => (
+                            <FormItem data-testid="field-first-name">
+                              <FormLabel>First Name</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  {...field} 
+                                  placeholder="Enter first name"
+                                  disabled={!isEditingProfile}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={profileForm.control}
+                          name="lastName"
+                          render={({ field }) => (
+                            <FormItem data-testid="field-last-name">
+                              <FormLabel>Last Name</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  {...field} 
+                                  placeholder="Enter last name"
+                                  disabled={!isEditingProfile}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={profileForm.control}
+                          name="phone"
+                          render={({ field }) => (
+                            <FormItem data-testid="field-phone">
+                              <FormLabel>Phone Number</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  {...field} 
+                                  placeholder="Enter phone number"
+                                  disabled={!isEditingProfile}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormItem data-testid="field-email">
+                          <FormLabel>Email Address</FormLabel>
+                          <FormControl>
+                            <Input 
+                              value={user?.email || ''}
+                              disabled
+                              className="bg-muted"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Email cannot be changed as it's used for account authentication
+                          </FormDescription>
+                        </FormItem>
+                      </div>
+                    </form>
+                  </Form>
+                </CardContent>
+              </Card>
+
+              {/* Account Information */}
+              <Card data-testid="card-account-info">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5" />
+                    Account Information
+                  </CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Full Name</label>
-                    <p className="text-lg" data-testid="text-profile-name">
-                      {user?.firstName && user?.lastName 
-                        ? `${user.firstName} ${user.lastName}` 
-                        : user?.firstName || user?.lastName || 'Not provided'
-                      }
-                    </p>
+                  {profileLoading ? (
+                    <div className="space-y-4">
+                      {[1, 2, 3, 4].map(i => (
+                        <div key={i} className="space-y-2">
+                          <div className="h-4 w-24 bg-muted rounded animate-pulse"></div>
+                          <div className="h-6 w-16 bg-muted rounded animate-pulse"></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : customerProfile ? (
+                    <>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Total Bookings</Label>
+                        <p className="text-lg font-semibold" data-testid="text-total-bookings">
+                          {customerProfile.stats.totalBookings}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Total Spent</Label>
+                        <p className="text-lg font-semibold" data-testid="text-total-spent-profile">
+                          {formatCurrency(customerProfile.stats.totalSpentPaisa)}
+                        </p>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Account Status</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <span className="text-sm font-medium text-green-600">Active</span>
+                        </div>
+                      </div>
+                      {customerProfile.stats.lastBookingDate && (
+                        <div>
+                          <Label className="text-sm font-medium text-muted-foreground">Last Booking</Label>
+                          <p className="text-sm">{formatDate(customerProfile.stats.lastBookingDate)}</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Account information unavailable</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Communication Preferences */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card data-testid="card-communication-preferences">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bell className="h-5 w-5" />
+                    Communication Preferences
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Choose how you'd like to receive updates about your appointments
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex items-center justify-between" data-testid="toggle-email-notifications">
+                    <div className="space-y-0.5">
+                      <Label className="flex items-center gap-2 text-base font-medium">
+                        <Mail className="h-4 w-4" />
+                        Email Notifications
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Appointment confirmations and reminders via email
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={preferencesData.emailNotifications}
+                      onCheckedChange={(checked) => handlePreferencesUpdate({ emailNotifications: checked })}
+                    />
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Email</label>
-                    <p className="text-lg flex items-center gap-2" data-testid="text-profile-email">
-                      <Mail className="h-4 w-4" />
-                      {user?.email}
-                    </p>
+                  
+                  <Separator />
+                  
+                  <div className="flex items-center justify-between" data-testid="toggle-sms-notifications">
+                    <div className="space-y-0.5">
+                      <Label className="flex items-center gap-2 text-base font-medium">
+                        <Smartphone className="h-4 w-4" />
+                        SMS Notifications
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Urgent reminders and updates via text message
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={preferencesData.smsNotifications}
+                      onCheckedChange={(checked) => handlePreferencesUpdate({ smsNotifications: checked })}
+                    />
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Phone</label>
-                    <p className="text-lg flex items-center gap-2" data-testid="text-profile-phone">
-                      <Phone className="h-4 w-4" />
-                      Not provided
-                    </p>
+                  
+                  <Separator />
+                  
+                  <div className="flex items-center justify-between" data-testid="toggle-marketing-comms">
+                    <div className="space-y-0.5">
+                      <Label className="flex items-center gap-2 text-base font-medium">
+                        <MessageSquare className="h-4 w-4" />
+                        Marketing Communications
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Special offers, promotions, and salon news
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={preferencesData.marketingComms}
+                      onCheckedChange={(checked) => handlePreferencesUpdate({ marketingComms: checked })}
+                    />
                   </div>
                 </CardContent>
               </Card>
 
-              <Card data-testid="card-preferences">
+              {/* Service Preferences */}
+              <Card data-testid="card-service-preferences">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Settings className="h-5 w-5" />
-                    Preferences
+                    <Heart className="h-5 w-5" />
+                    Service Preferences
                   </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Based on your booking history and preferences
+                  </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-6">
+                  {customerProfile && customerProfile.stats.favoriteServices.length > 0 ? (
+                    <>
+                      <div>
+                        <Label className="text-sm font-medium text-muted-foreground">Favorite Services</Label>
+                        <div className="mt-2 space-y-2">
+                          {customerProfile.stats.favoriteServices.slice(0, 3).map((service, index) => (
+                            <div key={index} className="flex items-center justify-between p-2 bg-muted rounded-lg" data-testid={`favorite-service-${index}`}>
+                              <div className="flex items-center gap-2">
+                                <Star className="h-4 w-4 text-yellow-500" />
+                                <span className="text-sm font-medium">{service.serviceName}</span>
+                              </div>
+                              <Badge variant="secondary" className="text-xs">
+                                {service.count} times
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <Separator />
+                    </>
+                  ) : null}
+                  
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground">Notification Settings</label>
-                    <p className="text-sm text-muted-foreground">
-                      Email notifications enabled
-                    </p>
+                    <Label className="text-sm font-medium text-muted-foreground">Preferred Times</Label>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {['Morning', 'Afternoon', 'Evening'].map((time) => (
+                        <Button
+                          key={time}
+                          variant={preferencesData.preferredTimes.includes(time.toLowerCase()) ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => {
+                            const currentTimes = preferencesData.preferredTimes;
+                            const timeValue = time.toLowerCase();
+                            const newTimes = currentTimes.includes(timeValue) 
+                              ? currentTimes.filter(t => t !== timeValue)
+                              : [...currentTimes, timeValue];
+                            handlePreferencesUpdate({ preferredTimes: newTimes });
+                          }}
+                          data-testid={`toggle-time-${time.toLowerCase()}`}
+                          className="text-xs"
+                        >
+                          {time}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
+                  
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground">Preferred Location</label>
-                    <p className="text-sm text-muted-foreground flex items-center gap-2">
-                      <MapPin className="h-4 w-4" />
-                      Not set
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Loyalty Points</label>
-                    <p className="text-lg font-semibold text-primary">
-                      0 points
-                    </p>
+                    <Label className="text-sm font-medium text-muted-foreground">Preferred Communication Method</Label>
+                    <Select 
+                      value={preferencesData.preferredCommunicationMethod} 
+                      onValueChange={(value) => handlePreferencesUpdate({ preferredCommunicationMethod: value as 'email' | 'sms' | 'both' })}
+                    >
+                      <SelectTrigger className="mt-2" data-testid="select-communication-method">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="email">Email Only</SelectItem>
+                        <SelectItem value="sms">SMS Only</SelectItem>
+                        <SelectItem value="both">Both Email & SMS</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </CardContent>
               </Card>
