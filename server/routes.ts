@@ -763,16 +763,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const salons = await storage.getAllSalons();
       
-      // Format salons for frontend with proper structure
-      let formattedSalons = salons.map(salon => ({
-        id: salon.id,
-        name: salon.name,
-        rating: parseFloat(salon.rating?.toString() || '0'),
-        reviewCount: salon.reviewCount,
-        location: `${salon.address}, ${salon.city}`,
-        category: salon.category,
-        priceRange: salon.priceRange,
-        openTime: salon.closeTime // Show when it closes
+      // Format salons for frontend with proper structure including images
+      let formattedSalons = await Promise.all(salons.map(async salon => {
+        // Get the first media asset as the primary image
+        const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
+        const primaryImage = mediaAssets.find(asset => asset.isPrimary) || mediaAssets[0];
+        
+        return {
+          id: salon.id,
+          name: salon.name,
+          rating: parseFloat(salon.rating?.toString() || '0'),
+          reviewCount: salon.reviewCount,
+          location: `${salon.address}, ${salon.city}`,
+          category: salon.category,
+          priceRange: salon.priceRange,
+          openTime: salon.closeTime, // Show when it closes
+          image: primaryImage?.url || '' // Include primary image URL
+        };
       }));
 
       // Apply search filters
