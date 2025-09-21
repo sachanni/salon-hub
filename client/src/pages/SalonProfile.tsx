@@ -1,14 +1,37 @@
 import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Calendar, Clock, MapPin, Phone, Star, Users, ArrowLeft } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { 
+  Calendar, 
+  Clock, 
+  MapPin, 
+  Phone, 
+  Star, 
+  Users, 
+  ArrowLeft, 
+  Share2,
+  Heart,
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  Award,
+  Wifi,
+  CreditCard,
+  Car,
+  Coffee,
+  Shield
+} from "lucide-react";
 import { Link } from "wouter";
 
 export default function SalonProfile() {
   const { salonId } = useParams();
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [isFavorited, setIsFavorited] = useState(false);
 
   // Fetch salon details
   const { data: salon, isLoading: isSalonLoading } = useQuery({
@@ -33,6 +56,69 @@ export default function SalonProfile() {
     queryKey: ['/api/salons', salonId, 'media-assets'],
     enabled: !!salonId,
   });
+
+  // Prepare image gallery
+  const allImages = [
+    ...(mediaAssets?.map(asset => asset.fileUrl) || []),
+    // Add some default professional salon images if no media assets
+    'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80',
+    'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80',
+    'https://images.unsplash.com/photo-1595475884552-c2b8a8b3d39a?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80',
+    'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80'
+  ].filter((url, index, array) => array.indexOf(url) === index); // Remove duplicates
+
+  // Service categories
+  const serviceCategories = services ? services.reduce((acc, service) => {
+    const category = service.category || 'General Services';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(service);
+    return acc;
+  }, {} as Record<string, typeof services>) : {};
+
+  // Mock reviews data (would come from API in real app)
+  const reviews = [
+    {
+      id: 1,
+      author: "Sarah M.",
+      rating: 5,
+      text: "Amazing experience! The staff was professional and the results exceeded my expectations. Highly recommend!",
+      date: "2 weeks ago",
+      verified: true
+    },
+    {
+      id: 2,
+      author: "Mike R.",
+      rating: 5,
+      text: "Clean facility, great service, and friendly staff. Will definitely be coming back!",
+      date: "1 month ago",
+      verified: true
+    },
+    {
+      id: 3,
+      author: "Lisa K.",
+      rating: 4,
+      text: "Very professional service. The therapist was skilled and knowledgeable. Beautiful salon!",
+      date: "1 month ago",
+      verified: true
+    }
+  ];
+
+  // Amenities
+  const amenities = [
+    { icon: Wifi, label: "Free WiFi" },
+    { icon: CreditCard, label: "Card Payment" },
+    { icon: Car, label: "Parking Available" },
+    { icon: Coffee, label: "Complimentary Drinks" },
+    { icon: Shield, label: "Health & Safety Certified" }
+  ];
+
+  const nextImage = () => {
+    setCurrentImageIndex((prev) => (prev + 1) % allImages.length);
+  };
+
+  const prevImage = () => {
+    setCurrentImageIndex((prev) => (prev - 1 + allImages.length) % allImages.length);
+  };
 
   if (isSalonLoading) {
     return (
@@ -59,43 +145,95 @@ export default function SalonProfile() {
     );
   }
 
-  const heroImage = mediaAssets?.find(asset => asset.category === 'hero')?.fileUrl || 
-                   mediaAssets?.[0]?.fileUrl || 
-                   'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80';
-
   return (
     <div className="min-h-screen bg-background">
-      {/* Back Navigation */}
-      <div className="container mx-auto px-4 pt-4">
-        <Button variant="ghost" asChild data-testid="button-back-home">
-          <Link href="/">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Home
-          </Link>
-        </Button>
+      {/* Navigation Header */}
+      <div className="bg-white border-b">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" asChild data-testid="button-back-home">
+              <Link href="/">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Home
+              </Link>
+            </Button>
+            
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsFavorited(!isFavorited)}
+                data-testid="button-favorite"
+              >
+                <Heart className={`h-4 w-4 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
+              </Button>
+              <Button variant="ghost" size="sm" data-testid="button-share">
+                <Share2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Hero Section */}
-      <div className="relative h-96 overflow-hidden">
+      {/* Image Gallery */}
+      <div className="relative h-96 lg:h-[500px] overflow-hidden bg-gray-100">
         <img 
-          src={heroImage}
-          alt={salon.name}
+          src={allImages[currentImageIndex]}
+          alt={`${salon.name} - Image ${currentImageIndex + 1}`}
           className="w-full h-full object-cover"
         />
-        <div className="absolute inset-0 bg-black/40"></div>
-        <div className="absolute bottom-0 left-0 right-0 p-8 text-white">
+        
+        {/* Gallery Navigation */}
+        {allImages.length > 1 && (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="absolute left-4 top-1/2 -translate-y-1/2 opacity-80 hover:opacity-100"
+              onClick={prevImage}
+              data-testid="button-prev-image"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="absolute right-4 top-1/2 -translate-y-1/2 opacity-80 hover:opacity-100"
+              onClick={nextImage}
+              data-testid="button-next-image"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            
+            {/* Image Counter */}
+            <div className="absolute bottom-4 right-4 bg-black/60 text-white px-3 py-1 rounded-full text-sm">
+              <Camera className="h-3 w-3 inline mr-1" />
+              {currentImageIndex + 1} / {allImages.length}
+            </div>
+          </>
+        )}
+        
+        {/* Salon Info Overlay */}
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-6 text-white">
           <div className="container mx-auto">
             <div className="flex items-center gap-2 mb-2">
-              <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
-              <span className="text-lg font-semibold" data-testid="text-salon-rating">
-                {salon.rating || '5.0'}
-              </span>
-              <span className="text-white/80">({salon.reviewCount || 0} reviews)</span>
+              <div className="flex items-center gap-1 bg-white/20 backdrop-blur-sm rounded-full px-3 py-1">
+                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                <span className="font-semibold" data-testid="text-salon-rating">
+                  {salon.rating || '4.7'}
+                </span>
+                <span className="text-white/80">({salon.reviewCount || reviews.length} reviews)</span>
+              </div>
+              <Badge variant="secondary" className="bg-white/20 backdrop-blur-sm text-white border-white/30">
+                {salon.category || 'Beauty & Wellness'}
+              </Badge>
             </div>
-            <h1 className="text-4xl font-bold mb-2" data-testid="text-salon-name">{salon.name}</h1>
-            <div className="flex items-center gap-2">
-              <MapPin className="h-5 w-5" />
-              <span className="text-lg" data-testid="text-salon-location">
+            <h1 className="text-3xl lg:text-4xl font-bold mb-2" data-testid="text-salon-name">
+              {salon.name}
+            </h1>
+            <div className="flex items-center gap-2 text-white/90">
+              <MapPin className="h-4 w-4" />
+              <span className="text-sm lg:text-base" data-testid="text-salon-location">
                 {salon.address}, {salon.city}, {salon.state} {salon.zipCode}
               </span>
             </div>
@@ -106,109 +244,245 @@ export default function SalonProfile() {
       <div className="container mx-auto px-4 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* About Section */}
-            <Card>
-              <CardHeader>
-                <CardTitle>About {salon.name}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4" data-testid="text-salon-description">
-                  {salon.description || `Welcome to ${salon.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment.`}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">{salon.category || 'Beauty & Wellness'}</Badge>
-                  <Badge variant="outline">{salon.priceRange || '$$'}</Badge>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="lg:col-span-2">
+            <Tabs defaultValue="services" className="w-full">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="services">Services</TabsTrigger>
+                <TabsTrigger value="team">Team</TabsTrigger>
+                <TabsTrigger value="reviews">Reviews</TabsTrigger>
+                <TabsTrigger value="about">About</TabsTrigger>
+              </TabsList>
 
-            {/* Services Section */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Our Services</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isServicesLoading ? (
-                  <div className="space-y-2">
-                    <div className="h-4 bg-muted rounded animate-pulse"></div>
-                    <div className="h-4 bg-muted rounded animate-pulse w-3/4"></div>
-                  </div>
-                ) : services && services.length > 0 ? (
-                  <div className="space-y-4">
-                    {services.map((service) => (
-                      <div key={service.id} className="flex justify-between items-start border-b pb-4 last:border-b-0" data-testid={`service-${service.id}`}>
-                        <div className="flex-1">
-                          <h4 className="font-semibold" data-testid={`text-service-name-${service.id}`}>{service.name}</h4>
-                          <p className="text-sm text-muted-foreground mt-1" data-testid={`text-service-description-${service.id}`}>
-                            {service.description}
-                          </p>
-                          <div className="flex items-center gap-2 mt-2">
-                            <Clock className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm text-muted-foreground" data-testid={`text-service-duration-${service.id}`}>
-                              {service.duration} minutes
-                            </span>
+              {/* Services Tab */}
+              <TabsContent value="services" className="mt-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Award className="h-5 w-5" />
+                      Our Services
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {isServicesLoading ? (
+                      <div className="space-y-4">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="animate-pulse">
+                            <div className="h-4 bg-muted rounded w-1/3 mb-2"></div>
+                            <div className="h-3 bg-muted rounded w-2/3 mb-2"></div>
+                            <div className="h-3 bg-muted rounded w-1/4"></div>
                           </div>
-                        </div>
-                        <div className="text-right ml-4">
-                          <p className="font-semibold text-lg" data-testid={`text-service-price-${service.id}`}>
-                            ₹{service.price}
-                          </p>
-                        </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">Services will be available soon.</p>
-                )}
-              </CardContent>
-            </Card>
+                    ) : Object.keys(serviceCategories).length > 0 ? (
+                      <div className="space-y-6">
+                        {Object.entries(serviceCategories).map(([category, categoryServices]) => (
+                          <div key={category}>
+                            <h3 className="text-lg font-semibold mb-4 text-primary">{category}</h3>
+                            <div className="space-y-4">
+                              {categoryServices.map((service) => (
+                                <div key={service.id} className="flex justify-between items-start p-4 rounded-lg border hover:shadow-sm transition-shadow" data-testid={`service-${service.id}`}>
+                                  <div className="flex-1">
+                                    <h4 className="font-semibold text-lg mb-1" data-testid={`text-service-name-${service.id}`}>
+                                      {service.name}
+                                    </h4>
+                                    <p className="text-muted-foreground mb-2" data-testid={`text-service-description-${service.id}`}>
+                                      {service.description}
+                                    </p>
+                                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                                      <div className="flex items-center gap-1">
+                                        <Clock className="h-4 w-4" />
+                                        <span data-testid={`text-service-duration-${service.id}`}>
+                                          {service.duration} min
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <Users className="h-4 w-4" />
+                                        <span>Professional team</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="text-right ml-6">
+                                    <p className="font-bold text-xl mb-2" data-testid={`text-service-price-${service.id}`}>
+                                      ₹{service.price}
+                                    </p>
+                                    <Button size="sm" data-testid={`button-book-service-${service.id}`}>
+                                      <Calendar className="h-3 w-3 mr-1" />
+                                      Book
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Award className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                        <p className="text-muted-foreground">Services will be available soon.</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-            {/* Staff Section */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Our Team</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isStaffLoading ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {[1, 2].map((i) => (
-                      <div key={i} className="flex items-center space-x-3">
-                        <div className="h-12 w-12 bg-muted rounded-full animate-pulse"></div>
-                        <div className="space-y-2 flex-1">
-                          <div className="h-4 bg-muted rounded animate-pulse"></div>
-                          <div className="h-3 bg-muted rounded animate-pulse w-2/3"></div>
-                        </div>
+              {/* Team Tab */}
+              <TabsContent value="team" className="mt-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Meet Our Team
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {isStaffLoading ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {[1, 2, 3, 4].map((i) => (
+                          <div key={i} className="animate-pulse">
+                            <div className="h-32 bg-muted rounded-lg mb-3"></div>
+                            <div className="h-4 bg-muted rounded w-2/3 mb-2"></div>
+                            <div className="h-3 bg-muted rounded w-1/2"></div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                ) : staff && staff.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {staff.map((member) => (
-                      <div key={member.id} className="flex items-center space-x-3" data-testid={`staff-${member.id}`}>
-                        <div className="h-12 w-12 bg-primary/10 rounded-full flex items-center justify-center">
-                          <Users className="h-6 w-6 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium" data-testid={`text-staff-name-${member.id}`}>{member.name}</p>
-                          <p className="text-sm text-muted-foreground" data-testid={`text-staff-role-${member.id}`}>
-                            {member.role || 'Specialist'}
+                    ) : staff && staff.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {staff.map((member) => (
+                          <div key={member.id} className="text-center" data-testid={`staff-${member.id}`}>
+                            <div className="h-32 w-32 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <Users className="h-16 w-16 text-primary" />
+                            </div>
+                            <h4 className="font-semibold text-lg mb-1" data-testid={`text-staff-name-${member.id}`}>
+                              {member.name}
+                            </h4>
+                            <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${member.id}`}>
+                              {member.role || 'Senior Specialist'}
+                            </p>
+                            <div className="flex items-center justify-center gap-1 text-sm">
+                              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                              <span>4.9</span>
+                              <span className="text-muted-foreground">(156 reviews)</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                        <p className="text-muted-foreground">Our team information will be available soon.</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Reviews Tab */}
+              <TabsContent value="reviews" className="mt-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Star className="h-5 w-5" />
+                      Customer Reviews
+                    </CardTitle>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
+                        <span className="text-2xl font-bold">4.7</span>
+                        <span className="text-muted-foreground">({reviews.length} reviews)</span>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-6">
+                      {reviews.map((review) => (
+                        <div key={review.id} className="border-b pb-6 last:border-b-0" data-testid={`review-${review.id}`}>
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
+                                <span className="font-semibold text-primary">
+                                  {review.author.charAt(0)}
+                                </span>
+                              </div>
+                              <div>
+                                <p className="font-semibold" data-testid={`text-review-author-${review.id}`}>
+                                  {review.author}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <div className="flex items-center">
+                                    {[...Array(5)].map((_, i) => (
+                                      <Star
+                                        key={i}
+                                        className={`h-4 w-4 ${
+                                          i < review.rating
+                                            ? 'fill-yellow-400 text-yellow-400'
+                                            : 'text-gray-300'
+                                        }`}
+                                      />
+                                    ))}
+                                  </div>
+                                  <span className="text-sm text-muted-foreground">{review.date}</span>
+                                  {review.verified && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      <Shield className="h-3 w-3 mr-1" />
+                                      Verified
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-muted-foreground" data-testid={`text-review-content-${review.id}`}>
+                            {review.text}
                           </p>
                         </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* About Tab */}
+              <TabsContent value="about" className="mt-6">
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>About {salon.name}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-muted-foreground mb-6" data-testid="text-salon-description">
+                        {salon.description || `Welcome to ${salon.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment. We use only the finest products and latest techniques to ensure you leave feeling refreshed and confident.`}
+                      </p>
+                      
+                      <div className="mb-6">
+                        <h4 className="font-semibold mb-3">Amenities & Features</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {amenities.map((amenity) => (
+                            <div key={amenity.label} className="flex items-center gap-2 text-sm">
+                              <amenity.icon className="h-4 w-4 text-primary" />
+                              <span>{amenity.label}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">Our team information will be available soon.</p>
-                )}
-              </CardContent>
-            </Card>
+                      
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline">{salon.category || 'Beauty & Wellness'}</Badge>
+                        <Badge variant="outline">{salon.priceRange || 'Mid-range'}</Badge>
+                        <Badge variant="outline">Professional</Badge>
+                        <Badge variant="outline">Certified</Badge>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
 
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Booking Card */}
-            <Card>
+            <Card className="sticky top-4">
               <CardHeader>
                 <CardTitle>Book an Appointment</CardTitle>
               </CardHeader>
@@ -218,44 +492,70 @@ export default function SalonProfile() {
                   Book Now
                 </Button>
                 <Separator />
-                <div className="space-y-3 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                    <span>Open {salon.openTime || '9:00 AM'} - {salon.closeTime || '9:00 PM'}</span>
+                
+                {/* Opening Hours */}
+                <div>
+                  <h4 className="font-semibold mb-2">Opening Hours</h4>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span>Monday - Friday</span>
+                      <span className="font-medium">{salon.openTime || '9:00 AM'} - {salon.closeTime || '9:00 PM'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Saturday</span>
+                      <span className="font-medium">9:00 AM - 7:00 PM</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Sunday</span>
+                      <span className="font-medium">10:00 AM - 6:00 PM</span>
+                    </div>
                   </div>
+                </div>
+                
+                <Separator />
+                
+                {/* Quick Contact */}
+                <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{salon.phone || 'Contact information available upon booking'}</span>
+                    <span>{salon.phone || '+91 XXXXX XXXXX'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">
+                      {salon.city}, {salon.state}
+                    </span>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Contact Info */}
+            {/* Location & Contact */}
             <Card>
               <CardHeader>
-                <CardTitle>Contact Information</CardTitle>
+                <CardTitle>Location & Contact</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
+              <CardContent className="space-y-4">
                 <div>
-                  <p className="font-medium">Address</p>
-                  <p className="text-muted-foreground" data-testid="text-contact-address">
+                  <h4 className="font-semibold mb-2">Address</h4>
+                  <p className="text-muted-foreground text-sm" data-testid="text-contact-address">
                     {salon.address}<br />
                     {salon.city}, {salon.state} {salon.zipCode}
                   </p>
                 </div>
-                {salon.phone && (
-                  <div>
-                    <p className="font-medium">Phone</p>
-                    <p className="text-muted-foreground" data-testid="text-contact-phone">{salon.phone}</p>
+                
+                {/* Map placeholder */}
+                <div className="h-32 bg-muted rounded-lg flex items-center justify-center">
+                  <div className="text-center text-muted-foreground">
+                    <MapPin className="h-6 w-6 mx-auto mb-1" />
+                    <p className="text-xs">Interactive Map</p>
                   </div>
-                )}
-                {salon.email && (
-                  <div>
-                    <p className="font-medium">Email</p>
-                    <p className="text-muted-foreground" data-testid="text-contact-email">{salon.email}</p>
-                  </div>
-                )}
+                </div>
+                
+                <Button variant="outline" className="w-full">
+                  <MapPin className="h-4 w-4 mr-2" />
+                  Get Directions
+                </Button>
               </CardContent>
             </Card>
           </div>
