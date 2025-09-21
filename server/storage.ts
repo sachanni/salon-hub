@@ -93,6 +93,14 @@ export interface IStorage {
   getCustomersBySalonId(salonId: string): Promise<any[]>;
   getSalonAnalytics(salonId: string, period: string): Promise<any>;
   
+  // Advanced Analytics Methods
+  getAdvancedStaffAnalytics(salonId: string, period: string): Promise<any>;
+  getClientRetentionAnalytics(salonId: string, period: string): Promise<any>;
+  getServicePopularityAnalytics(salonId: string, period: string): Promise<any>;
+  getBusinessIntelligenceMetrics(salonId: string, period: string): Promise<any>;
+  getCohortAnalysis(salonId: string): Promise<any>;
+  getCustomerSegmentation(salonId: string): Promise<any>;
+  
   // Payment operations
   getPayment(id: string): Promise<Payment | undefined>;
   getPaymentByBookingId(bookingId: string): Promise<Payment | undefined>;
@@ -775,6 +783,680 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching salon analytics:', error);
       throw error;
     }
+  }
+
+  // Advanced Staff Analytics
+  async getAdvancedStaffAnalytics(salonId: string, period: string): Promise<any> {
+    try {
+      const { startDate, endDate, previousStartDate, previousEndDate } = this.calculateDateRange(period);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
+      const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
+
+      // Get detailed staff performance metrics
+      const staffMetrics = await db
+        .select({
+          staffId: staff.id,
+          staffName: staff.name,
+          position: staff.position,
+          hourlyRatePaisa: staff.hourlyRatePaisa,
+          totalBookings: sql<number>`count(${bookings.id})`,
+          completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
+          cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          averageBookingValue: sql<number>`avg(${bookings.totalAmountPaisa})`,
+          workingDays: sql<number>`count(distinct ${bookings.bookingDate})`,
+          firstBookingDate: sql<string>`min(${bookings.bookingDate})`,
+          lastBookingDate: sql<string>`max(${bookings.bookingDate})`
+        })
+        .from(staff)
+        .leftJoin(bookings, and(
+          eq(bookings.staffId, staff.id),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ))
+        .where(and(
+          eq(staff.salonId, salonId),
+          eq(staff.isActive, 1)
+        ))
+        .groupBy(staff.id, staff.name, staff.position, staff.hourlyRatePaisa);
+
+      // Calculate utilization and efficiency metrics
+      const staffAnalytics = staffMetrics.map(staff => {
+        const totalBookings = Number(staff.totalBookings) || 0;
+        const completedBookings = Number(staff.completedBookings) || 0;
+        const cancelledBookings = Number(staff.cancelledBookings) || 0;
+        const totalRevenue = Number(staff.totalRevenue) || 0;
+        const workingDays = Number(staff.workingDays) || 0;
+        const averageBookingValue = Number(staff.averageBookingValue) || 0;
+
+        const completionRate = totalBookings > 0 ? (completedBookings / totalBookings * 100) : 0;
+        const cancellationRate = totalBookings > 0 ? (cancelledBookings / totalBookings * 100) : 0;
+        const bookingsPerDay = workingDays > 0 ? (totalBookings / workingDays) : 0;
+        const revenuePerDay = workingDays > 0 ? (totalRevenue / workingDays) : 0;
+
+        return {
+          staffId: staff.staffId,
+          staffName: staff.staffName,
+          position: staff.position,
+          totalBookings,
+          completedBookings,
+          completionRate: Number(completionRate.toFixed(1)),
+          cancellationRate: Number(cancellationRate.toFixed(1)),
+          totalRevenuePaisa: totalRevenue,
+          averageBookingValuePaisa: Math.round(averageBookingValue),
+          workingDays,
+          bookingsPerDay: Number(bookingsPerDay.toFixed(1)),
+          revenuePerDay: Math.round(revenuePerDay),
+          utilizationScore: Number((completionRate * 0.6 + bookingsPerDay * 10).toFixed(1)),
+          efficiency: Number((totalRevenue / Math.max(totalBookings, 1)).toFixed(0))
+        };
+      });
+
+      return {
+        period,
+        staffAnalytics: staffAnalytics.sort((a, b) => b.totalRevenuePaisa - a.totalRevenuePaisa),
+        summary: {
+          totalStaff: staffAnalytics.length,
+          averageUtilization: staffAnalytics.length > 0 
+            ? Number((staffAnalytics.reduce((sum, s) => sum + s.utilizationScore, 0) / staffAnalytics.length).toFixed(1))
+            : 0,
+          topPerformer: staffAnalytics.length > 0 ? staffAnalytics[0].staffName : null,
+          totalStaffRevenue: staffAnalytics.reduce((sum, s) => sum + s.totalRevenuePaisa, 0)
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching advanced staff analytics:', error);
+      throw error;
+    }
+  }
+
+  // Client Retention Analytics
+  async getClientRetentionAnalytics(salonId: string, period: string): Promise<any> {
+    try {
+      const { startDate, endDate } = this.calculateDateRange(period);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      // Get customer behavior data
+      const customerMetrics = await db
+        .select({
+          customerEmail: bookings.customerEmail,
+          customerName: bookings.customerName,
+          totalBookings: sql<number>`count(*)`,
+          totalSpent: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          firstBooking: sql<string>`min(${bookings.bookingDate})`,
+          lastBooking: sql<string>`max(${bookings.bookingDate})`,
+          completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
+          cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ))
+        .groupBy(bookings.customerEmail, bookings.customerName);
+
+      // Calculate retention metrics
+      const now = new Date();
+      const retentionAnalytics = customerMetrics.map(customer => {
+        const totalBookings = Number(customer.totalBookings) || 0;
+        const totalSpent = Number(customer.totalSpent) || 0;
+        const completedBookings = Number(customer.completedBookings) || 0;
+        const firstBookingDate = new Date(customer.firstBooking);
+        const lastBookingDate = new Date(customer.lastBooking);
+        
+        const daysSinceFirst = Math.floor((now.getTime() - firstBookingDate.getTime()) / (1000 * 60 * 60 * 24));
+        const daysSinceLast = Math.floor((now.getTime() - lastBookingDate.getTime()) / (1000 * 60 * 60 * 24));
+        const customerLifespan = Math.floor((lastBookingDate.getTime() - firstBookingDate.getTime()) / (1000 * 60 * 60 * 24));
+        const averageDaysBetweenBookings = totalBookings > 1 ? customerLifespan / (totalBookings - 1) : 0;
+
+        // Customer lifecycle stage
+        let lifecycleStage = 'new';
+        if (totalBookings >= 5) lifecycleStage = 'loyal';
+        else if (totalBookings >= 2) lifecycleStage = 'returning';
+        
+        // Churn risk assessment
+        let churnRisk = 'low';
+        if (daysSinceLast > 90) churnRisk = 'high';
+        else if (daysSinceLast > 45) churnRisk = 'medium';
+
+        return {
+          customerEmail: customer.customerEmail,
+          customerName: customer.customerName,
+          totalBookings,
+          completedBookings,
+          totalSpentPaisa: totalSpent,
+          averageBookingValuePaisa: totalBookings > 0 ? Math.round(totalSpent / totalBookings) : 0,
+          daysSinceFirst,
+          daysSinceLast,
+          averageDaysBetweenBookings: Math.round(averageDaysBetweenBookings),
+          lifecycleStage,
+          churnRisk,
+          lifetimeValue: totalSpent
+        };
+      });
+
+      // Calculate aggregate retention metrics
+      const totalCustomers = retentionAnalytics.length;
+      const returningCustomers = retentionAnalytics.filter(c => c.totalBookings > 1).length;
+      const loyalCustomers = retentionAnalytics.filter(c => c.lifecycleStage === 'loyal').length;
+      const highRiskCustomers = retentionAnalytics.filter(c => c.churnRisk === 'high').length;
+
+      const averageLifetimeValue = totalCustomers > 0 
+        ? retentionAnalytics.reduce((sum, c) => sum + c.lifetimeValue, 0) / totalCustomers 
+        : 0;
+
+      return {
+        period,
+        customerAnalytics: retentionAnalytics.sort((a, b) => b.lifetimeValue - a.lifetimeValue),
+        retentionMetrics: {
+          totalCustomers,
+          newCustomers: retentionAnalytics.filter(c => c.lifecycleStage === 'new').length,
+          returningCustomers,
+          loyalCustomers,
+          retentionRate: totalCustomers > 0 ? Number((returningCustomers / totalCustomers * 100).toFixed(1)) : 0,
+          loyaltyRate: totalCustomers > 0 ? Number((loyalCustomers / totalCustomers * 100).toFixed(1)) : 0,
+          churnRisk: {
+            high: highRiskCustomers,
+            medium: retentionAnalytics.filter(c => c.churnRisk === 'medium').length,
+            low: retentionAnalytics.filter(c => c.churnRisk === 'low').length
+          },
+          averageLifetimeValuePaisa: Math.round(averageLifetimeValue),
+          averageBookingsPerCustomer: totalCustomers > 0 
+            ? Number((retentionAnalytics.reduce((sum, c) => sum + c.totalBookings, 0) / totalCustomers).toFixed(1))
+            : 0
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching client retention analytics:', error);
+      throw error;
+    }
+  }
+
+  // Service Popularity Analytics
+  async getServicePopularityAnalytics(salonId: string, period: string): Promise<any> {
+    try {
+      const { startDate, endDate, previousStartDate, previousEndDate } = this.calculateDateRange(period);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
+      const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
+
+      // Current period service performance
+      const currentServiceMetrics = await db
+        .select({
+          serviceId: services.id,
+          serviceName: services.name,
+          serviceCategory: services.category,
+          servicePricePaisa: services.priceInPaisa,
+          serviceDuration: services.durationMinutes,
+          totalBookings: sql<number>`count(*)`,
+          completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
+          cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          averageBookingValue: sql<number>`avg(${bookings.totalAmountPaisa})`,
+          uniqueCustomers: sql<number>`count(distinct ${bookings.customerEmail})`
+        })
+        .from(services)
+        .leftJoin(bookings, and(
+          eq(bookings.serviceId, services.id),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ))
+        .where(eq(services.salonId, salonId))
+        .groupBy(services.id, services.name, services.category, services.priceInPaisa, services.durationMinutes);
+
+      // Previous period for comparison
+      const previousServiceMetrics = await db
+        .select({
+          serviceId: services.id,
+          totalBookings: sql<number>`count(*)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
+        })
+        .from(services)
+        .leftJoin(bookings, and(
+          eq(bookings.serviceId, services.id),
+          gte(bookings.bookingDate, previousStartDateStr),
+          lte(bookings.bookingDate, previousEndDateStr)
+        ))
+        .where(eq(services.salonId, salonId))
+        .groupBy(services.id);
+
+      // Create lookup for previous period data
+      const previousMetricsMap = new Map();
+      previousServiceMetrics.forEach(metric => {
+        previousMetricsMap.set(metric.serviceId, {
+          totalBookings: Number(metric.totalBookings) || 0,
+          totalRevenue: Number(metric.totalRevenue) || 0
+        });
+      });
+
+      // Calculate service analytics with trends
+      const serviceAnalytics = currentServiceMetrics.map(service => {
+        const totalBookings = Number(service.totalBookings) || 0;
+        const completedBookings = Number(service.completedBookings) || 0;
+        const totalRevenue = Number(service.totalRevenue) || 0;
+        const uniqueCustomers = Number(service.uniqueCustomers) || 0;
+        
+        const previousData = previousMetricsMap.get(service.serviceId) || { totalBookings: 0, totalRevenue: 0 };
+        
+        const completionRate = totalBookings > 0 ? (completedBookings / totalBookings * 100) : 0;
+        const cancellationRate = totalBookings > 0 ? (Number(service.cancelledBookings) / totalBookings * 100) : 0;
+        const revenuePerBooking = totalBookings > 0 ? (totalRevenue / totalBookings) : 0;
+        
+        // Trend calculations
+        const bookingsTrend = this.calculateTrendMetric(totalBookings, previousData.totalBookings);
+        const revenueTrend = this.calculateTrendMetric(totalRevenue, previousData.totalRevenue);
+
+        return {
+          serviceId: service.serviceId,
+          serviceName: service.serviceName,
+          category: service.serviceCategory,
+          standardPricePaisa: Number(service.servicePricePaisa) || 0,
+          durationMinutes: Number(service.serviceDuration) || 0,
+          totalBookings,
+          completedBookings,
+          completionRate: Number(completionRate.toFixed(1)),
+          cancellationRate: Number(cancellationRate.toFixed(1)),
+          totalRevenuePaisa: totalRevenue,
+          averageRevenuePerBookingPaisa: Math.round(revenuePerBooking),
+          uniqueCustomers,
+          customerReturnRate: uniqueCustomers > 0 ? Number(((totalBookings - uniqueCustomers) / uniqueCustomers * 100).toFixed(1)) : 0,
+          bookingsTrend,
+          revenueTrend,
+          popularityScore: totalBookings * 0.4 + completionRate * 0.3 + (uniqueCustomers / Math.max(totalBookings, 1)) * 100 * 0.3
+        };
+      });
+
+      // Service category analysis
+      const categoryAnalysis = {};
+      serviceAnalytics.forEach(service => {
+        const category = service.category || 'Other';
+        if (!categoryAnalysis[category]) {
+          categoryAnalysis[category] = {
+            serviceCount: 0,
+            totalBookings: 0,
+            totalRevenue: 0,
+            averageCompletionRate: 0
+          };
+        }
+        categoryAnalysis[category].serviceCount++;
+        categoryAnalysis[category].totalBookings += service.totalBookings;
+        categoryAnalysis[category].totalRevenue += service.totalRevenuePaisa;
+        categoryAnalysis[category].averageCompletionRate += service.completionRate;
+      });
+
+      // Calculate category averages
+      Object.values(categoryAnalysis).forEach((category: any) => {
+        category.averageCompletionRate = category.serviceCount > 0 
+          ? Number((category.averageCompletionRate / category.serviceCount).toFixed(1))
+          : 0;
+      });
+
+      return {
+        period,
+        serviceAnalytics: serviceAnalytics.sort((a, b) => b.popularityScore - a.popularityScore),
+        categoryAnalysis,
+        insights: {
+          topService: serviceAnalytics.length > 0 ? serviceAnalytics[0].serviceName : null,
+          mostProfitableService: serviceAnalytics.length > 0 
+            ? serviceAnalytics.sort((a, b) => b.totalRevenuePaisa - a.totalRevenuePaisa)[0].serviceName 
+            : null,
+          highestCompletionRate: serviceAnalytics.length > 0 
+            ? Math.max(...serviceAnalytics.map(s => s.completionRate))
+            : 0,
+          lowestCancellationRate: serviceAnalytics.length > 0 
+            ? Math.min(...serviceAnalytics.map(s => s.cancellationRate))
+            : 0
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching service popularity analytics:', error);
+      throw error;
+    }
+  }
+
+  // Business Intelligence Metrics
+  async getBusinessIntelligenceMetrics(salonId: string, period: string): Promise<any> {
+    try {
+      const { startDate, endDate } = this.calculateDateRange(period);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      // Revenue forecasting based on trends
+      const dailyRevenue = await db
+        .select({
+          date: bookings.bookingDate,
+          revenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          bookingCount: sql<number>`count(*)`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr),
+          eq(bookings.status, 'completed')
+        ))
+        .groupBy(bookings.bookingDate)
+        .orderBy(asc(bookings.bookingDate));
+
+      // Calculate growth trends
+      const revenueData = dailyRevenue.map(day => Number(day.revenue) || 0);
+      const bookingData = dailyRevenue.map(day => Number(day.bookingCount) || 0);
+      
+      const averageRevenue = revenueData.length > 0 ? revenueData.reduce((a, b) => a + b, 0) / revenueData.length : 0;
+      const averageBookings = bookingData.length > 0 ? bookingData.reduce((a, b) => a + b, 0) / bookingData.length : 0;
+      
+      // Simple linear trend calculation
+      const revenueTrend = this.calculateLinearTrend(revenueData);
+      const bookingTrend = this.calculateLinearTrend(bookingData);
+
+      // Peak performance analysis
+      const peakRevenueDay = dailyRevenue.length > 0 
+        ? dailyRevenue.reduce((max, day) => Number(day.revenue) > Number(max.revenue) ? day : max)
+        : null;
+
+      const peakBookingDay = dailyRevenue.length > 0 
+        ? dailyRevenue.reduce((max, day) => Number(day.bookingCount) > Number(max.bookingCount) ? day : max)
+        : null;
+
+      // Capacity utilization
+      const totalStaff = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(staff)
+        .where(and(eq(staff.salonId, salonId), eq(staff.isActive, 1)));
+
+      const staffCount = totalStaff[0]?.count || 0;
+      const workingDaysInPeriod = dailyRevenue.length;
+      const totalBookings = bookingData.reduce((a, b) => a + b, 0);
+      
+      // Assume 8 hours working day, 1 hour per booking average
+      const theoreticalCapacity = staffCount * workingDaysInPeriod * 8;
+      const capacityUtilization = theoreticalCapacity > 0 ? (totalBookings / theoreticalCapacity * 100) : 0;
+
+      return {
+        period,
+        forecasting: {
+          averageDailyRevenuePaisa: Math.round(averageRevenue),
+          averageDailyBookings: Number(averageBookings.toFixed(1)),
+          revenueTrendSlope: revenueTrend.slope,
+          bookingTrendSlope: bookingTrend.slope,
+          projectedNextPeriodRevenuePaisa: Math.round(averageRevenue * (1 + revenueTrend.slope / 100)),
+          projectedNextPeriodBookings: Math.round(averageBookings * (1 + bookingTrend.slope / 100))
+        },
+        performance: {
+          peakRevenueDay: peakRevenueDay ? {
+            date: peakRevenueDay.date,
+            revenuePaisa: Number(peakRevenueDay.revenue),
+            bookings: Number(peakRevenueDay.bookingCount)
+          } : null,
+          peakBookingDay: peakBookingDay ? {
+            date: peakBookingDay.date,
+            revenuePaisa: Number(peakBookingDay.revenue),
+            bookings: Number(peakBookingDay.bookingCount)
+          } : null,
+          capacityUtilization: Number(capacityUtilization.toFixed(1)),
+          staffCount,
+          workingDays: workingDaysInPeriod
+        },
+        trends: {
+          dailyData: dailyRevenue.map(day => ({
+            date: day.date,
+            revenuePaisa: Number(day.revenue) || 0,
+            bookings: Number(day.bookingCount) || 0
+          })),
+          revenueGrowthRate: Number(revenueTrend.slope.toFixed(2)),
+          bookingGrowthRate: Number(bookingTrend.slope.toFixed(2))
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching business intelligence metrics:', error);
+      throw error;
+    }
+  }
+
+  // Cohort Analysis
+  async getCohortAnalysis(salonId: string): Promise<any> {
+    try {
+      // Get all customers with their first booking date
+      const customerCohorts = await db
+        .select({
+          customerEmail: bookings.customerEmail,
+          firstBookingDate: sql<string>`min(${bookings.bookingDate})`,
+          totalBookings: sql<number>`count(*)`
+        })
+        .from(bookings)
+        .where(eq(bookings.salonId, salonId))
+        .groupBy(bookings.customerEmail);
+
+      // Group customers by cohort (month of first booking)
+      const cohortData = {};
+      customerCohorts.forEach(customer => {
+        const cohortMonth = customer.firstBookingDate.substring(0, 7); // YYYY-MM format
+        if (!cohortData[cohortMonth]) {
+          cohortData[cohortMonth] = {
+            cohortSize: 0,
+            customers: []
+          };
+        }
+        cohortData[cohortMonth].cohortSize++;
+        cohortData[cohortMonth].customers.push({
+          email: customer.customerEmail,
+          totalBookings: Number(customer.totalBookings)
+        });
+      });
+
+      // Calculate retention rates for each cohort
+      const cohortAnalysis = Object.entries(cohortData).map(([cohortMonth, data]: [string, any]) => {
+        const returningCustomers = data.customers.filter(c => c.totalBookings > 1).length;
+        const loyalCustomers = data.customers.filter(c => c.totalBookings >= 5).length;
+        
+        return {
+          cohortMonth,
+          cohortSize: data.cohortSize,
+          returningCustomers,
+          loyalCustomers,
+          retentionRate: data.cohortSize > 0 ? Number((returningCustomers / data.cohortSize * 100).toFixed(1)) : 0,
+          loyaltyRate: data.cohortSize > 0 ? Number((loyalCustomers / data.cohortSize * 100).toFixed(1)) : 0,
+          averageBookingsPerCustomer: data.cohortSize > 0 
+            ? Number((data.customers.reduce((sum, c) => sum + c.totalBookings, 0) / data.cohortSize).toFixed(1))
+            : 0
+        };
+      }).sort((a, b) => b.cohortMonth.localeCompare(a.cohortMonth));
+
+      return {
+        cohorts: cohortAnalysis,
+        summary: {
+          totalCohorts: cohortAnalysis.length,
+          averageRetentionRate: cohortAnalysis.length > 0 
+            ? Number((cohortAnalysis.reduce((sum, c) => sum + c.retentionRate, 0) / cohortAnalysis.length).toFixed(1))
+            : 0,
+          averageLoyaltyRate: cohortAnalysis.length > 0 
+            ? Number((cohortAnalysis.reduce((sum, c) => sum + c.loyaltyRate, 0) / cohortAnalysis.length).toFixed(1))
+            : 0,
+          bestPerformingCohort: cohortAnalysis.length > 0 
+            ? cohortAnalysis.reduce((best, current) => current.retentionRate > best.retentionRate ? current : best)
+            : null
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching cohort analysis:', error);
+      throw error;
+    }
+  }
+
+  // Customer Segmentation
+  async getCustomerSegmentation(salonId: string): Promise<any> {
+    try {
+      const customerData = await db
+        .select({
+          customerEmail: bookings.customerEmail,
+          customerName: bookings.customerName,
+          totalBookings: sql<number>`count(*)`,
+          totalSpent: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          lastBookingDate: sql<string>`max(${bookings.bookingDate})`,
+          firstBookingDate: sql<string>`min(${bookings.bookingDate})`
+        })
+        .from(bookings)
+        .where(eq(bookings.salonId, salonId))
+        .groupBy(bookings.customerEmail, bookings.customerName);
+
+      // Segment customers based on RFM analysis (Recency, Frequency, Monetary)
+      const now = new Date();
+      const segments = {
+        champions: [], // High value, frequent, recent
+        loyalCustomers: [], // High frequency, good monetary
+        potentialLoyalists: [], // Recent customers with good frequency
+        newCustomers: [], // Recent but low frequency
+        promising: [], // Recent customers with potential
+        needsAttention: [], // Good monetary but declining frequency
+        aboutToSleep: [], // Low recency but good historical value
+        atRisk: [], // Low recency and frequency but good monetary
+        cannotLoseThem: [], // High monetary value but low recency
+        hibernating: [] // Low on all metrics
+      };
+
+      customerData.forEach(customer => {
+        const totalBookings = Number(customer.totalBookings);
+        const totalSpent = Number(customer.totalSpent);
+        const lastBookingDate = new Date(customer.lastBookingDate);
+        const firstBookingDate = new Date(customer.firstBookingDate);
+        
+        const daysSinceLastBooking = Math.floor((now.getTime() - lastBookingDate.getTime()) / (1000 * 60 * 60 * 24));
+        const customerAge = Math.floor((now.getTime() - firstBookingDate.getTime()) / (1000 * 60 * 60 * 24));
+        const averageBookingValue = totalBookings > 0 ? totalSpent / totalBookings : 0;
+
+        // Simple segmentation logic
+        if (totalBookings >= 5 && daysSinceLastBooking <= 30 && totalSpent >= 500000) {
+          segments.champions.push(customer);
+        } else if (totalBookings >= 3 && daysSinceLastBooking <= 60) {
+          segments.loyalCustomers.push(customer);
+        } else if (daysSinceLastBooking <= 30 && totalBookings >= 2) {
+          segments.potentialLoyalists.push(customer);
+        } else if (daysSinceLastBooking <= 30 && totalBookings === 1) {
+          segments.newCustomers.push(customer);
+        } else if (daysSinceLastBooking <= 60 && totalBookings >= 2) {
+          segments.promising.push(customer);
+        } else if (totalSpent >= 300000 && daysSinceLastBooking <= 90) {
+          segments.needsAttention.push(customer);
+        } else if (totalSpent >= 200000 && daysSinceLastBooking <= 120) {
+          segments.aboutToSleep.push(customer);
+        } else if (totalBookings >= 2 && daysSinceLastBooking <= 180) {
+          segments.atRisk.push(customer);
+        } else if (totalSpent >= 500000) {
+          segments.cannotLoseThem.push(customer);
+        } else {
+          segments.hibernating.push(customer);
+        }
+      });
+
+      // Calculate segment metrics
+      const segmentMetrics = Object.entries(segments).map(([segmentName, customers]: [string, any[]]) => ({
+        segmentName,
+        customerCount: customers.length,
+        totalRevenuePaisa: customers.reduce((sum, c) => sum + Number(c.totalSpent), 0),
+        averageLifetimeValuePaisa: customers.length > 0 
+          ? Math.round(customers.reduce((sum, c) => sum + Number(c.totalSpent), 0) / customers.length)
+          : 0,
+        averageBookings: customers.length > 0 
+          ? Number((customers.reduce((sum, c) => sum + Number(c.totalBookings), 0) / customers.length).toFixed(1))
+          : 0,
+        percentage: customerData.length > 0 ? Number((customers.length / customerData.length * 100).toFixed(1)) : 0
+      }));
+
+      return {
+        segments: segmentMetrics.sort((a, b) => b.totalRevenuePaisa - a.totalRevenuePaisa),
+        totalCustomers: customerData.length,
+        insights: {
+          highValueSegments: ['champions', 'loyalCustomers', 'cannotLoseThem'],
+          atRiskSegments: ['aboutToSleep', 'atRisk', 'hibernating'],
+          growthOpportunitySegments: ['potentialLoyalists', 'promising', 'newCustomers']
+        }
+      };
+    } catch (error) {
+      console.error('Error fetching customer segmentation:', error);
+      throw error;
+    }
+  }
+
+  // Helper methods
+  private calculateDateRange(period: string) {
+    const endDate = new Date();
+    const startDate = new Date();
+    const previousStartDate = new Date();
+    const previousEndDate = new Date();
+    
+    switch (period) {
+      case 'daily':
+      case '1d':
+        startDate.setDate(endDate.getDate() - 1);
+        previousStartDate.setDate(endDate.getDate() - 2);
+        previousEndDate.setDate(endDate.getDate() - 1);
+        break;
+      case 'weekly':
+      case 'week':
+      case '7d':
+        startDate.setDate(endDate.getDate() - 7);
+        previousStartDate.setDate(endDate.getDate() - 14);
+        previousEndDate.setDate(endDate.getDate() - 7);
+        break;
+      case 'monthly':
+      case 'month':
+      case '30d':
+        startDate.setMonth(endDate.getMonth() - 1);
+        previousStartDate.setMonth(endDate.getMonth() - 2);
+        previousEndDate.setMonth(endDate.getMonth() - 1);
+        break;
+      case 'quarterly':
+      case 'quarter':
+      case '90d':
+        startDate.setMonth(endDate.getMonth() - 3);
+        previousStartDate.setMonth(endDate.getMonth() - 6);
+        previousEndDate.setMonth(endDate.getMonth() - 3);
+        break;
+      case 'yearly':
+      case 'year':
+      case '1y':
+        startDate.setFullYear(endDate.getFullYear() - 1);
+        previousStartDate.setFullYear(endDate.getFullYear() - 2);
+        previousEndDate.setFullYear(endDate.getFullYear() - 1);
+        break;
+      default:
+        startDate.setMonth(endDate.getMonth() - 1);
+        previousStartDate.setMonth(endDate.getMonth() - 2);
+        previousEndDate.setMonth(endDate.getMonth() - 1);
+    }
+
+    return { startDate, endDate, previousStartDate, previousEndDate };
+  }
+
+  private calculateTrendMetric(current: number, previous: number) {
+    if (previous === 0) {
+      return current > 0 ? { percentage: '100.0', direction: 'up' } : { percentage: '0.0', direction: 'neutral' };
+    }
+    const change = ((current - previous) / previous) * 100;
+    return {
+      percentage: Math.abs(change).toFixed(1),
+      direction: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral'
+    };
+  }
+
+  private calculateLinearTrend(data: number[]) {
+    if (data.length < 2) return { slope: 0, intercept: 0 };
+    
+    const n = data.length;
+    const sumX = (n * (n - 1)) / 2; // 0 + 1 + 2 + ... + (n-1)
+    const sumY = data.reduce((a, b) => a + b, 0);
+    const sumXY = data.reduce((sum, y, x) => sum + x * y, 0);
+    const sumXX = data.reduce((sum, _, x) => sum + x * x, 0);
+    
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+    
+    return { slope: slope || 0, intercept: intercept || 0 };
   }
 
   // Payment operations

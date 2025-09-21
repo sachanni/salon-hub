@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 import type { Salon } from "@/../../shared/schema";
+import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -789,6 +790,15 @@ export default function BusinessDashboard() {
       publish: ReviewPublishStep
     };
 
+    // Handle analytics tab
+    if (activeTab === "analytics") {
+      return (
+        <div className="p-6">
+          <AdvancedAnalyticsDashboard salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     const Component = components[activeTab as keyof typeof components];
     if (Component && salonId) {
       return (
@@ -926,6 +936,20 @@ export default function BusinessDashboard() {
                 Media
                 {hasMedia && <CheckCircle className="h-3 w-3 text-green-500" />}
                 {!hasMedia && <span className="text-xs text-red-500">*</span>}
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("analytics")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "analytics" 
+                  ? "border-blue-500 text-blue-600" 
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4" />
+                Advanced Analytics
               </div>
             </button>
 

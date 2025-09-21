@@ -1066,6 +1066,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'Failed to fetch analytics' });
     }
   });
+
+  // Advanced Analytics Endpoints
+  
+  // Get advanced staff analytics
+  app.get('/api/salons/:salonId/analytics/staff', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = '30d' } = req.query;
+      
+      const analytics = await storage.getAdvancedStaffAnalytics(salonId, period as string);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching advanced staff analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch staff analytics' });
+    }
+  });
+
+  // Get client retention analytics
+  app.get('/api/salons/:salonId/analytics/retention', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = '30d' } = req.query;
+      
+      const analytics = await storage.getClientRetentionAnalytics(salonId, period as string);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching client retention analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch retention analytics' });
+    }
+  });
+
+  // Get service popularity analytics
+  app.get('/api/salons/:salonId/analytics/services', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = '30d' } = req.query;
+      
+      const analytics = await storage.getServicePopularityAnalytics(salonId, period as string);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching service popularity analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch service analytics' });
+    }
+  });
+
+  // Get business intelligence metrics
+  app.get('/api/salons/:salonId/analytics/intelligence', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = '30d' } = req.query;
+      
+      const analytics = await storage.getBusinessIntelligenceMetrics(salonId, period as string);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching business intelligence metrics:', error);
+      res.status(500).json({ error: 'Failed to fetch intelligence metrics' });
+    }
+  });
+
+  // Get cohort analysis
+  app.get('/api/salons/:salonId/analytics/cohorts', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      const analytics = await storage.getCohortAnalysis(salonId);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching cohort analysis:', error);
+      res.status(500).json({ error: 'Failed to fetch cohort analysis' });
+    }
+  });
+
+  // Get customer segmentation
+  app.get('/api/salons/:salonId/analytics/segmentation', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      const analytics = await storage.getCustomerSegmentation(salonId);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching customer segmentation:', error);
+      res.status(500).json({ error: 'Failed to fetch customer segmentation' });
+    }
+  });
   
   // Get customer profiles for a salon
   app.get('/api/salons/:salonId/customers', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
