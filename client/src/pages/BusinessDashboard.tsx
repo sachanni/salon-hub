@@ -38,6 +38,7 @@ import ServicesStep from "@/components/business-setup/ServicesStep";
 import StaffStep from "@/components/business-setup/StaffStep";
 import BookingSettingsStep from "@/components/business-setup/BookingSettingsStep";
 import MediaStep from "@/components/business-setup/MediaStep";
+import ReviewPublishStep from "@/components/business-setup/ReviewPublishStep";
 
 export default function BusinessDashboard() {
   const { user, isAuthenticated } = useAuth();
@@ -267,7 +268,8 @@ export default function BusinessDashboard() {
       services: ServicesStep,
       staff: StaffStep,
       settings: BookingSettingsStep,
-      media: MediaStep
+      media: MediaStep,
+      publish: ReviewPublishStep
     };
 
     const Component = components[activeTab as keyof typeof components];
@@ -407,6 +409,22 @@ export default function BusinessDashboard() {
                 Media
                 {hasMedia && <CheckCircle className="h-3 w-3 text-green-500" />}
                 {!hasMedia && <span className="text-xs text-red-500">*</span>}
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("publish")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "publish" 
+                  ? "border-blue-500 text-blue-600" 
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-4 w-4" />
+                Publish
+                {completionPercentage === 100 && <CheckCircle className="h-3 w-3 text-green-500" />}
+                {completionPercentage < 100 && <span className="text-xs text-amber-500">({Math.round(completionPercentage)}%)</span>}
               </div>
             </button>
           </div>
