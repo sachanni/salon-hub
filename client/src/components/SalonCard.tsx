@@ -1,7 +1,8 @@
-import { Star, MapPin, Clock } from "lucide-react";
+import { Star, MapPin, Clock, Eye } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
 
 interface SalonCardProps {
   id: string;
@@ -28,16 +29,19 @@ export default function SalonCard({
   openTime,
   onBookingClick
 }: SalonCardProps) {
-  const handleBookNow = () => {
+  const handleBookNow = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     console.log('Book now clicked for salon:', id);
     onBookingClick?.(name, id);
   };
 
   return (
-    <Card 
-      data-testid={`card-salon-${id}`}
-      className="overflow-hidden hover-elevate transition-all duration-200 cursor-pointer"
-    >
+    <Link href={`/salon/${id}`}>
+      <Card 
+        data-testid={`card-salon-${id}`}
+        className="overflow-hidden hover-elevate transition-all duration-200 cursor-pointer"
+      >
       <div className="relative h-48 overflow-hidden">
         <img 
           src={image} 
@@ -82,14 +86,26 @@ export default function SalonCard({
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        <Button 
-          data-testid={`button-book-${id}`}
-          onClick={handleBookNow}
-          className="w-full"
-        >
-          Book Now
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            data-testid={`button-view-${id}`}
+          >
+            <Eye className="h-4 w-4 mr-2" />
+            View Details
+          </Button>
+          <Button 
+            data-testid={`button-book-${id}`}
+            onClick={handleBookNow}
+            className="flex-1"
+          >
+            Book Now
+          </Button>
+        </div>
       </CardContent>
     </Card>
+    </Link>
   );
 }
