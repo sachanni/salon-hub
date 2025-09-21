@@ -65,7 +65,12 @@ export default function MediaStep({
   // Add media asset mutation
   const addMediaMutation = useMutation({
     mutationFn: async (media: MediaAsset) => {
-      const response = await apiRequest('POST', `/api/salons/${salonId}/media-assets`, media);
+      // Convert boolean isPrimary to integer for database compatibility
+      const mediaData = {
+        ...media,
+        isPrimary: media.isPrimary ? 1 : 0
+      };
+      const response = await apiRequest('POST', `/api/salons/${salonId}/media-assets`, mediaData);
       return response.json();
     },
     onSuccess: (data) => {
@@ -147,7 +152,7 @@ export default function MediaStep({
       // Update local state to reflect the change
       setMediaAssets(prev => prev.map(asset => ({
         ...asset,
-        isPrimary: asset.id === mediaId
+        isPrimary: asset.id === mediaId ? 1 : 0
       })));
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
