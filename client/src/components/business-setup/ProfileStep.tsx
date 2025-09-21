@@ -50,17 +50,18 @@ export default function ProfileStep({ salonId, onComplete, isCompleted }: Profil
   // Populate form once
   useEffect(() => {
     if (salonData && !formData.name) {
+      const salon = salonData as any;
       setFormData({
-        name: salonData.name || "",
-        description: salonData.description || "",
-        category: salonData.category || "",
-        website: salonData.website || "",
-        address: salonData.address || "",
-        city: salonData.city || "",
-        state: salonData.state || "",
-        zipCode: salonData.zipCode || "",
-        phone: salonData.phone || "",
-        email: salonData.email || ""
+        name: salon.name || "",
+        description: salon.description || "",
+        category: salon.category || "",
+        website: salon.website || "",
+        address: salon.address || "",
+        city: salon.city || "",
+        state: salon.state || "",
+        zipCode: salon.zipCode || "",
+        phone: salon.phone || "",
+        email: salon.email || ""
       });
     }
   }, [salonData, formData.name]);

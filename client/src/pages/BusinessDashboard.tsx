@@ -61,8 +61,9 @@ export default function BusinessDashboard() {
     staleTime: 30000
   });
 
-  // Simple completion logic
-  const isProfileComplete = salonData?.name && salonData?.address && salonData?.phone;
+  // Fix completion logic with proper type checking
+  const salon = salonData as any;
+  const isProfileComplete = salon && salon.name && salon.address && salon.phone;
   const hasServices = Array.isArray(services) && services.length > 0;
   const completionPercentage = Math.round(((isProfileComplete ? 1 : 0) + (hasServices ? 1 : 0)) / 2 * 100);
 
@@ -98,9 +99,10 @@ export default function BusinessDashboard() {
   }
 
   const handleStepComplete = () => {
+    // No automatic redirect - let user control navigation
     toast({
       title: "Step Completed",
-      description: "Great progress! Keep going.",
+      description: "Great progress! You can now move to the next step.",
     });
   };
 
