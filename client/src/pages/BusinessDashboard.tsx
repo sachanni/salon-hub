@@ -22,13 +22,15 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  MessageSquare
+  MessageSquare,
+  Package
 } from "lucide-react";
 import { Link } from "wouter";
 import type { Salon } from "@/../../shared/schema";
 import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
 import FinancialReportingDashboard from "@/components/FinancialReportingDashboard";
 import CustomerCommunicationDashboard from "@/components/CustomerCommunicationDashboard";
+import InventoryManagementDashboard from "@/components/InventoryManagementDashboard";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -827,6 +829,15 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle inventory tab
+    if (activeTab === "inventory") {
+      return (
+        <div className="p-6">
+          <InventoryManagementDashboard salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     const Component = components[activeTab as keyof typeof components];
     if (Component && salonId) {
       return (
@@ -1008,6 +1019,21 @@ export default function BusinessDashboard() {
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
                 Communications
+              </div>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("inventory")}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === "inventory" 
+                  ? "border-blue-500 text-blue-600" 
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+              data-testid="tab-inventory"
+            >
+              <div className="flex items-center gap-2">
+                <Package className="h-4 w-4" />
+                Inventory
               </div>
             </button>
 

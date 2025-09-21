@@ -1705,3 +1705,497 @@ export const communicationAnalyticsRelations = relations(communicationAnalytics,
     references: [communicationCampaigns.id],
   }),
 }));
+
+// ===== INVENTORY MANAGEMENT SYSTEM =====
+
+// Vendors - supplier information for inventory management
+export const vendors = pgTable("vendors", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  contactPerson: varchar("contact_person", { length: 200 }),
+  email: varchar("email", { length: 200 }),
+  phone: varchar("phone", { length: 50 }),
+  address: text("address"),
+  city: varchar("city", { length: 100 }),
+  state: varchar("state", { length: 100 }),
+  zipCode: varchar("zip_code", { length: 20 }),
+  country: varchar("country", { length: 100 }).default('India'),
+  website: varchar("website", { length: 200 }),
+  taxId: varchar("tax_id", { length: 50 }), // GST number in India
+  paymentTerms: varchar("payment_terms", { length: 100 }), // Net 30, COD, etc.
+  notes: text("notes"),
+  status: varchar("status", { length: 20 }).notNull().default('active'), // active, inactive, suspended
+  rating: decimal("rating", { precision: 3, scale: 2 }).default('0.00'),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("vendors_salon_id_idx").on(table.salonId),
+  index("vendors_status_idx").on(table.status),
+]);
+
+export const insertVendorSchema = createInsertSchema(vendors).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Vendor = typeof vendors.$inferSelect;
+export type InsertVendor = z.infer<typeof insertVendorSchema>;
+
+// Product Categories - organize products into categories
+export const productCategories = pgTable("product_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  parentCategoryId: varchar("parent_category_id").references(() => productCategories.id, { onDelete: "set null" }),
+  isActive: integer("is_active").notNull().default(1),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("product_categories_salon_id_idx").on(table.salonId),
+  index("product_categories_parent_idx").on(table.parentCategoryId),
+  unique("product_categories_salon_name_unique").on(table.salonId, table.name),
+]);
+
+export const insertProductCategorySchema = createInsertSchema(productCategories).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type ProductCategory = typeof productCategories.$inferSelect;
+export type InsertProductCategory = z.infer<typeof insertProductCategorySchema>;
+
+// Products - main product catalog
+export const products = pgTable("products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  categoryId: varchar("category_id").references(() => productCategories.id, { onDelete: "set null" }),
+  vendorId: varchar("vendor_id").references(() => vendors.id, { onDelete: "set null" }),
+  sku: varchar("sku", { length: 100 }).notNull(),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description"),
+  brand: varchar("brand", { length: 100 }),
+  size: varchar("size", { length: 50 }), // 500ml, 1L, etc.
+  unit: varchar("unit", { length: 20 }).notNull().default('piece'), // piece, ml, g, kg, etc.
+  costPriceInPaisa: integer("cost_price_in_paisa").notNull(), // Purchase cost
+  sellingPriceInPaisa: integer("selling_price_in_paisa"), // Retail price for resale items
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currentStock: decimal("current_stock", { precision: 10, scale: 3 }).notNull().default('0'),
+  minimumStock: decimal("minimum_stock", { precision: 10, scale: 3 }).notNull().default('0'),
+  maximumStock: decimal("maximum_stock", { precision: 10, scale: 3 }),
+  reorderPoint: decimal("reorder_point", { precision: 10, scale: 3 }),
+  reorderQuantity: decimal("reorder_quantity", { precision: 10, scale: 3 }),
+  leadTimeDays: integer("lead_time_days").default(7),
+  expiryDate: timestamp("expiry_date"),
+  batchNumber: varchar("batch_number", { length: 100 }),
+  barcode: varchar("barcode", { length: 100 }),
+  location: varchar("location", { length: 100 }), // Storage location in salon
+  isActive: integer("is_active").notNull().default(1),
+  isRetailItem: integer("is_retail_item").notNull().default(0), // Can be sold to customers
+  trackStock: integer("track_stock").notNull().default(1), // Enable stock tracking
+  lowStockAlert: integer("low_stock_alert").notNull().default(1),
+  notes: text("notes"),
+  tags: jsonb("tags").default('[]'), // Flexible tagging system
+  metadata: jsonb("metadata").default('{}'), // Additional custom fields
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("products_salon_id_idx").on(table.salonId),
+  index("products_category_id_idx").on(table.categoryId),
+  index("products_vendor_id_idx").on(table.vendorId),
+  index("products_sku_idx").on(table.sku),
+  index("products_barcode_idx").on(table.barcode),
+  index("products_current_stock_idx").on(table.currentStock),
+  index("products_low_stock_idx").on(table.currentStock, table.minimumStock),
+  unique("products_salon_sku_unique").on(table.salonId, table.sku),
+]);
+
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Product = typeof products.$inferSelect;
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+
+// Stock Movements - track all inventory changes
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 50 }).notNull(), // purchase, usage, adjustment, waste, transfer, return
+  quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
+  unit: varchar("unit", { length: 20 }).notNull(),
+  unitCostInPaisa: integer("unit_cost_in_paisa"), // Cost per unit for this movement
+  totalCostInPaisa: integer("total_cost_in_paisa"), // Total cost of movement
+  previousStock: decimal("previous_stock", { precision: 10, scale: 3 }).notNull(),
+  newStock: decimal("new_stock", { precision: 10, scale: 3 }).notNull(),
+  reason: varchar("reason", { length: 100 }), // Why the movement happened
+  reference: varchar("reference", { length: 100 }), // PO number, booking ID, etc.
+  referenceId: varchar("reference_id"), // Foreign key to related record
+  referenceType: varchar("reference_type", { length: 50 }), // purchase_order, booking, adjustment, etc.
+  staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }), // Who performed the movement
+  notes: text("notes"),
+  batchNumber: varchar("batch_number", { length: 100 }),
+  expiryDate: timestamp("expiry_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("stock_movements_salon_id_idx").on(table.salonId),
+  index("stock_movements_product_id_idx").on(table.productId),
+  index("stock_movements_type_idx").on(table.type),
+  index("stock_movements_created_at_idx").on(table.createdAt),
+  index("stock_movements_reference_idx").on(table.referenceType, table.referenceId),
+]);
+
+export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type StockMovement = typeof stockMovements.$inferSelect;
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
+
+// Purchase Orders - manage orders from vendors
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  vendorId: varchar("vendor_id").notNull().references(() => vendors.id, { onDelete: "restrict" }),
+  orderNumber: varchar("order_number", { length: 100 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default('draft'), // draft, sent, confirmed, received, cancelled
+  orderDate: timestamp("order_date").notNull().defaultNow(),
+  expectedDeliveryDate: timestamp("expected_delivery_date"),
+  actualDeliveryDate: timestamp("actual_delivery_date"),
+  subtotalInPaisa: integer("subtotal_in_paisa").notNull().default(0),
+  taxInPaisa: integer("tax_in_paisa").notNull().default(0),
+  shippingInPaisa: integer("shipping_in_paisa").notNull().default(0),
+  discountInPaisa: integer("discount_in_paisa").notNull().default(0),
+  totalInPaisa: integer("total_in_paisa").notNull().default(0),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  paymentTerms: varchar("payment_terms", { length: 100 }),
+  paymentStatus: varchar("payment_status", { length: 20 }).default('pending'), // pending, partial, paid
+  createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: "restrict" }),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: "set null" }),
+  receivedBy: varchar("received_by").references(() => users.id, { onDelete: "set null" }),
+  notes: text("notes"),
+  internalNotes: text("internal_notes"), // Private notes not visible to vendor
+  metadata: jsonb("metadata").default('{}'),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("purchase_orders_salon_id_idx").on(table.salonId),
+  index("purchase_orders_vendor_id_idx").on(table.vendorId),
+  index("purchase_orders_status_idx").on(table.status),
+  index("purchase_orders_order_date_idx").on(table.orderDate),
+  unique("purchase_orders_salon_order_number_unique").on(table.salonId, table.orderNumber),
+]);
+
+export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type InsertPurchaseOrder = z.infer<typeof insertPurchaseOrderSchema>;
+
+// Purchase Order Items - items within purchase orders
+export const purchaseOrderItems = pgTable("purchase_order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  purchaseOrderId: varchar("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
+  unit: varchar("unit", { length: 20 }).notNull(),
+  unitCostInPaisa: integer("unit_cost_in_paisa").notNull(),
+  totalCostInPaisa: integer("total_cost_in_paisa").notNull(),
+  receivedQuantity: decimal("received_quantity", { precision: 10, scale: 3 }).default('0'),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("purchase_order_items_po_id_idx").on(table.purchaseOrderId),
+  index("purchase_order_items_product_id_idx").on(table.productId),
+]);
+
+export const insertPurchaseOrderItemSchema = createInsertSchema(purchaseOrderItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
+export type InsertPurchaseOrderItem = z.infer<typeof insertPurchaseOrderItemSchema>;
+
+// Product Usage - link product consumption to services
+export const productUsage = pgTable("product_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  quantityPerService: decimal("quantity_per_service", { precision: 10, scale: 3 }).notNull(),
+  unit: varchar("unit", { length: 20 }).notNull(),
+  costPerServiceInPaisa: integer("cost_per_service_in_paisa"), // Calculated cost per service
+  isActive: integer("is_active").notNull().default(1),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("product_usage_salon_id_idx").on(table.salonId),
+  index("product_usage_service_id_idx").on(table.serviceId),
+  index("product_usage_product_id_idx").on(table.productId),
+  unique("product_usage_service_product_unique").on(table.serviceId, table.productId),
+]);
+
+export const insertProductUsageSchema = createInsertSchema(productUsage).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ProductUsage = typeof productUsage.$inferSelect;
+export type InsertProductUsage = z.infer<typeof insertProductUsageSchema>;
+
+// Reorder Rules - automated reorder settings
+export const reorderRules = pgTable("reorder_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  vendorId: varchar("vendor_id").references(() => vendors.id, { onDelete: "set null" }),
+  isActive: integer("is_active").notNull().default(1),
+  reorderPoint: decimal("reorder_point", { precision: 10, scale: 3 }).notNull(),
+  reorderQuantity: decimal("reorder_quantity", { precision: 10, scale: 3 }).notNull(),
+  leadTimeDays: integer("lead_time_days").notNull().default(7),
+  safetyStockDays: integer("safety_stock_days").default(3),
+  autoCreatePO: integer("auto_create_po").notNull().default(0), // Automatically create purchase orders
+  lastTriggered: timestamp("last_triggered"),
+  nextReviewDate: timestamp("next_review_date"),
+  seasonalFactor: decimal("seasonal_factor", { precision: 5, scale: 2 }).default('1.00'), // Seasonal adjustment
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("reorder_rules_salon_id_idx").on(table.salonId),
+  index("reorder_rules_product_id_idx").on(table.productId),
+  index("reorder_rules_vendor_id_idx").on(table.vendorId),
+  index("reorder_rules_next_review_idx").on(table.nextReviewDate),
+  unique("reorder_rules_salon_product_unique").on(table.salonId, table.productId),
+]);
+
+export const insertReorderRuleSchema = createInsertSchema(reorderRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ReorderRule = typeof reorderRules.$inferSelect;
+export type InsertReorderRule = z.infer<typeof insertReorderRuleSchema>;
+
+// Inventory Adjustments - manual stock adjustments and audits
+export const inventoryAdjustments = pgTable("inventory_adjustments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  adjustmentNumber: varchar("adjustment_number", { length: 100 }).notNull(),
+  type: varchar("type", { length: 50 }).notNull(), // physical_count, shrinkage, damage, expired, correction
+  status: varchar("status", { length: 20 }).notNull().default('draft'), // draft, submitted, approved
+  adjustmentDate: timestamp("adjustment_date").notNull().defaultNow(),
+  reason: varchar("reason", { length: 200 }).notNull(),
+  description: text("description"),
+  totalValueInPaisa: integer("total_value_in_paisa").default(0), // Total value of adjustment
+  createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: "restrict" }),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("inventory_adjustments_salon_id_idx").on(table.salonId),
+  index("inventory_adjustments_type_idx").on(table.type),
+  index("inventory_adjustments_status_idx").on(table.status),
+  index("inventory_adjustments_date_idx").on(table.adjustmentDate),
+  unique("inventory_adjustments_salon_number_unique").on(table.salonId, table.adjustmentNumber),
+]);
+
+export const insertInventoryAdjustmentSchema = createInsertSchema(inventoryAdjustments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InventoryAdjustment = typeof inventoryAdjustments.$inferSelect;
+export type InsertInventoryAdjustment = z.infer<typeof insertInventoryAdjustmentSchema>;
+
+// Inventory Adjustment Items - individual product adjustments
+export const inventoryAdjustmentItems = pgTable("inventory_adjustment_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  adjustmentId: varchar("adjustment_id").notNull().references(() => inventoryAdjustments.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  expectedQuantity: decimal("expected_quantity", { precision: 10, scale: 3 }).notNull(),
+  actualQuantity: decimal("actual_quantity", { precision: 10, scale: 3 }).notNull(),
+  adjustmentQuantity: decimal("adjustment_quantity", { precision: 10, scale: 3 }).notNull(),
+  unit: varchar("unit", { length: 20 }).notNull(),
+  unitCostInPaisa: integer("unit_cost_in_paisa"),
+  totalCostInPaisa: integer("total_cost_in_paisa"),
+  reason: varchar("reason", { length: 200 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("inventory_adjustment_items_adjustment_id_idx").on(table.adjustmentId),
+  index("inventory_adjustment_items_product_id_idx").on(table.productId),
+]);
+
+export const insertInventoryAdjustmentItemSchema = createInsertSchema(inventoryAdjustmentItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InventoryAdjustmentItem = typeof inventoryAdjustmentItems.$inferSelect;
+export type InsertInventoryAdjustmentItem = z.infer<typeof insertInventoryAdjustmentItemSchema>;
+
+// Add relations for inventory tables
+export const vendorsRelations = relations(vendors, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [vendors.salonId],
+    references: [salons.id],
+  }),
+  products: many(products),
+  purchaseOrders: many(purchaseOrders),
+  reorderRules: many(reorderRules),
+}));
+
+export const productCategoriesRelations = relations(productCategories, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [productCategories.salonId],
+    references: [salons.id],
+  }),
+  parentCategory: one(productCategories, {
+    fields: [productCategories.parentCategoryId],
+    references: [productCategories.id],
+  }),
+  subcategories: many(productCategories),
+  products: many(products),
+}));
+
+export const productsRelations = relations(products, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [products.salonId],
+    references: [salons.id],
+  }),
+  category: one(productCategories, {
+    fields: [products.categoryId],
+    references: [productCategories.id],
+  }),
+  vendor: one(vendors, {
+    fields: [products.vendorId],
+    references: [vendors.id],
+  }),
+  stockMovements: many(stockMovements),
+  purchaseOrderItems: many(purchaseOrderItems),
+  productUsage: many(productUsage),
+  reorderRule: one(reorderRules),
+  adjustmentItems: many(inventoryAdjustmentItems),
+}));
+
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  salon: one(salons, {
+    fields: [stockMovements.salonId],
+    references: [salons.id],
+  }),
+  product: one(products, {
+    fields: [stockMovements.productId],
+    references: [products.id],
+  }),
+  staff: one(staff, {
+    fields: [stockMovements.staffId],
+    references: [staff.id],
+  }),
+}));
+
+export const purchaseOrdersRelations = relations(purchaseOrders, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [purchaseOrders.salonId],
+    references: [salons.id],
+  }),
+  vendor: one(vendors, {
+    fields: [purchaseOrders.vendorId],
+    references: [vendors.id],
+  }),
+  createdByUser: one(users, {
+    fields: [purchaseOrders.createdBy],
+    references: [users.id],
+  }),
+  approvedByUser: one(users, {
+    fields: [purchaseOrders.approvedBy],
+    references: [users.id],
+  }),
+  receivedByUser: one(users, {
+    fields: [purchaseOrders.receivedBy],
+    references: [users.id],
+  }),
+  items: many(purchaseOrderItems),
+}));
+
+export const purchaseOrderItemsRelations = relations(purchaseOrderItems, ({ one }) => ({
+  purchaseOrder: one(purchaseOrders, {
+    fields: [purchaseOrderItems.purchaseOrderId],
+    references: [purchaseOrders.id],
+  }),
+  product: one(products, {
+    fields: [purchaseOrderItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const productUsageRelations = relations(productUsage, ({ one }) => ({
+  salon: one(salons, {
+    fields: [productUsage.salonId],
+    references: [salons.id],
+  }),
+  service: one(services, {
+    fields: [productUsage.serviceId],
+    references: [services.id],
+  }),
+  product: one(products, {
+    fields: [productUsage.productId],
+    references: [products.id],
+  }),
+}));
+
+export const reorderRulesRelations = relations(reorderRules, ({ one }) => ({
+  salon: one(salons, {
+    fields: [reorderRules.salonId],
+    references: [salons.id],
+  }),
+  product: one(products, {
+    fields: [reorderRules.productId],
+    references: [products.id],
+  }),
+  vendor: one(vendors, {
+    fields: [reorderRules.vendorId],
+    references: [vendors.id],
+  }),
+}));
+
+export const inventoryAdjustmentsRelations = relations(inventoryAdjustments, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [inventoryAdjustments.salonId],
+    references: [salons.id],
+  }),
+  createdByUser: one(users, {
+    fields: [inventoryAdjustments.createdBy],
+    references: [users.id],
+  }),
+  approvedByUser: one(users, {
+    fields: [inventoryAdjustments.approvedBy],
+    references: [users.id],
+  }),
+  items: many(inventoryAdjustmentItems),
+}));
+
+export const inventoryAdjustmentItemsRelations = relations(inventoryAdjustmentItems, ({ one }) => ({
+  adjustment: one(inventoryAdjustments, {
+    fields: [inventoryAdjustmentItems.adjustmentId],
+    references: [inventoryAdjustments.id],
+  }),
+  product: one(products, {
+    fields: [inventoryAdjustmentItems.productId],
+    references: [products.id],
+  }),
+}));

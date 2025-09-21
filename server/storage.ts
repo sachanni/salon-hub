@@ -36,6 +36,17 @@ import {
   type CommunicationPreferences, type InsertCommunicationPreferences,
   type ScheduledMessage, type InsertScheduledMessage,
   type CommunicationAnalytics, type InsertCommunicationAnalytics,
+  // Inventory management system types
+  type Vendor, type InsertVendor,
+  type ProductCategory, type InsertProductCategory,
+  type Product, type InsertProduct,
+  type StockMovement, type InsertStockMovement,
+  type PurchaseOrder, type InsertPurchaseOrder,
+  type PurchaseOrderItem, type InsertPurchaseOrderItem,
+  type ProductUsage, type InsertProductUsage,
+  type ReorderRule, type InsertReorderRule,
+  type InventoryAdjustment, type InsertInventoryAdjustment,
+  type InventoryAdjustmentItem, type InsertInventoryAdjustmentItem,
   users, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
@@ -43,7 +54,10 @@ import {
   expenseCategories, expenses, commissionRates, commissions, budgets, financialReports, taxSettings,
   // Communication system tables
   messageTemplates, customerSegments, communicationCampaigns, communicationHistory, 
-  communicationPreferences, scheduledMessages, communicationAnalytics
+  communicationPreferences, scheduledMessages, communicationAnalytics,
+  // Inventory management system tables
+  vendors, productCategories, products, stockMovements, purchaseOrders, purchaseOrderItems,
+  productUsage, reorderRules, inventoryAdjustments, inventoryAdjustmentItems
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
@@ -592,6 +606,230 @@ export interface IStorage {
   // Template processing and personalization
   processTemplate(templateContent: string, variables: Record<string, any>): Promise<string>;
   getTemplateVariables(salonId: string, bookingId?: string, customerId?: string): Promise<Record<string, any>>;
+
+  // =================================
+  // INVENTORY MANAGEMENT OPERATIONS
+  // =================================
+  
+  // Vendor operations
+  getVendor(id: string): Promise<Vendor | undefined>;
+  getVendorsBySalonId(salonId: string): Promise<Vendor[]>;
+  createVendor(vendor: InsertVendor): Promise<Vendor>;
+  updateVendor(id: string, salonId: string, updates: Partial<InsertVendor>): Promise<void>;
+  deleteVendor(id: string, salonId: string): Promise<void>;
+  
+  // Product category operations
+  getProductCategory(id: string): Promise<ProductCategory | undefined>;
+  getProductCategoriesBySalonId(salonId: string): Promise<ProductCategory[]>;
+  createProductCategory(category: InsertProductCategory): Promise<ProductCategory>;
+  updateProductCategory(id: string, salonId: string, updates: Partial<InsertProductCategory>): Promise<void>;
+  deleteProductCategory(id: string, salonId: string): Promise<void>;
+  createDefaultProductCategories(salonId: string): Promise<ProductCategory[]>;
+  
+  // Product operations
+  getProduct(id: string): Promise<Product | undefined>;
+  getProductsBySalonId(salonId: string, filters?: {
+    categoryId?: string;
+    vendorId?: string;
+    isActive?: boolean;
+    lowStock?: boolean;
+    search?: string;
+  }): Promise<Product[]>;
+  getProductBySKU(salonId: string, sku: string): Promise<Product | undefined>;
+  createProduct(product: InsertProduct): Promise<Product>;
+  updateProduct(id: string, salonId: string, updates: Partial<InsertProduct>): Promise<void>;
+  updateProductStock(id: string, salonId: string, newStock: number, reason: string, staffId?: string): Promise<void>;
+  deleteProduct(id: string, salonId: string): Promise<void>;
+  getLowStockProducts(salonId: string): Promise<Product[]>;
+  getExpiringProducts(salonId: string, daysAhead?: number): Promise<Product[]>;
+  
+  // Stock movement operations
+  getStockMovement(id: string): Promise<StockMovement | undefined>;
+  getStockMovementsBySalonId(salonId: string, filters?: {
+    productId?: string;
+    type?: string;
+    startDate?: string;
+    endDate?: string;
+    staffId?: string;
+  }): Promise<StockMovement[]>;
+  createStockMovement(movement: InsertStockMovement): Promise<StockMovement>;
+  getProductStockHistory(productId: string, limit?: number): Promise<StockMovement[]>;
+  
+  // Purchase order operations
+  getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined>;
+  getPurchaseOrdersBySalonId(salonId: string, filters?: {
+    vendorId?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<PurchaseOrder[]>;
+  createPurchaseOrder(order: InsertPurchaseOrder): Promise<PurchaseOrder>;
+  updatePurchaseOrder(id: string, salonId: string, updates: Partial<InsertPurchaseOrder>): Promise<void>;
+  submitPurchaseOrder(id: string, submittedBy: string): Promise<void>;
+  receivePurchaseOrder(id: string, receivedBy: string, items: Array<{ productId: string; receivedQuantity: number }>): Promise<void>;
+  cancelPurchaseOrder(id: string, cancelledBy: string): Promise<void>;
+  generatePurchaseOrderNumber(salonId: string): Promise<string>;
+  
+  // Purchase order item operations
+  getPurchaseOrderItem(id: string): Promise<PurchaseOrderItem | undefined>;
+  getPurchaseOrderItemsByOrderId(orderId: string): Promise<PurchaseOrderItem[]>;
+  createPurchaseOrderItem(item: InsertPurchaseOrderItem): Promise<PurchaseOrderItem>;
+  updatePurchaseOrderItem(id: string, updates: Partial<InsertPurchaseOrderItem>): Promise<void>;
+  deletePurchaseOrderItem(id: string): Promise<void>;
+  
+  // Product usage operations
+  getProductUsage(id: string): Promise<ProductUsage | undefined>;
+  getProductUsagesBySalonId(salonId: string): Promise<ProductUsage[]>;
+  getProductUsagesByServiceId(serviceId: string): Promise<ProductUsage[]>;
+  getProductUsagesByProductId(productId: string): Promise<ProductUsage[]>;
+  createProductUsage(usage: InsertProductUsage): Promise<ProductUsage>;
+  updateProductUsage(id: string, salonId: string, updates: Partial<InsertProductUsage>): Promise<void>;
+  deleteProductUsage(id: string, salonId: string): Promise<void>;
+  calculateServiceProductCost(serviceId: string): Promise<number>;
+  trackProductUsageForBooking(bookingId: string): Promise<void>;
+  
+  // Reorder rule operations
+  getReorderRule(id: string): Promise<ReorderRule | undefined>;
+  getReorderRulesBySalonId(salonId: string): Promise<ReorderRule[]>;
+  getReorderRuleByProductId(productId: string): Promise<ReorderRule | undefined>;
+  createReorderRule(rule: InsertReorderRule): Promise<ReorderRule>;
+  updateReorderRule(id: string, salonId: string, updates: Partial<InsertReorderRule>): Promise<void>;
+  deleteReorderRule(id: string, salonId: string): Promise<void>;
+  checkReorderRequirements(salonId: string): Promise<Array<{
+    productId: string;
+    productName: string;
+    currentStock: number;
+    reorderPoint: number;
+    reorderQuantity: number;
+    vendorId?: string;
+    vendorName?: string;
+    estimatedCost: number;
+  }>>;
+  triggerAutomaticReorders(salonId: string): Promise<number>; // Returns number of POs created
+  
+  // Inventory adjustment operations
+  getInventoryAdjustment(id: string): Promise<InventoryAdjustment | undefined>;
+  getInventoryAdjustmentsBySalonId(salonId: string, filters?: {
+    type?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<InventoryAdjustment[]>;
+  createInventoryAdjustment(adjustment: InsertInventoryAdjustment): Promise<InventoryAdjustment>;
+  updateInventoryAdjustment(id: string, salonId: string, updates: Partial<InsertInventoryAdjustment>): Promise<void>;
+  submitInventoryAdjustment(id: string, submittedBy: string): Promise<void>;
+  approveInventoryAdjustment(id: string, approvedBy: string): Promise<void>;
+  generateAdjustmentNumber(salonId: string): Promise<string>;
+  
+  // Inventory adjustment item operations
+  getInventoryAdjustmentItem(id: string): Promise<InventoryAdjustmentItem | undefined>;
+  getInventoryAdjustmentItemsByAdjustmentId(adjustmentId: string): Promise<InventoryAdjustmentItem[]>;
+  createInventoryAdjustmentItem(item: InsertInventoryAdjustmentItem): Promise<InventoryAdjustmentItem>;
+  updateInventoryAdjustmentItem(id: string, updates: Partial<InsertInventoryAdjustmentItem>): Promise<void>;
+  deleteInventoryAdjustmentItem(id: string): Promise<void>;
+  
+  // Inventory analytics and reporting
+  getInventoryDashboardMetrics(salonId: string): Promise<{
+    totalProducts: number;
+    totalStockValue: number;
+    lowStockCount: number;
+    reorderRequiredCount: number;
+    expiringProductsCount: number;
+    topCategories: Array<{ categoryId: string; categoryName: string; productCount: number; stockValue: number }>;
+    recentMovements: Array<{ 
+      id: string; 
+      productName: string; 
+      type: string; 
+      quantity: number; 
+      date: Date;
+      staffName?: string;
+    }>;
+    monthlyUsageTrends: Array<{ month: string; usageValue: number; count: number }>;
+    vendorPerformance: Array<{ 
+      vendorId: string; 
+      vendorName: string; 
+      orderCount: number; 
+      totalValue: number; 
+      avgDeliveryTime: number;
+      rating: number;
+    }>;
+  }>;
+  
+  getInventoryAnalytics(salonId: string, period: string): Promise<{
+    overview: {
+      totalStockValue: number;
+      stockTurnoverRate: number;
+      averageLeadTime: number;
+      wastePercentage: number;
+      stockAccuracy: number;
+    };
+    topMovingProducts: Array<{
+      productId: string;
+      productName: string;
+      category: string;
+      usageCount: number;
+      usageValue: number;
+      turnoverRate: number;
+    }>;
+    slowMovingProducts: Array<{
+      productId: string;
+      productName: string;
+      lastUsed: Date | null;
+      stockValue: number;
+      daysOnHand: number;
+    }>;
+    categoryAnalysis: Array<{
+      categoryId: string;
+      categoryName: string;
+      productCount: number;
+      stockValue: number;
+      usageValue: number;
+      profitMargin: number;
+    }>;
+    costAnalysis: {
+      totalPurchaseCost: number;
+      totalUsageCost: number;
+      averageCostPerService: number;
+      costTrends: Array<{ month: string; purchaseCost: number; usageCost: number }>;
+    };
+    wasteAnalysis: {
+      totalWaste: number;
+      wasteByReason: Array<{ reason: string; quantity: number; value: number }>;
+      topWastedProducts: Array<{ productId: string; productName: string; wasteQuantity: number; wasteValue: number }>;
+    };
+  }>;
+  
+  getProductProfitabilityAnalysis(salonId: string, period: string): Promise<Array<{
+    productId: string;
+    productName: string;
+    category: string;
+    purchaseCost: number;
+    sellingPrice: number;
+    usageInServices: number;
+    revenueGenerated: number;
+    profitMargin: number;
+    roi: number;
+    recommendations: string[];
+  }>>;
+  
+  getInventoryForecast(salonId: string, months: number): Promise<{
+    forecast: Array<{
+      month: string;
+      projectedUsage: Array<{
+        productId: string;
+        productName: string;
+        estimatedUsage: number;
+        estimatedCost: number;
+        recommendedOrderQuantity: number;
+      }>;
+      totalEstimatedCost: number;
+    }>;
+    assumptions: {
+      seasonalFactors: Array<{ month: number; factor: number }>;
+      growthRate: number;
+      leadTimes: Array<{ vendorId: string; avgLeadTime: number }>;
+    };
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
