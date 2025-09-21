@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -30,7 +32,14 @@ import {
   MoreHorizontal,
   Eye,
   X,
-  RotateCcw
+  RotateCcw,
+  Check,
+  AlertTriangle,
+  Receipt,
+  MessageCircle,
+  Filter,
+  Search,
+  RefreshCcw
 } from "lucide-react";
 
 // Server response types (what the backend actually returns)
@@ -173,6 +182,20 @@ export default function CustomerDashboard() {
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [rescheduleAppointment, setRescheduleAppointment] = useState<Appointment | null>(null);
 
+  // History filtering and search state
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
+  const [historyDateFilter, setHistoryDateFilter] = useState("all");
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
+  
+  // Rebooking modal state (separate from reschedule)
+  const [rebookModalOpen, setRebookModalOpen] = useState(false);
+  const [rebookAppointment, setRebookAppointment] = useState<{
+    salonId: string;
+    salonName: string;
+    serviceId?: string;
+    staffId?: string;
+  } | null>(null);
+
   // Fetch customer profile with stats (replaces dashboard-stats)
   const { data: customerProfile, isLoading: profileLoading } = useQuery<ServerCustomerProfile>({
     queryKey: ['/api/customer/profile'],
@@ -187,9 +210,37 @@ export default function CustomerDashboard() {
     staleTime: 30000
   });
 
-  // Fetch appointment history using correct endpoint with status parameter
-  const { data: appointmentHistoryData, isLoading: historyLoading } = useQuery<ServerAppointment[]>({
-    queryKey: ['/api/customer/appointments', { status: 'completed' }],
+  // Calculate date range for filtering
+  const getDateRange = (filter: string) => {
+    const now = new Date();
+    switch (filter) {
+      case '30days': {
+        const date = new Date(now);
+        date.setDate(date.getDate() - 30);
+        return date.toISOString().split('T')[0];
+      }
+      case '3months': {
+        const date = new Date(now);
+        date.setMonth(date.getMonth() - 3);
+        return date.toISOString().split('T')[0];
+      }
+      case '1year': {
+        const date = new Date(now);
+        date.setFullYear(date.getFullYear() - 1);
+        return date.toISOString().split('T')[0];
+      }
+      default:
+        return null;
+    }
+  };
+
+  // Fetch appointment history with enhanced filtering - use 'all' instead of unsupported 'history'
+  const { data: allHistoryData, isLoading: historyLoading, error: historyError, refetch: refetchHistory } = useQuery<ServerAppointment[]>({
+    queryKey: ['/api/customer/appointments', { 
+      status: historyStatusFilter === 'all' ? 'all' : historyStatusFilter,
+      dateFrom: getDateRange(historyDateFilter),
+      limit: 50 // Fetch more for better filtering
+    }],
     enabled: isAuthenticated && activeTab === "history",
     staleTime: 30000
   });
@@ -204,13 +255,45 @@ export default function CustomerDashboard() {
   // Map server data to frontend types
   const dashboardStats = customerProfile ? mapDashboardStats(customerProfile) : undefined;
   const upcomingAppointments = upcomingAppointmentsData?.map(mapAppointmentData) || [];
-  const appointmentHistory = appointmentHistoryData?.map(mapAppointmentData) || [];
   const paymentHistory = paymentHistoryData?.map(mapPaymentData) || [];
+
+  // Filter and search appointment history with memoization
+  const appointmentHistory = useMemo(() => {
+    if (!allHistoryData) return [];
+    
+    let filteredHistory = allHistoryData.map(mapAppointmentData);
+    
+    // Apply status filter
+    if (historyStatusFilter !== 'all') {
+      filteredHistory = filteredHistory.filter(app => app.status === historyStatusFilter);
+    }
+    
+    // Apply search filter
+    if (historySearchQuery.trim()) {
+      const query = historySearchQuery.toLowerCase();
+      filteredHistory = filteredHistory.filter(app => 
+        app.salonName.toLowerCase().includes(query) || 
+        app.serviceName.toLowerCase().includes(query) ||
+        app.staffName.toLowerCase().includes(query)
+      );
+    }
+    
+    // Sort by date (most recent first)
+    filteredHistory.sort((a, b) => {
+      const dateA = new Date(`${a.date} ${a.time}`);
+      const dateB = new Date(`${b.date} ${b.time}`);
+      return dateB.getTime() - dateA.getTime();
+    });
+    
+    return filteredHistory;
+  }, [allHistoryData, historyStatusFilter, historySearchQuery]);
   
-  // Update upcoming appointments count in stats
-  if (dashboardStats && upcomingAppointments.length > 0) {
-    dashboardStats.upcomingAppointments = upcomingAppointments.length;
-  }
+  // Update upcoming appointments count in stats using useEffect to avoid mutation
+  useEffect(() => {
+    if (dashboardStats) {
+      dashboardStats.upcomingAppointments = upcomingAppointments?.length || 0;
+    }
+  }, [upcomingAppointments, dashboardStats]);
 
   const statsLoading = profileLoading;
 
@@ -298,15 +381,80 @@ export default function CustomerDashboard() {
     window.open(mapsUrl, '_blank');
   };
 
-  const handleContactSalon = () => {
-    toast({
-      title: "Contact Information",
-      description: "Salon contact information will be available soon. You can contact them through their profile page.",
-    });
-  };
 
   const handleCancelAppointment = (appointmentId: string) => {
     cancelAppointmentMutation.mutate(appointmentId);
+  };
+
+  // Enhanced action handlers for appointment history
+  const handleRebook = (appointment: Appointment) => {
+    setRebookAppointment({
+      salonId: appointment.salonId,
+      salonName: appointment.salonName,
+      // TODO: Backend should provide staffId - using staffName as fallback for now
+      staffId: undefined, // staffId not available in current API response
+    });
+    setRebookModalOpen(true);
+    
+    toast({
+      title: "Rebooking Appointment",
+      description: `Opening booking for ${appointment.serviceName} at ${appointment.salonName}`,
+    });
+  };
+
+  const handleLeaveReview = (appointment: Appointment) => {
+    // Placeholder for review functionality
+    toast({
+      title: "Leave Review",
+      description: "Review functionality will be available soon. Thank you for your feedback!",
+    });
+  };
+
+  const handleViewReceipt = (appointment: Appointment) => {
+    // Placeholder for receipt viewing
+    toast({
+      title: "View Receipt", 
+      description: `Receipt for ${appointment.serviceName} on ${formatDate(appointment.date)} will be available soon.`,
+    });
+  };
+
+  const handleContactSalon = (appointment?: Appointment) => {
+    toast({
+      title: "Contact Salon",
+      description: appointment 
+        ? `Contact information for ${appointment.salonName} will be available soon. You can visit their profile page for more details.`
+        : "Salon contact information will be available soon. You can contact them through their profile page.",
+    });
+  };
+
+  // Enhanced status badge component with icons
+  const getStatusBadgeContent = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return {
+          icon: <Check className="h-3 w-3" />,
+          text: 'Completed',
+          className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+        };
+      case 'cancelled':
+        return {
+          icon: <X className="h-3 w-3" />,
+          text: 'Cancelled', 
+          className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+        };
+      case 'no-show':
+        return {
+          icon: <AlertTriangle className="h-3 w-3" />,
+          text: 'No-show',
+          className: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
+        };
+      default:
+        return {
+          icon: null,
+          text: status,
+          className: getStatusColor(status)
+        };
+    }
   };
 
   if (isLoading) {
@@ -706,25 +854,120 @@ export default function CustomerDashboard() {
             )}
           </TabsContent>
 
-          {/* Appointment History Tab */}
-          <TabsContent value="history" className="space-y-4" data-testid="content-history">
+          {/* Comprehensive Appointment History Tab */}
+          <TabsContent value="history" className="space-y-6" data-testid="content-history">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold">Appointment History</h2>
-              <Button variant="outline" disabled data-testid="button-filters">
-                <Settings className="h-4 w-4 mr-2" />
-                Filters
-              </Button>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" data-testid="text-history-count">
+                  {appointmentHistory.length} {appointmentHistory.length === 1 ? 'appointment' : 'appointments'}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="filter-bar bg-card rounded-lg p-4 border" data-testid="filter-bar">
+              <div className="flex flex-wrap gap-4">
+                <div className="flex-1 min-w-[200px]">
+                  <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
+                    <SelectTrigger data-testid="select-status-filter">
+                      <Filter className="h-4 w-4 mr-2" />
+                      <SelectValue placeholder="Filter by status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Appointments</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex-1 min-w-[200px]">
+                  <Select value={historyDateFilter} onValueChange={setHistoryDateFilter}>
+                    <SelectTrigger data-testid="select-date-filter">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      <SelectValue placeholder="Filter by date" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All time</SelectItem>
+                      <SelectItem value="30days">Last 30 days</SelectItem>
+                      <SelectItem value="3months">Last 3 months</SelectItem>
+                      <SelectItem value="1year">Last year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex-1 min-w-[200px]">
+                  <div className="relative">
+                    <Search className="h-4 w-4 absolute left-3 top-3 text-muted-foreground" />
+                    <Input
+                      placeholder="Search salons or services..."
+                      value={historySearchQuery}
+                      onChange={(e) => setHistorySearchQuery(e.target.value)}
+                      className="pl-10"
+                      data-testid="input-search-history"
+                    />
+                  </div>
+                </div>
+
+                {(historyStatusFilter !== 'all' || historyDateFilter !== 'all' || historySearchQuery) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      setHistoryStatusFilter('all');
+                      setHistoryDateFilter('all');
+                      setHistorySearchQuery('');
+                    }}
+                    data-testid="button-clear-filters"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Clear
+                  </Button>
+                )}
+              </div>
             </div>
             
-            {historyLoading ? (
+            {/* History Content */}
+            {historyError ? (
+              <Card className="text-center py-12" data-testid="error-history">
+                <CardContent>
+                  <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Failed to load history</h3>
+                  <p className="text-muted-foreground mb-4">
+                    We couldn't load your appointment history. Please try again.
+                  </p>
+                  <Button 
+                    onClick={() => queryClient.invalidateQueries({ queryKey: ['/api/customer/appointments'] })}
+                    data-testid="button-retry-history"
+                  >
+                    <RefreshCcw className="h-4 w-4 mr-2" />
+                    Retry
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : historyLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3, 4].map(i => (
                   <Card key={i}>
                     <CardContent className="p-6">
-                      <div className="space-y-2">
-                        <div className="h-4 w-48 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></div>
-                        <div className="h-6 w-32 bg-gray-300 dark:bg-gray-700 rounded animate-pulse"></div>
-                        <div className="h-4 w-64 bg-gray-200 dark:bg-gray-800 rounded animate-pulse"></div>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-2">
+                            <div className="h-5 w-48 bg-muted rounded animate-pulse"></div>
+                            <div className="h-4 w-32 bg-muted rounded animate-pulse"></div>
+                            <div className="h-4 w-64 bg-muted rounded animate-pulse"></div>
+                          </div>
+                          <div className="space-y-2 text-right">
+                            <div className="h-6 w-20 bg-muted rounded animate-pulse"></div>
+                            <div className="h-4 w-16 bg-muted rounded animate-pulse"></div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 mt-4">
+                          <div className="h-8 w-20 bg-muted rounded animate-pulse"></div>
+                          <div className="h-8 w-24 bg-muted rounded animate-pulse"></div>
+                          <div className="h-8 w-16 bg-muted rounded animate-pulse"></div>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -732,45 +975,159 @@ export default function CustomerDashboard() {
               </div>
             ) : appointmentHistory && appointmentHistory.length > 0 ? (
               <div className="space-y-4">
-                {appointmentHistory.map((appointment) => (
-                  <Card key={appointment.id} className="hover:shadow-md transition-shadow" data-testid={`card-history-${appointment.id}`}>
-                    <CardContent className="p-6">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-lg">{appointment.serviceName}</h3>
-                            <Badge className={getStatusColor(appointment.status)} data-testid={`badge-history-status-${appointment.id}`}>
-                              {appointment.status}
+                {appointmentHistory.map((appointment) => {
+                  const isExpanded = expandedCards.has(appointment.id);
+                  const statusBadge = getStatusBadgeContent(appointment.status);
+                  
+                  return (
+                    <Card 
+                      key={appointment.id} 
+                      className="appointment-history-card hover:shadow-md transition-shadow" 
+                      data-testid={`card-history-${appointment.id}`}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-1">
+                            <h3 className="font-semibold text-lg" data-testid={`text-service-${appointment.id}`}>
+                              {appointment.serviceName}
+                            </h3>
+                            <p className="text-muted-foreground" data-testid={`text-salon-${appointment.id}`}>
+                              {appointment.salonName}
+                            </p>
+                            <p className="text-sm text-muted-foreground" data-testid={`text-date-time-${appointment.id}`}>
+                              {formatDate(appointment.date)} at {appointment.time}
+                            </p>
+                          </div>
+                          <div className="text-right space-y-1">
+                            <Badge 
+                              className={`${statusBadge.className} flex items-center gap-1`}
+                              data-testid={`badge-status-${appointment.id}`}
+                            >
+                              {statusBadge.icon}
+                              {statusBadge.text}
                             </Badge>
-                          </div>
-                          <p className="text-muted-foreground">{appointment.salonName}</p>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-4 w-4" />
-                              {formatDate(appointment.date)}
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <User className="h-4 w-4" />
-                              {appointment.staffName}
-                            </div>
+                            <p className="text-sm font-medium" data-testid={`text-price-${appointment.id}`}>
+                              {formatCurrency(appointment.totalPaisa)}
+                            </p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-lg">{formatCurrency(appointment.totalPaisa)}</p>
+                      </CardHeader>
+                      
+                      <CardContent className="pt-0 pb-3">
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <span className="flex items-center gap-1" data-testid={`text-staff-${appointment.id}`}>
+                            <User className="h-4 w-4" />
+                            {appointment.staffName}
+                          </span>
+                          <span className="flex items-center gap-1" data-testid={`text-duration-${appointment.id}`}>
+                            <Clock className="h-4 w-4" />
+                            {appointment.duration} min
+                          </span>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+
+                        {isExpanded && appointment.notes && (
+                          <div className="mt-3 p-3 bg-muted rounded-lg" data-testid={`text-notes-${appointment.id}`}>
+                            <p className="text-sm">
+                              <strong>Notes:</strong> {appointment.notes}
+                            </p>
+                          </div>
+                        )}
+                      </CardContent>
+                      
+                      <CardFooter className="pt-0">
+                        <div className="flex flex-wrap gap-2 w-full">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleRebook(appointment)}
+                            data-testid={`button-rebook-${appointment.id}`}
+                          >
+                            <RotateCcw className="h-3 w-3 mr-1" />
+                            Rebook
+                          </Button>
+
+                          {appointment.status === 'completed' && (
+                            <>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleLeaveReview(appointment)}
+                                data-testid={`button-review-${appointment.id}`}
+                              >
+                                <Star className="h-3 w-3 mr-1" />
+                                Review
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleViewReceipt(appointment)}
+                                data-testid={`button-receipt-${appointment.id}`}
+                              >
+                                <Receipt className="h-3 w-3 mr-1" />
+                                Receipt
+                              </Button>
+                            </>
+                          )}
+
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleContactSalon(appointment)}
+                            data-testid={`button-contact-${appointment.id}`}
+                          >
+                            <MessageCircle className="h-3 w-3 mr-1" />
+                            Contact
+                          </Button>
+
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => toggleCardExpansion(appointment.id)}
+                            data-testid={`button-details-${appointment.id}`}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            {isExpanded ? 'Hide' : 'Details'}
+                          </Button>
+                        </div>
+                      </CardFooter>
+                    </Card>
+                  );
+                })}
               </div>
             ) : (
               <Card className="text-center py-12" data-testid="empty-history">
                 <CardContent>
                   <History className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No appointment history</h3>
-                  <p className="text-muted-foreground">
-                    Your completed appointments will appear here after your visits.
+                  <h3 className="text-lg font-semibold mb-2">
+                    {historyStatusFilter !== 'all' || historySearchQuery ? 'No matching appointments' : 'No appointment history'}
+                  </h3>
+                  <p className="text-muted-foreground mb-4">
+                    {historyStatusFilter !== 'all' || historySearchQuery 
+                      ? 'Try adjusting your filters or search terms.'
+                      : 'Your completed appointments will appear here after your visits.'
+                    }
                   </p>
+                  {(historyStatusFilter !== 'all' || historySearchQuery) ? (
+                    <Button 
+                      variant="outline"
+                      onClick={() => {
+                        setHistoryStatusFilter('all');
+                        setHistoryDateFilter('all');
+                        setHistorySearchQuery('');
+                      }}
+                      data-testid="button-clear-filters-empty"
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Clear Filters
+                    </Button>
+                  ) : (
+                    <Link href="/">
+                      <Button data-testid="button-start-booking">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Start Your Beauty Journey
+                      </Button>
+                    </Link>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -942,6 +1299,20 @@ export default function CustomerDashboard() {
           salonName={rescheduleAppointment.salonName}
           salonId={rescheduleAppointment.salonId}
           staffId={rescheduleAppointment.staffId}
+        />
+      )}
+
+      {/* Rebooking Modal for History Actions */}
+      {rebookAppointment && (
+        <BookingModal
+          isOpen={rebookModalOpen}
+          onClose={() => {
+            setRebookModalOpen(false);
+            setRebookAppointment(null);
+          }}
+          salonName={rebookAppointment.salonName}
+          salonId={rebookAppointment.salonId}
+          staffId={rebookAppointment.staffId}
         />
       )}
     </div>
