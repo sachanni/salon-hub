@@ -195,9 +195,9 @@ const mapPaymentData = (serverData: ServerPaymentRecord): PaymentRecord => ({
 
 const mapDashboardStats = (profile: ServerCustomerProfile): DashboardStats => ({
   upcomingAppointments: 0, // Will be calculated from upcoming appointments query
-  totalAppointments: profile.stats.totalBookings,
-  totalSpent: Math.floor(profile.stats.totalSpentPaisa / 100), // CRITICAL FIX: Convert paisa to rupees
-  favoriteServices: profile.stats.favoriteServices.map(service => ({
+  totalAppointments: profile.stats.totalBookings || 0,
+  totalSpent: Math.floor((profile.stats.totalSpentPaisa || 0) / 100), // CRITICAL FIX: Convert paisa to rupees
+  favoriteServices: (profile.stats.favoriteServices || []).map(service => ({
     serviceName: service.serviceName,
     count: service.count
   }))
@@ -363,7 +363,7 @@ export default function CustomerDashboard() {
 
   // Calculate payment summary stats
   const paymentSummaryStats = useMemo(() => {
-    if (!paymentHistory.length) return null;
+    if (!paymentHistory || !paymentHistory.length) return null;
     
     const completedPayments = paymentHistory.filter(p => p.status === 'completed');
     const totalSpent = completedPayments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -409,17 +409,16 @@ export default function CustomerDashboard() {
     return filteredHistory;
   }, [allHistoryData, historyStatusFilter, historySearchQuery]);
   
-  // Create derived stats with upcoming appointments count
-  const [dashboardStatsWithUpcoming, setDashboardStatsWithUpcoming] = useState<DashboardStats | undefined>();
-  
-  useEffect(() => {
+  // Create derived stats with upcoming appointments count using useMemo to prevent infinite loops
+  const dashboardStatsWithUpcoming = useMemo(() => {
     if (dashboardStats) {
-      setDashboardStatsWithUpcoming({
+      return {
         ...dashboardStats,
         upcomingAppointments: upcomingAppointments?.length || 0
-      });
+      };
     }
-  }, [upcomingAppointments, dashboardStats]);
+    return undefined;
+  }, [dashboardStats, upcomingAppointments]);
 
   const statsLoading = profileLoading;
 
@@ -442,7 +441,7 @@ export default function CustomerDashboard() {
         phone: customerProfile.phone || '',
       });
     }
-  }, [customerProfile, profileLoading, profileForm]);
+  }, [customerProfile, profileLoading]);
 
   // Hydrate preferences from server data to prevent data loss
   useEffect(() => {
@@ -1717,7 +1716,7 @@ export default function CustomerDashboard() {
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {customerProfile && customerProfile.stats.favoriteServices.length > 0 ? (
+                  {customerProfile && customerProfile.stats.favoriteServices && customerProfile.stats.favoriteServices.length > 0 ? (
                     <>
                       <div>
                         <Label className="text-sm font-medium text-muted-foreground">Favorite Services</Label>

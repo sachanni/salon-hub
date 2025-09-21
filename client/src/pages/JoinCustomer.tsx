@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { ChevronLeft, User, Mail, Phone, Lock, Star, Users } from "lucide-react"
 import customerImage from "@assets/stock_images/happy_woman_getting__3f5716b3.jpg";
 import { SocialLogin } from "@/components/SocialLogin";
 import { handleSocialAuth } from "@/lib/socialAuth";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function JoinCustomer() {
   const [, setLocation] = useLocation();
@@ -21,6 +22,18 @@ export default function JoinCustomer() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const { isAuthenticated, isBusinessUser, isLoading: authLoading } = useAuth();
+
+  // Redirect authenticated users to appropriate dashboard
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      if (isBusinessUser) {
+        setLocation('/business/dashboard');
+      } else {
+        setLocation('/customer/dashboard');
+      }
+    }
+  }, [isAuthenticated, isBusinessUser, authLoading, setLocation]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
