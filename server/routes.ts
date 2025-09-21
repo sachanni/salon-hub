@@ -311,21 +311,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(500).json({ error: "Failed to create session" });
         }
 
-        // Check user role and setup completion for redirect
+        // Check user role for redirect
         const roles = await storage.getUserRoles(user.id);
         const isOwner = roles.some(role => role.name === 'owner');
         
         let redirectUrl = '/';
         if (isOwner) {
-          // Check if business owner has completed setup
-          const orgMemberships = await storage.getUserOrganizations(user.id);
-          const hasCompletedSetup = orgMemberships && orgMemberships.length > 0;
-          
-          if (!hasCompletedSetup) {
-            redirectUrl = '/business/setup';
-          } else {
-            redirectUrl = '/business/dashboard';
-          }
+          // Always redirect business owners to dashboard - dashboard handles setup within tabs
+          redirectUrl = '/business/dashboard';
         }
 
         // Success response
