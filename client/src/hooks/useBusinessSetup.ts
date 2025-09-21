@@ -63,10 +63,10 @@ export function useBusinessSetup(salonId: string): UseBusinessSetupReturn {
       try {
         const calculatedState = BusinessSetupService.calculateSetupState({
           salonData,
-          services: services || [],
-          staff: staff || [],
+          services: Array.isArray(services) ? services : [],
+          staff: Array.isArray(staff) ? staff : [],
           bookingSettings,
-          media: media || []
+          media: Array.isArray(media) ? media : []
         });
         
         setSetupState(calculatedState);
