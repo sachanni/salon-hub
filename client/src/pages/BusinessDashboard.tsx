@@ -526,6 +526,7 @@ export default function BusinessDashboard() {
               <CardContent>
                 <ProfileStep 
                   salonId={salonId} 
+                  initialData={salon as any}
                   onComplete={() => handleSectionComplete('profile')} 
                   isCompleted={completionStatus.profile}
                 />
