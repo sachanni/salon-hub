@@ -49,7 +49,7 @@ export default function ServicesStep({
   const { data: existingServices } = useQuery({
     queryKey: ['/api/salons', salonId, 'services'],
     enabled: !!salonId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 0, // Always refetch when invalidated
   });
 
   // Update local services state when query data changes
