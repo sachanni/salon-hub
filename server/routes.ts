@@ -890,6 +890,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // BOOKING MANAGEMENT ENDPOINTS
+  
+  // Get bookings for a salon (business dashboard)
+  app.get('/api/salons/:salonId/bookings', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { status, startDate, endDate } = req.query;
+      
+      const bookings = await storage.getBookingsBySalonId(salonId, {
+        status: status as string,
+        startDate: startDate as string,
+        endDate: endDate as string
+      });
+      
+      res.json(bookings);
+    } catch (error) {
+      console.error('Error fetching salon bookings:', error);
+      res.status(500).json({ error: 'Failed to fetch bookings' });
+    }
+  });
+  
+  // Get specific booking details
+  app.get('/api/salons/:salonId/bookings/:bookingId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, bookingId } = req.params;
+      const booking = await storage.getBooking(bookingId);
+      
+      if (!booking) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      // SECURITY: Verify booking belongs to the specified salon
+      if (booking.salonId !== salonId) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      res.json(booking);
+    } catch (error) {
+      console.error('Error fetching booking:', error);
+      res.status(500).json({ error: 'Failed to fetch booking' });
+    }
+  });
+  
+  // Update booking status
+  app.put('/api/salons/:salonId/bookings/:bookingId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, bookingId } = req.params;
+      const { status, notes } = req.body;
+      
+      if (!status || !['pending', 'confirmed', 'cancelled', 'completed'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+      
+      // SECURITY: First fetch the booking to verify it belongs to the salon
+      const booking = await storage.getBooking(bookingId);
+      
+      if (!booking) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      // SECURITY: Verify booking belongs to the specified salon
+      if (booking.salonId !== salonId) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      await storage.updateBookingStatus(bookingId, status);
+      
+      // If notes provided, update booking notes
+      if (notes) {
+        await storage.updateBookingNotes(bookingId, notes);
+      }
+      
+      res.json({ success: true, message: 'Booking updated successfully' });
+    } catch (error) {
+      console.error('Error updating booking:', error);
+      res.status(500).json({ error: 'Failed to update booking' });
+    }
+  });
+  
+  // Get salon dashboard analytics
+  app.get('/api/salons/:salonId/analytics', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = '7d' } = req.query; // 7d, 30d, 90d, 1y
+      
+      const analytics = await storage.getSalonAnalytics(salonId, period as string);
+      
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching salon analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch analytics' });
+    }
+  });
+  
+  // Get customer profiles for a salon
+  app.get('/api/salons/:salonId/customers', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const customers = await storage.getCustomersBySalonId(salonId);
+      
+      res.json(customers);
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+      res.status(500).json({ error: 'Failed to fetch customers' });
+    }
+  });
+
   // Get available services
   app.get('/api/services', async (req, res) => {
     try {

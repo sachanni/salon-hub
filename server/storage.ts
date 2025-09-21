@@ -24,7 +24,7 @@ import {
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, gte, lte, desc, asc, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
@@ -86,6 +86,10 @@ export interface IStorage {
   getBooking(id: string): Promise<Booking | undefined>;
   createBooking(booking: InsertBooking): Promise<Booking>;
   updateBookingStatus(id: string, status: string): Promise<void>;
+  updateBookingNotes(id: string, notes: string): Promise<void>;
+  getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]>;
+  getCustomersBySalonId(salonId: string): Promise<any[]>;
+  getSalonAnalytics(salonId: string, period: string): Promise<any>;
   
   // Payment operations
   getPayment(id: string): Promise<Payment | undefined>;
@@ -396,6 +400,210 @@ export class DatabaseStorage implements IStorage {
 
   async updateBookingStatus(id: string, status: string): Promise<void> {
     await db.update(bookings).set({ status }).where(eq(bookings.id, id));
+  }
+
+  async updateBookingNotes(id: string, notes: string): Promise<void> {
+    await db.update(bookings).set({ notes }).where(eq(bookings.id, id));
+  }
+
+  async getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]> {
+    try {
+      const conditions = [eq(bookings.salonId, salonId)];
+
+      // Add status filter if provided
+      if (filters?.status) {
+        conditions.push(eq(bookings.status, filters.status));
+      }
+
+      // Add date range filters if provided
+      if (filters?.startDate) {
+        conditions.push(gte(bookings.bookingDate, filters.startDate));
+      }
+      if (filters?.endDate) {
+        conditions.push(lte(bookings.bookingDate, filters.endDate));
+      }
+
+      return await db
+        .select()
+        .from(bookings)
+        .where(and(...conditions))
+        .orderBy(desc(bookings.createdAt));
+    } catch (error) {
+      console.error('Error fetching bookings by salon ID:', error);
+      throw error;
+    }
+  }
+
+  async getCustomersBySalonId(salonId: string): Promise<any[]> {
+    try {
+      // Get unique customers from bookings for this salon
+      const customers = await db
+        .selectDistinct({
+          name: bookings.customerName,
+          email: bookings.customerEmail,
+          phone: bookings.customerPhone,
+          totalBookings: sql<number>`count(*)`,
+          totalSpent: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          lastBookingDate: sql<string>`max(${bookings.bookingDate})`,
+          lastBookingStatus: sql<string>`max(${bookings.status})`
+        })
+        .from(bookings)
+        .where(eq(bookings.salonId, salonId))
+        .groupBy(bookings.customerEmail, bookings.customerName, bookings.customerPhone)
+        .orderBy(desc(sql`max(${bookings.createdAt})`));
+
+      return customers.map(customer => ({
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        totalBookings: Number(customer.totalBookings) || 0,
+        totalSpentPaisa: Number(customer.totalSpent) || 0,
+        lastBookingDate: customer.lastBookingDate,
+        lastBookingStatus: customer.lastBookingStatus
+      }));
+    } catch (error) {
+      console.error('Error fetching customers by salon ID:', error);
+      throw error;
+    }
+  }
+
+  async getSalonAnalytics(salonId: string, period: string): Promise<any> {
+    try {
+      // Calculate date range based on period
+      const endDate = new Date();
+      const startDate = new Date();
+      
+      switch (period) {
+        case 'week':
+          startDate.setDate(endDate.getDate() - 7);
+          break;
+        case 'month':
+          startDate.setMonth(endDate.getMonth() - 1);
+          break;
+        case 'quarter':
+          startDate.setMonth(endDate.getMonth() - 3);
+          break;
+        case 'year':
+          startDate.setFullYear(endDate.getFullYear() - 1);
+          break;
+        default:
+          startDate.setMonth(endDate.getMonth() - 1); // Default to month
+      }
+
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      // Get total bookings and revenue
+      const bookingStats = await db
+        .select({
+          totalBookings: sql<number>`count(*)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          confirmedBookings: sql<number>`count(case when ${bookings.status} = 'confirmed' then 1 end)`,
+          cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
+          completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ));
+
+      // Get popular services
+      const popularServices = await db
+        .select({
+          serviceName: services.name,
+          bookingCount: sql<number>`count(*)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
+        })
+        .from(bookings)
+        .innerJoin(services, eq(bookings.serviceId, services.id))
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ))
+        .groupBy(services.id, services.name)
+        .orderBy(desc(sql`count(*)`))
+        .limit(5);
+
+      // Get booking trends by day
+      const bookingTrends = await db
+        .select({
+          date: bookings.bookingDate,
+          bookingCount: sql<number>`count(*)`,
+          revenue: sql<number>`sum(${bookings.totalAmountPaisa})`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ))
+        .groupBy(bookings.bookingDate)
+        .orderBy(asc(bookings.bookingDate));
+
+      // Get staff performance
+      const staffPerformance = await db
+        .select({
+          staffName: staff.name,
+          bookingCount: sql<number>`count(*)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
+        })
+        .from(bookings)
+        .leftJoin(staff, eq(bookings.staffId, staff.id))
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, startDateStr),
+          lte(bookings.bookingDate, endDateStr)
+        ))
+        .groupBy(staff.id, staff.name)
+        .orderBy(desc(sql`count(*)`));
+
+      const stats = bookingStats[0] || {
+        totalBookings: 0,
+        totalRevenue: 0,
+        confirmedBookings: 0,
+        cancelledBookings: 0,
+        completedBookings: 0
+      };
+
+      return {
+        period,
+        startDate: startDateStr,
+        endDate: endDateStr,
+        overview: {
+          totalBookings: Number(stats.totalBookings) || 0,
+          totalRevenuePaisa: Number(stats.totalRevenue) || 0,
+          confirmedBookings: Number(stats.confirmedBookings) || 0,
+          cancelledBookings: Number(stats.cancelledBookings) || 0,
+          completedBookings: Number(stats.completedBookings) || 0,
+          cancellationRate: stats.totalBookings > 0 
+            ? ((Number(stats.cancelledBookings) || 0) / Number(stats.totalBookings) * 100).toFixed(2)
+            : '0.00'
+        },
+        popularServices: popularServices.map(service => ({
+          serviceName: service.serviceName,
+          bookingCount: Number(service.bookingCount) || 0,
+          totalRevenuePaisa: Number(service.totalRevenue) || 0
+        })),
+        bookingTrends: bookingTrends.map(trend => ({
+          date: trend.date,
+          bookingCount: Number(trend.bookingCount) || 0,
+          revenuePaisa: Number(trend.revenue) || 0
+        })),
+        staffPerformance: staffPerformance
+          .filter(performer => performer.staffName) // Filter out null staff names
+          .map(performer => ({
+            staffName: performer.staffName,
+            bookingCount: Number(performer.bookingCount) || 0,
+            totalRevenuePaisa: Number(performer.totalRevenue) || 0
+          }))
+      };
+    } catch (error) {
+      console.error('Error fetching salon analytics:', error);
+      throw error;
+    }
   }
 
   // Payment operations
