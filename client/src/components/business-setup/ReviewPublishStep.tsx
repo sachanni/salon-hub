@@ -247,8 +247,9 @@ export default function ReviewPublishStep({
   };
 
   // Use dashboard completion data if available, otherwise fallback to old logic
-  const completionPercentage = dashboardCompletion?.overallProgress ?? 
-    ((publishStatus.completedSections / publishStatus.totalSections) * 100);
+  const completionPercentage = (dashboardCompletion && typeof dashboardCompletion === 'object' && 'overallProgress' in dashboardCompletion) 
+    ? (dashboardCompletion as any).overallProgress 
+    : ((publishStatus.completedSections / publishStatus.totalSections) * 100);
 
   return (
     <div className="space-y-6">
@@ -309,23 +310,23 @@ export default function ReviewPublishStep({
             {SETUP_SECTIONS.map((section) => {
               // Use dashboard completion data instead of old sequential logic
               let isCompleted = false;
-              if (dashboardCompletion) {
+              if (dashboardCompletion && typeof dashboardCompletion === 'object') {
                 switch (section.id) {
                   case 'business_info':
                   case 'location_contact':
-                    isCompleted = dashboardCompletion.profile?.isComplete ?? false;
+                    isCompleted = (dashboardCompletion as any).profile?.isComplete ?? false;
                     break;
                   case 'services':
-                    isCompleted = dashboardCompletion.services?.isComplete ?? false;
+                    isCompleted = (dashboardCompletion as any).services?.isComplete ?? false;
                     break;
                   case 'staff':
-                    isCompleted = dashboardCompletion.staff?.isComplete ?? false;
+                    isCompleted = (dashboardCompletion as any).staff?.isComplete ?? false;
                     break;
                   case 'booking_settings':
-                    isCompleted = dashboardCompletion.settings?.isComplete ?? false;
+                    isCompleted = (dashboardCompletion as any).settings?.isComplete ?? false;
                     break;
                   case 'media':
-                    isCompleted = dashboardCompletion.media?.isComplete ?? false;
+                    isCompleted = (dashboardCompletion as any).media?.isComplete ?? false;
                     break;
                   case 'payment_setup':
                     isCompleted = true; // Auto-complete payment setup for now
