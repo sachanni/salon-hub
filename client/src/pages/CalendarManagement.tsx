@@ -76,68 +76,7 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
   // Get salonId from prop (dashboard embedding) or selected salon or first available salon
   const salonId = propSalonId || selectedSalonId || userSalons[0]?.id || '';
 
-  // Check authentication and permissions
-  if (!isAuthenticated) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="max-w-md mx-auto">
-          <CardHeader className="text-center">
-            <CardTitle className="flex items-center justify-center gap-2">
-              <Lock className="h-6 w-6" />
-              Authentication Required
-            </CardTitle>
-            <CardDescription>
-              You need to be signed in to access calendar management
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <Button asChild>
-              <Link href="/join">Sign In</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!isBusinessUser) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="max-w-md mx-auto">
-          <CardHeader className="text-center">
-            <CardTitle className="flex items-center justify-center gap-2">
-              <Lock className="h-6 w-6" />
-              Business Access Required
-            </CardTitle>
-            <CardDescription>
-              Only business owners, managers, and staff can access calendar management
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <Button asChild variant="outline">
-              <Link href="/join/business">Join as Business</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!salonId) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="max-w-md mx-auto">
-          <CardHeader className="text-center">
-            <CardTitle>No Salon Access</CardTitle>
-            <CardDescription>
-              You don't have access to any salons yet
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
+  // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS!
   // Fetch staff
   const { data: staff = [], isLoading: staffLoading, error: staffError } = useQuery({
     queryKey: ['/api/salons', salonId, 'staff'],
@@ -330,6 +269,68 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
       });
     }
   });
+
+  // Check authentication and permissions AFTER all hooks
+  if (!isAuthenticated) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="max-w-md mx-auto">
+          <CardHeader className="text-center">
+            <CardTitle className="flex items-center justify-center gap-2">
+              <Lock className="h-6 w-6" />
+              Authentication Required
+            </CardTitle>
+            <CardDescription>
+              You need to be signed in to access calendar management
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center">
+            <Button asChild>
+              <Link href="/join">Sign In</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!isBusinessUser) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="max-w-md mx-auto">
+          <CardHeader className="text-center">
+            <CardTitle className="flex items-center justify-center gap-2">
+              <Lock className="h-6 w-6" />
+              Business Access Required
+            </CardTitle>
+            <CardDescription>
+              Only business owners, managers, and staff can access calendar management
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-center">
+            <Button asChild variant="outline">
+              <Link href="/join/business">Join as Business</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!salonId) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="max-w-md mx-auto">
+          <CardHeader className="text-center">
+            <CardTitle>No Salon Access</CardTitle>
+            <CardDescription>
+              You don't have access to any salons yet
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   const onStaffSubmit = (data: any) => {
     createStaffMutation.mutate(data);
