@@ -14,6 +14,7 @@ import LoginBusiness from "@/pages/LoginBusiness";
 import BusinessSetup from "@/pages/BusinessSetup";
 import CalendarManagement from "@/pages/CalendarManagement";
 import BusinessDashboard from "@/pages/BusinessDashboard";
+import CustomerDashboard from "@/pages/CustomerDashboard";
 import SalonProfile from "@/pages/SalonProfile";
 import NotFound from "@/pages/not-found";
 
@@ -31,8 +32,13 @@ function Router() {
         <Route path="/business-setup" component={BusinessSetup} />
         <Route path="/dashboard" component={BusinessDashboard} />
         <Route path="/business/dashboard" component={BusinessDashboard} />
-        <Route path="/calendar" component={CalendarManagement} />
-        <Route path="/calendar-management/:salonId" component={CalendarManagement} />
+        <Route path="/customer/dashboard" component={CustomerDashboard} />
+        <Route path="/calendar">
+          {() => <CalendarManagement />}
+        </Route>
+        <Route path="/calendar-management/:salonId">
+          {(params) => <CalendarManagement salonId={params.salonId} />}
+        </Route>
         <Route path="/salon/:salonId" component={SalonProfile} />
         {/* Fallback to 404 */}
         <Route component={NotFound} />

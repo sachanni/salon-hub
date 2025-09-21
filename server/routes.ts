@@ -5653,6 +5653,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Customer authentication middleware - ensures user has customer role
+  const requireCustomerAuth = async (req: any, res: any, next: any) => {
+    await isAuthenticated(req, res, async () => {
+      try {
+        // Check if user has customer role
+        if (!req.user?.roles?.includes('customer')) {
+          return res.status(403).json({ message: "Customer access required" });
+        }
+        next();
+      } catch (error) {
+        console.error("Customer authorization error:", error);
+        return res.status(403).json({ message: "Authorization failed" });
+      }
+    });
+  };
+
+  // Customer Dashboard API Endpoints
+  
+  // Get customer appointments
+  app.get('/api/customer/appointments', requireCustomerAuth, async (req: any, res) => {
+    try {
+      const customerId = req.user.id;
+      const filters = {
+        status: req.query.status as "upcoming" | "completed" | "cancelled" | "all" || "all",
+        limit: parseInt(req.query.limit as string) || 50,
+        offset: parseInt(req.query.offset as string) || 0,
+      };
+
+      // Validate query parameters
+      const validStatuses = ["upcoming", "completed", "cancelled", "all"];
+      if (!validStatuses.includes(filters.status)) {
+        return res.status(400).json({ 
+          error: "Invalid status parameter", 
+          validValues: validStatuses 
+        });
+      }
+
+      if (filters.limit > 100) {
+        return res.status(400).json({ 
+          error: "Limit cannot exceed 100" 
+        });
+      }
+
+      const appointments = await storage.getCustomerAppointments(customerId, filters);
+      res.json(appointments);
+    } catch (error) {
+      console.error('Error fetching customer appointments:', error);
+      res.status(500).json({ error: 'Failed to fetch appointments' });
+    }
+  });
+
+  // Get customer profile with stats
+  app.get('/api/customer/profile', requireCustomerAuth, async (req: any, res) => {
+    try {
+      const customerId = req.user.id;
+      const profile = await storage.getCustomerProfileWithStats(customerId);
+      res.json(profile);
+    } catch (error) {
+      console.error('Error fetching customer profile:', error);
+      res.status(500).json({ error: 'Failed to fetch customer profile' });
+    }
+  });
+
+  // Get customer payment history
+  app.get('/api/customer/payments', requireCustomerAuth, async (req: any, res) => {
+    try {
+      const customerId = req.user.id;
+      const payments = await storage.getCustomerPaymentHistory(customerId);
+      res.json(payments);
+    } catch (error) {
+      console.error('Error fetching customer payment history:', error);
+      res.status(500).json({ error: 'Failed to fetch payment history' });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

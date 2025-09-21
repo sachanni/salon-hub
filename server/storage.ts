@@ -982,6 +982,74 @@ export interface IStorage {
   getMessageTemplatesBySalonId(salonId: string): Promise<MessageTemplate[]>;
   getCustomerSegmentsBySalonId(salonId: string): Promise<CustomerSegment[]>;
   deleteTestMetricsBefore(cutoffDate: Date): Promise<number>;
+
+  // Customer Dashboard API Operations
+  getCustomerAppointments(customerId: string, filters?: {
+    status?: "upcoming" | "completed" | "cancelled" | "all";
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    appointments: Array<{
+      id: string;
+      salonId: string;
+      salonName: string;
+      serviceId: string;
+      serviceName: string;
+      staffId: string;
+      staffName: string;
+      bookingDate: string;
+      bookingTime: string;
+      status: "upcoming" | "completed" | "cancelled";
+      totalAmountPaisa: number;
+      currency: string;
+      duration: number;
+      notes?: string;
+      createdAt: string;
+    }>;
+    total: number;
+    hasMore: boolean;
+  }>;
+
+  getCustomerProfileWithStats(customerId: string): Promise<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    profileImageUrl?: string;
+    preferences: {
+      favoriteServices: string[];
+      preferredStaff: string[];
+      communicationPreferences: {
+        email: boolean;
+        sms: boolean;
+        push: boolean;
+      };
+    };
+    stats: {
+      totalBookings: number;
+      totalSpentPaisa: number;
+      memberSince: string;
+      lastBookingDate?: string;
+      favoriteService?: string;
+    };
+  }>;
+
+  getCustomerPaymentHistory(customerId: string): Promise<{
+    payments: Array<{
+      id: string;
+      bookingId: string;
+      salonName: string;
+      serviceName: string;
+      amountPaisa: number;
+      currency: string;
+      status: "completed" | "pending" | "failed" | "refunded";
+      paymentMethod: string;
+      transactionDate: string;
+      receiptUrl?: string;
+    }>;
+    total: number;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -5143,6 +5211,240 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error('Error fetching A/B test campaign analytics:', error);
       throw new Error('Failed to fetch A/B test campaign analytics');
+    }
+  }
+
+  // Customer Dashboard API Implementation
+  async getCustomerAppointments(customerId: string, filters?: {
+    status?: "upcoming" | "completed" | "cancelled" | "all";
+    limit?: number;
+    offset?: number;
+  }) {
+    try {
+      const limit = filters?.limit || 50;
+      const offset = filters?.offset || 0;
+      const status = filters?.status || "all";
+
+      // Get customer email first
+      const user = await this.getUserById(customerId);
+      if (!user?.email) {
+        throw new Error('Customer email not found');
+      }
+
+      // Build where conditions using customerEmail
+      let whereCondition = eq(bookings.customerEmail, user.email);
+      
+      if (status === "upcoming") {
+        // Fix: Filter by date/time >= now AND status in ['confirmed','pending']
+        const today = new Date().toISOString().split('T')[0];
+        whereCondition = and(
+          whereCondition,
+          gte(bookings.bookingDate, today),
+          sql`${bookings.status} IN ('confirmed', 'pending')`
+        ) as any;
+      } else if (status !== "all") {
+        whereCondition = and(whereCondition, eq(bookings.status, status)) as any;
+      }
+
+      // Get appointments with salon, service, and staff details
+      const appointmentsQuery = db
+        .select({
+          id: bookings.id,
+          salonId: bookings.salonId,
+          salonName: salons.name,
+          serviceId: bookings.serviceId,
+          serviceName: services.name,
+          staffId: bookings.staffId,
+          staffName: staff.name,
+          bookingDate: bookings.bookingDate,
+          bookingTime: bookings.bookingTime,
+          status: bookings.status,
+          totalAmountPaisa: bookings.totalAmountPaisa,
+          currency: bookings.currency,
+          duration: services.durationMinutes,
+          notes: bookings.notes,
+          createdAt: bookings.createdAt,
+        })
+        .from(bookings)
+        .innerJoin(salons, eq(bookings.salonId, salons.id))
+        .innerJoin(services, eq(bookings.serviceId, services.id))
+        .leftJoin(staff, eq(bookings.staffId, staff.id))
+        .where(whereCondition)
+        .orderBy(desc(bookings.bookingDate), desc(bookings.bookingTime))
+        .limit(limit)
+        .offset(offset);
+
+      const appointments = await appointmentsQuery;
+
+      // Get total count
+      const [{ count }] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(bookings)
+        .where(whereCondition);
+
+      const hasMore = offset + limit < count;
+
+      return {
+        appointments: appointments.map(apt => ({
+          id: apt.id,
+          salonId: apt.salonId,
+          salonName: apt.salonName,
+          serviceId: apt.serviceId,
+          serviceName: apt.serviceName,
+          staffId: apt.staffId || '',
+          staffName: apt.staffName || 'Not assigned',
+          bookingDate: apt.bookingDate,
+          bookingTime: apt.bookingTime,
+          status: apt.status as "upcoming" | "completed" | "cancelled",
+          totalAmountPaisa: apt.totalAmountPaisa,
+          currency: apt.currency,
+          duration: apt.duration,
+          notes: apt.notes || undefined,
+          createdAt: apt.createdAt?.toISOString() || '',
+        })),
+        total: count,
+        hasMore,
+      };
+    } catch (error) {
+      console.error('Error fetching customer appointments:', error);
+      throw new Error('Failed to fetch customer appointments');
+    }
+  }
+
+  async getCustomerProfileWithStats(customerId: string) {
+    try {
+      // Get user details
+      const user = await this.getUserById(customerId);
+      if (!user?.email) {
+        throw new Error('User not found');
+      }
+
+      // Get booking stats using customerEmail
+      const bookingStats = await db
+        .select({
+          totalBookings: sql<number>`count(*)`,
+          totalSpentPaisa: sql<number>`coalesce(sum(${bookings.totalAmountPaisa}), 0)`,
+          lastBookingDate: sql<string>`max(${bookings.bookingDate})`,
+        })
+        .from(bookings)
+        .where(eq(bookings.customerEmail, user.email));
+
+      // Get favorite service using customerEmail
+      const favoriteServiceQuery = await db
+        .select({
+          serviceId: bookings.serviceId,
+          serviceName: services.name,
+          count: sql<number>`count(*)`,
+        })
+        .from(bookings)
+        .innerJoin(services, eq(bookings.serviceId, services.id))
+        .where(eq(bookings.customerEmail, user.email))
+        .groupBy(bookings.serviceId, services.name)
+        .orderBy(desc(sql<number>`count(*)`))
+        .limit(1);
+
+      // Get communication preferences (default values if not found)
+      let communicationPrefs = {
+        email: true,
+        sms: true,
+        push: true,
+      };
+
+      try {
+        const [userPrefs] = await db
+          .select({
+            emailOptIn: communicationPreferences.emailOptIn,
+            smsOptIn: communicationPreferences.smsOptIn,
+          })
+          .from(communicationPreferences)
+          .where(eq(communicationPreferences.customerId, customerId))
+          .limit(1);
+
+        if (userPrefs) {
+          communicationPrefs = {
+            email: Boolean(userPrefs.emailOptIn),
+            sms: Boolean(userPrefs.smsOptIn),
+            push: true, // Default push to true
+          };
+        }
+      } catch {
+        // Keep default values if communication preferences table doesn't exist or query fails
+      }
+
+      const stats = bookingStats[0];
+      const favoriteService = favoriteServiceQuery[0];
+
+      return {
+        id: user.id,
+        email: user.email || '',
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        phone: user.phone || undefined,
+        profileImageUrl: user.profileImageUrl || undefined,
+        preferences: {
+          favoriteServices: favoriteService ? [favoriteService.serviceId] : [],
+          preferredStaff: [], // TODO: Can be calculated from booking history
+          communicationPreferences: communicationPrefs,
+        },
+        stats: {
+          totalBookings: stats.totalBookings || 0,
+          totalSpentPaisa: stats.totalSpentPaisa || 0,
+          memberSince: user.createdAt?.toISOString() || new Date().toISOString(),
+          lastBookingDate: stats.lastBookingDate || undefined,
+          favoriteService: favoriteService?.serviceName || undefined,
+        },
+      };
+    } catch (error) {
+      console.error('Error fetching customer profile with stats:', error);
+      throw new Error('Failed to fetch customer profile');
+    }
+  }
+
+  async getCustomerPaymentHistory(customerId: string) {
+    try {
+      // Get customer email first
+      const user = await this.getUserById(customerId);
+      if (!user?.email) {
+        throw new Error('Customer email not found');
+      }
+
+      // Get payments with booking, salon, and service details
+      const paymentsQuery = await db
+        .select({
+          id: payments.id,
+          bookingId: payments.bookingId,
+          salonName: salons.name,
+          serviceName: services.name,
+          amountPaisa: payments.amountPaisa,
+          currency: payments.currency,
+          status: payments.status,
+          transactionDate: payments.createdAt,
+        })
+        .from(payments)
+        .innerJoin(bookings, eq(payments.bookingId, bookings.id))
+        .innerJoin(salons, eq(bookings.salonId, salons.id))
+        .innerJoin(services, eq(bookings.serviceId, services.id))
+        .where(eq(bookings.customerEmail, user.email))
+        .orderBy(desc(payments.createdAt));
+
+      return {
+        payments: paymentsQuery.map(payment => ({
+          id: payment.id,
+          bookingId: payment.bookingId,
+          salonName: payment.salonName,
+          serviceName: payment.serviceName,
+          amountPaisa: payment.amountPaisa,
+          currency: payment.currency,
+          status: payment.status as "completed" | "pending" | "failed" | "refunded",
+          paymentMethod: 'razorpay', // Default since we use Razorpay
+          transactionDate: payment.transactionDate?.toISOString() || '',
+          receiptUrl: undefined, // Not available in schema
+        })),
+        total: paymentsQuery.length,
+      };
+    } catch (error) {
+      console.error('Error fetching customer payment history:', error);
+      throw new Error('Failed to fetch customer payment history');
     }
   }
 }
