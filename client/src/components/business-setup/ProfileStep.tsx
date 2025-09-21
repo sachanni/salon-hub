@@ -54,17 +54,18 @@ export default function ProfileStep({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Load existing salon data
+  // Load existing salon data - Use same query key as dashboard
   const { data: salonData } = useQuery({
-    queryKey: ['profile-salon-data', salonId],
+    queryKey: ['/api/salons', salonId], // Match dashboard query key
     enabled: !!salonId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 0, // Always get fresh data
   });
 
   // Populate form with existing data
   useEffect(() => {
     if (salonData) {
       const salon = salonData as any;
+      console.log('ProfileStep received salon data:', salon);
       setFormData(prev => ({
         ...prev,
         name: salon.name || "",
@@ -74,10 +75,10 @@ export default function ProfileStep({
         address: salon.address || "",
         city: salon.city || "",
         state: salon.state || "",
-        zipCode: salon.zipCode || "",
+        zipCode: salon.zip_code || salon.zipCode || "", // Handle both database formats
         phone: salon.phone || "",
         email: salon.email || "",
-        businessHours: salon.businessHours || ""
+        businessHours: salon.business_hours || salon.businessHours || ""
       }));
     }
   }, [salonData]);
