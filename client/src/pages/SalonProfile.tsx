@@ -2,6 +2,7 @@ import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
+import BookingModal from "@/components/BookingModal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,9 @@ export default function SalonProfile() {
   const { salonId } = useParams();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isFavorited, setIsFavorited] = useState(false);
+  const [isBookingOpen, setIsBookingOpen] = useState(false);
+  const [selectedSalon, setSelectedSalon] = useState("");
+  const [selectedSalonId, setSelectedSalonId] = useState("");
   const { addRecentlyViewed } = useRecentlyViewed();
 
   // Fetch salon details
@@ -334,7 +338,15 @@ export default function SalonProfile() {
                                     <p className="font-bold text-xl mb-2" data-testid={`text-service-price-${service.id}`}>
                                       ₹{service.price}
                                     </p>
-                                    <Button size="sm" data-testid={`button-book-service-${service.id}`}>
+                                    <Button 
+                                      size="sm" 
+                                      data-testid={`button-book-service-${service.id}`}
+                                      onClick={() => {
+                                        setSelectedSalon(salon?.name || '');
+                                        setSelectedSalonId(salonId || '');
+                                        setIsBookingOpen(true);
+                                      }}
+                                    >
                                       <Calendar className="h-3 w-3 mr-1" />
                                       Book
                                     </Button>
@@ -488,7 +500,16 @@ export default function SalonProfile() {
                 <CardTitle>Book an Appointment</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Button className="w-full" size="lg" data-testid="button-book-appointment">
+                <Button 
+                  className="w-full" 
+                  size="lg" 
+                  data-testid="button-book-appointment"
+                  onClick={() => {
+                    setSelectedSalon(salon?.name || '');
+                    setSelectedSalonId(salonId || '');
+                    setIsBookingOpen(true);
+                  }}
+                >
                   <Calendar className="h-4 w-4 mr-2" />
                   Book Now
                 </Button>
@@ -578,6 +599,14 @@ export default function SalonProfile() {
           </div>
         </div>
       </div>
+      
+      {/* Booking Modal */}
+      <BookingModal
+        isOpen={isBookingOpen}
+        onClose={() => setIsBookingOpen(false)}
+        salonName={selectedSalon}
+        salonId={selectedSalonId}
+      />
     </div>
   );
 }
