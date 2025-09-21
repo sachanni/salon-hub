@@ -94,9 +94,9 @@ export default function BusinessDashboard() {
 
   // Fetch salon details
   const { data: salon, isLoading: salonLoading } = useQuery({
-    queryKey: ['dashboard-salon-data', salonId], // Unique key for dashboard
+    queryKey: ['/api/salons', salonId], // Use standard salon data key
     enabled: !!salonId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 0, // Always fetch fresh data
     refetchOnWindowFocus: false,
   });
 
