@@ -765,21 +765,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Format salons for frontend with proper structure including images
       let formattedSalons = await Promise.all(salons.map(async salon => {
-        // Get the first media asset as the primary image
-        const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
-        const primaryImage = mediaAssets.find(asset => asset.isPrimary) || mediaAssets[0];
-        
-        return {
-          id: salon.id,
-          name: salon.name,
-          rating: parseFloat(salon.rating?.toString() || '0'),
-          reviewCount: salon.reviewCount,
-          location: `${salon.address}, ${salon.city}`,
-          category: salon.category,
-          priceRange: salon.priceRange,
-          openTime: salon.closeTime, // Show when it closes
-          image: primaryImage?.url || '' // Include primary image URL
-        };
+        try {
+          // Get the first media asset as the primary image
+          const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
+          const primaryImage = mediaAssets.find(asset => asset.isPrimary) || mediaAssets[0];
+          
+          console.log(`Salon ${salon.name}: Found ${mediaAssets.length} media assets, primary: ${primaryImage?.url || 'none'}`);
+          
+          return {
+            id: salon.id,
+            name: salon.name,
+            rating: parseFloat(salon.rating?.toString() || '0'),
+            reviewCount: salon.reviewCount,
+            location: `${salon.address}, ${salon.city}`,
+            category: salon.category,
+            priceRange: salon.priceRange,
+            openTime: salon.closeTime, // Show when it closes
+            image: primaryImage?.url || '' // Include primary image URL
+          };
+        } catch (error) {
+          console.error(`Error fetching media for salon ${salon.id}:`, error);
+          return {
+            id: salon.id,
+            name: salon.name,
+            rating: parseFloat(salon.rating?.toString() || '0'),
+            reviewCount: salon.reviewCount,
+            location: `${salon.address}, ${salon.city}`,
+            category: salon.category,
+            priceRange: salon.priceRange,
+            openTime: salon.closeTime,
+            image: '' // Fallback to empty string
+          };
+        }
       }));
 
       // Apply search filters
