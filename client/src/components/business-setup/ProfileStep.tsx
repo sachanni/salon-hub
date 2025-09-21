@@ -56,8 +56,9 @@ export default function ProfileStep({
 
   // Load existing salon data
   const { data: salonData } = useQuery({
-    queryKey: ['/api/salons', salonId],
+    queryKey: ['profile-salon-data', salonId],
     enabled: !!salonId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   // Populate form with existing data

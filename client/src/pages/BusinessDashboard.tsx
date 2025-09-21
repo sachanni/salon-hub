@@ -94,8 +94,10 @@ export default function BusinessDashboard() {
 
   // Fetch salon details
   const { data: salon, isLoading: salonLoading } = useQuery({
-    queryKey: ['/api/salons', salonId],
+    queryKey: ['dashboard-salon-data', salonId], // Unique key for dashboard
     enabled: !!salonId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
   });
 
   // Select salon ID from accessible salons only
@@ -105,36 +107,41 @@ export default function BusinessDashboard() {
     }
   }, [accessibleSalons, salonId]);
 
-  // Check completion status and handle auto-navigation
+  // Check completion status 
   useEffect(() => {
     if (salon) {
       const salonData = salon as any;
       const profileComplete = !!(salonData.name && salonData.description && salonData.address);
       
-      // Update completion status
-      setCompletionStatus(prev => ({
-        ...prev,
-        profile: profileComplete,
-        services: false, // Will be checked against services API
-        staff: false,    // Will be checked against staff API
-        settings: false, // Will be checked against settings API
-        media: false     // Will be checked against media API
-      }));
+      // Only update if profile completion status actually changed
+      setCompletionStatus(prev => {
+        if (prev.profile !== profileComplete) {
+          return {
+            ...prev,
+            profile: profileComplete,
+            services: false, // Will be checked against services API
+            staff: false,    // Will be checked against staff API
+            settings: false, // Will be checked against settings API
+            media: false     // Will be checked against media API
+          };
+        }
+        return prev;
+      });
     }
   }, [salon]);
 
-  // Handle auto-navigation only when first landing on overview with incomplete profile
+  // Handle auto-navigation only when salon data first loads
   useEffect(() => {
-    if (salon && activeTab === "overview" && !hasAutoNavigated.current) {
+    if (salon && !hasAutoNavigated.current) {
       const salonData = salon as any;
       const profileComplete = !!(salonData.name && salonData.description && salonData.address);
       
-      if (!profileComplete) {
+      if (!profileComplete && activeTab === "overview") {
         hasAutoNavigated.current = true;
         setActiveTab('profile');
       }
     }
-  }, [salon, activeTab]);
+  }, [salon]); // Remove activeTab from dependencies to prevent loops
 
   // Fetch dashboard stats (mock for now - would connect to real analytics)
   const { data: stats = { totalBookings: 0, todayBookings: 0, monthlyRevenue: 0, activeStaff: 0 } } = useQuery({
