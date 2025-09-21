@@ -140,7 +140,7 @@ export default function ReviewPublishStep({
       const response = await apiRequest('PUT', `/api/salons/${salonId}/publish-state`, {
         isPublished: 1,
         canAcceptBookings: 1,
-        publishedAt: new Date().toISOString()
+        publishedAt: new Date()
       });
       return response.json();
     },
