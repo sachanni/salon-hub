@@ -162,34 +162,65 @@ export default function SalonProfile() {
           </div>
         )}
         
-        {/* Gallery Navigation */}
+        {/* Enhanced Gallery Navigation */}
         {allImages.length > 1 && (
           <>
+            {/* Large Navigation Arrows - Much More Visible */}
             <Button
               variant="secondary"
-              size="sm"
-              className="absolute left-4 top-1/2 -translate-y-1/2 opacity-80 hover:opacity-100"
+              size="lg"
+              className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/95 hover:bg-white shadow-lg border-0 h-14 w-14 rounded-full p-0 z-10"
               onClick={prevImage}
               data-testid="button-prev-image"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-8 w-8 text-gray-800" />
             </Button>
             <Button
               variant="secondary"
-              size="sm"
-              className="absolute right-4 top-1/2 -translate-y-1/2 opacity-80 hover:opacity-100"
+              size="lg"
+              className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/95 hover:bg-white shadow-lg border-0 h-14 w-14 rounded-full p-0 z-10"
               onClick={nextImage}
               data-testid="button-next-image"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-8 w-8 text-gray-800" />
             </Button>
             
-            {/* Image Counter */}
-            <div className="absolute bottom-4 right-4 bg-black/60 text-white px-3 py-1 rounded-full text-sm">
+            {/* Dot Indicators for Easy Navigation */}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 flex space-x-2 z-10">
+              {allImages.map((_, index) => (
+                <button
+                  key={index}
+                  className={`w-3 h-3 rounded-full transition-all ${
+                    index === currentImageIndex 
+                      ? 'bg-white scale-125 shadow-lg' 
+                      : 'bg-white/60 hover:bg-white/80'
+                  }`}
+                  onClick={() => setCurrentImageIndex(index)}
+                  data-testid={`button-image-dot-${index}`}
+                />
+              ))}
+            </div>
+            
+            {/* Image Counter - Moved to Top Right */}
+            <div className="absolute top-4 right-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm font-medium z-10">
               <Camera className="h-3 w-3 inline mr-1" />
               {currentImageIndex + 1} / {allImages.length}
             </div>
+            
+            {/* Navigation Hint */}
+            <div className="absolute bottom-20 left-4 bg-black/70 text-white px-3 py-1 rounded-full text-xs z-10">
+              👆 Click dots or arrows to view all photos
+            </div>
           </>
+        )}
+        
+        {/* Click Anywhere to Navigate */}
+        {allImages.length > 1 && (
+          <div 
+            className="absolute inset-0 cursor-pointer z-5"
+            onClick={nextImage}
+            title="Click to view next image"
+          />
         )}
         
         {/* Salon Info Overlay */}
