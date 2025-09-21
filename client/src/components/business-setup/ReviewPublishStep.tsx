@@ -63,13 +63,6 @@ const SETUP_SECTIONS = [
     endpoint: '/api/salons/{salonId}/booking-settings'
   },
   {
-    id: 'payment_setup',
-    title: 'Payment Setup',
-    icon: CreditCard,
-    requiredFields: [],
-    endpoint: '/api/salons/{salonId}/payout-accounts'
-  },
-  {
     id: 'media',
     title: 'Photos & Media',
     icon: Camera,
@@ -200,11 +193,6 @@ export default function ReviewPublishStep({
         return;
       }
 
-      // Skip payment setup requirement - it's now optional
-      if (section.id === 'payment_setup') {
-        completed++; // Auto-complete payment setup section
-        return;
-      }
 
       if (data && typeof data === 'object') {
         const hasRequiredFields = section.requiredFields.every(field => {
@@ -225,7 +213,7 @@ export default function ReviewPublishStep({
     });
 
     setPublishStatus({
-      canPublish: completed >= 5, // Changed from 6 to 5 since payment setup is optional
+      canPublish: completed >= 6, // All 6 core sections required
       completedSections: completed,
       totalSections: SETUP_SECTIONS.length,
       issues
@@ -328,9 +316,6 @@ export default function ReviewPublishStep({
                     break;
                   case 'media':
                     isCompleted = (dashboardCompletion as any).media?.isComplete ?? false;
-                    break;
-                  case 'payment_setup':
-                    isCompleted = true; // Auto-complete payment setup for now
                     break;
                   default:
                     isCompleted = false;
