@@ -20,6 +20,8 @@ interface BookingModalProps {
 }
 
 export default function BookingModal({ isOpen, onClose, salonName, salonId, staffId }: BookingModalProps) {
+  // Handle empty staffId prop by treating empty strings as undefined
+  const validStaffId = staffId && staffId.trim() !== '' ? staffId : undefined;
   const [selectedService, setSelectedService] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
@@ -43,7 +45,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
 
   // Get selected staff member details with proper type guards
   const selectedStaffMember = Array.isArray(staff) ? staff.find((member: any) => member.id === selectedStaff) : undefined;
-  const preSelectedStaffMember = Array.isArray(staff) ? staff.find((member: any) => member.id === staffId) : undefined;
+  const preSelectedStaffMember = Array.isArray(staff) ? staff.find((member: any) => member.id === validStaffId) : undefined;
 
   // Guest session management
   const GUEST_DATA_KEY = 'salonhub_guest_data';
@@ -126,14 +128,14 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
     setGuestSessionId(null);
   }, [salonId]);
 
-  // Handle staff pre-selection when staffId prop changes
+  // Handle staff pre-selection when validStaffId prop changes
   useEffect(() => {
-    if (staffId && Array.isArray(staff) && staff.length > 0) {
-      setSelectedStaff(staffId);
-    } else if (!staffId) {
+    if (validStaffId && Array.isArray(staff) && staff.length > 0) {
+      setSelectedStaff(validStaffId);
+    } else if (!validStaffId) {
       setSelectedStaff("");
     }
-  }, [staffId, staff]);
+  }, [validStaffId, staff]);
 
   // Display staff error in toast
   useEffect(() => {
@@ -191,7 +193,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
       setSelectedTime("");
       setSelectedStaff("");
       setIsLoadingServices(true);
-      console.log('BookingModal opened - salonId:', salonId, 'salonName:', salonName, 'staffId:', staffId);
+      console.log('BookingModal opened - salonId:', salonId, 'salonName:', salonName, 'staffId:', staffId, 'validStaffId:', validStaffId);
       fetchServices();
     }
   }, [isOpen, salonId, toast]);
@@ -429,9 +431,9 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
               <div className="flex items-center justify-between">
                 <Label htmlFor="staff" className="text-base font-semibold flex items-center gap-2">
                   <Users className="h-4 w-4" />
-                  {staffId ? 'Your Selected Staff Member' : 'Choose Your Staff Member'}
+                  {validStaffId ? 'Your Selected Staff Member' : 'Choose Your Staff Member'}
                 </Label>
-                {staffId && (
+                {validStaffId && (
                   <Badge variant="outline" className="text-xs">
                     Pre-selected
                   </Badge>
@@ -441,11 +443,11 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
               <Select 
                 value={selectedStaff} 
                 onValueChange={setSelectedStaff}
-                disabled={staffId ? true : false} // Disable if staff was pre-selected
+                disabled={validStaffId ? true : false} // Disable if staff was pre-selected
               >
                 <SelectTrigger data-testid="select-staff" className="h-12">
                   <SelectValue placeholder={
-                    staffId && preSelectedStaffMember ? 
+                    validStaffId && preSelectedStaffMember ? 
                       `✓ ${preSelectedStaffMember.name} - ${preSelectedStaffMember.role || 'Specialist'}` :
                       "Choose a staff member (optional)"
                   } />
@@ -457,15 +459,15 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
                     </SelectItem>
                   ) : (
                     <>
-                      {!staffId && (
-                        <SelectItem value="">
+                      {!validStaffId && (
+                        <SelectItem value="any-available">
                           <div className="flex items-center gap-2">
                             <Users className="h-4 w-4 text-muted-foreground" />
                             <span>Any available staff member</span>
                           </div>
                         </SelectItem>
                       )}
-                      {Array.isArray(staff) && staff.map((member: any) => (
+                      {Array.isArray(staff) && staff.filter((member: any) => member.id && member.id.trim() !== '').map((member: any) => (
                         <SelectItem key={member.id} value={member.id}>
                           <div className="flex items-center gap-3 py-1">
                             <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
@@ -477,7 +479,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
                                 {member.role || 'Specialist'}
                               </div>
                             </div>
-                            {member.id === staffId && (
+                            {member.id === validStaffId && (
                               <Badge variant="secondary" className="text-xs">
                                 Selected
                               </Badge>
@@ -500,7 +502,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
                 </div>
               )}
               
-              {staffId && preSelectedStaffMember && (
+              {validStaffId && preSelectedStaffMember && (
                 <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                   <Star className="h-4 w-4 text-blue-600" />
                   <span className="text-sm text-blue-700 dark:text-blue-300">
@@ -528,7 +530,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
                     No services available
                   </SelectItem>
                 ) : (
-                  services.map((service) => (
+                  services.filter((service) => service.id && service.id.trim() !== '').map((service) => (
                     <SelectItem key={service.id} value={service.id}>
                       <div className="flex justify-between w-full">
                         <span>{service.name}</span>
