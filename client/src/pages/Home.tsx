@@ -48,10 +48,12 @@ export default function Home() {
   useEffect(() => {
     const fetchSalons = async () => {
       try {
-        const response = await fetch('/api/salons');
+        // Add cache-busting to ensure fresh data with images
+        const response = await fetch('/api/salons?_=' + Date.now());
         if (response.ok) {
           const salons = await response.json();
           setSalonsData(salons);
+          console.log('Fresh salon data loaded with images:', salons.find(s => s.name.includes('UNIBEAM'))?.image);
         }
       } catch (error) {
         console.error('Error fetching salons for recently viewed:', error);

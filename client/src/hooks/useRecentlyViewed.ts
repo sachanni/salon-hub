@@ -26,6 +26,15 @@ export function useRecentlyViewed() {
         const parsed: RecentlyViewedSalon[] = JSON.parse(stored);
         // Validate that we got an array
         if (Array.isArray(parsed)) {
+          // Check if old data format (missing image field) - if so, clear it
+          const hasOldFormat = parsed.some(salon => salon && typeof salon.image === 'undefined');
+          if (hasOldFormat) {
+            console.log('Clearing old recently viewed data format (missing images)');
+            localStorage.removeItem(RECENTLY_VIEWED_KEY);
+            setRecentlyViewed([]);
+            return;
+          }
+          
           // Sort by most recent first and validate data structure
           const validSalons = parsed
             .filter(salon => salon && typeof salon === 'object' && salon.id && salon.name && salon.viewedAt)
