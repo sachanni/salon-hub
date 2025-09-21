@@ -73,6 +73,7 @@ export default function MediaStep({
       setNewMedia({ url: "", assetType: "cover", caption: "", isPrimary: false });
       setIsAddingMedia(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
       toast({
         title: "Photo Added Successfully",
         description: "Your photo has been added to the gallery and is now visible to customers.",
@@ -97,6 +98,7 @@ export default function MediaStep({
     onSuccess: (_, mediaId) => {
       setMediaAssets(prev => prev.filter(m => m.id !== mediaId));
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'media-assets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
       toast({
         title: "Photo Deleted",
         description: "Media has been removed from your gallery.",
