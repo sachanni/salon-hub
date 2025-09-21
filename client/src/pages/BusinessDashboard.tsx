@@ -105,35 +105,36 @@ export default function BusinessDashboard() {
     }
   }, [accessibleSalons, salonId]);
 
-  // Check completion status based on salon data (prevent infinite loops)
+  // Check completion status and handle auto-navigation
   useEffect(() => {
     if (salon) {
       const salonData = salon as any;
       const profileComplete = !!(salonData.name && salonData.description && salonData.address);
       
-      // Only update completion status if it actually changed
-      setCompletionStatus(prev => {
-        if (prev.profile !== profileComplete) {
-          return {
-            ...prev,
-            profile: profileComplete
-          };
-        }
-        return prev;
-      });
+      // Update completion status
+      setCompletionStatus(prev => ({
+        ...prev,
+        profile: profileComplete,
+        services: false, // Will be checked against services API
+        staff: false,    // Will be checked against staff API
+        settings: false, // Will be checked against settings API
+        media: false     // Will be checked against media API
+      }));
+    }
+  }, [salon]);
+
+  // Handle auto-navigation only when first landing on overview with incomplete profile
+  useEffect(() => {
+    if (salon && activeTab === "overview" && !hasAutoNavigated.current) {
+      const salonData = salon as any;
+      const profileComplete = !!(salonData.name && salonData.description && salonData.address);
       
-      // Auto-navigate only once and only if needed
-      if (activeTab === "overview" && !profileComplete && !hasAutoNavigated.current) {
+      if (!profileComplete) {
         hasAutoNavigated.current = true;
         setActiveTab('profile');
       }
     }
   }, [salon, activeTab]);
-
-  // Reset auto-navigation flag when user manually changes tabs
-  useEffect(() => {
-    hasAutoNavigated.current = false;
-  }, [activeTab]);
 
   // Fetch dashboard stats (mock for now - would connect to real analytics)
   const { data: stats = { totalBookings: 0, todayBookings: 0, monthlyRevenue: 0, activeStaff: 0 } } = useQuery({
