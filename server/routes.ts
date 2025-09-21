@@ -33,7 +33,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
+    createTableIfMissing: true,
     ttl: sessionTtl,
     tableName: "sessions",
   });
@@ -285,10 +285,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
-      // Check if user has a password (could be Replit-only user)
+      // Check if user has a password (could be social auth user)
       if (!user.password) {
         return res.status(401).json({ 
-          error: "This account was created with Replit Auth. Please use 'Login with Replit' button." 
+          error: "This account was created with social authentication. Please contact support to set a password." 
         });
       }
 

@@ -107,21 +107,22 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
         return res.status(404).json({ error: 'Salon not found' });
       }
 
-      // Simplified access check: if user is owner role and salon exists, grant access
-      // This ensures business owners can manage their salons regardless of org membership complexity
+      // Check if user is the actual owner of this specific salon
+      const userId = req.user.id;
       const userRoles = req.user.roles || [];
-      const isOwner = userRoles.includes('owner');
       
       console.log('Authorization debug:', {
-        userId: req.user.id,
+        userId: userId,
         userRoles: userRoles,
-        isOwner: isOwner,
         salonId: salonId,
+        salonOwnerId: salon.ownerId,
+        salonOrgId: salon.orgId,
         orgMemberships: req.user.orgMemberships
       });
       
-      if (isOwner) {
-        console.log('Access granted - user is business owner for salon:', salonId);
+      // Check if user is the direct owner of this specific salon
+      if (salon.ownerId === userId) {
+        console.log('Access granted - user is the salon owner for salon:', salonId);
         next();
         return;
       }
