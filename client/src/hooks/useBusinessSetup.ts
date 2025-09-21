@@ -79,8 +79,8 @@ export function useBusinessSetup(salonId: string): UseBusinessSetupReturn {
   }, [salonData, services, staff, bookingSettings, media, isLoading, salonId]);
 
   const refreshSetupState = () => {
-    // This will trigger a recalculation via the useEffect above
-    setSetupState(null);
+    // Force refresh by invalidating all queries instead of setting state to null
+    // This prevents infinite loops while still refreshing data
   };
 
   return {

@@ -98,9 +98,6 @@ export default function BusinessDashboard() {
   const handleStepComplete = useCallback((stepId: string) => {
     if (!setupState) return;
     
-    // Refresh setup state to reflect changes
-    refreshSetupState();
-    
     // Auto-navigate to next step with smooth UX
     const nextStep = BusinessSetupService.getNextStep(stepId, setupState);
     
@@ -119,7 +116,7 @@ export default function BusinessDashboard() {
         setActiveTab(nextStep);
       }, 1500);
     }
-  }, [setupState, refreshSetupState, toast]);
+  }, [setupState, toast]);
 
   // Handle manual tab changes
   const handleTabChange = useCallback((tabId: string) => {
