@@ -55,11 +55,13 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const queryClientInstance = useQueryClient();
   
-  // Fetch current user using Replit Auth - handle 401s gracefully
+  // Fetch current user using session auth - handle 401s gracefully
   const { data: user, isLoading } = useQuery({
     queryKey: ['/api/auth/user'],
     queryFn: getQueryFn({ on401: "returnNull" }),
     retry: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false, // Reduce unnecessary requests
   });
   
   // Function to refresh authentication state
