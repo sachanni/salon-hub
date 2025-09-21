@@ -47,11 +47,10 @@ export default function ProfileStep({ salonId, onComplete, isCompleted }: Profil
     enabled: !!salonId
   });
 
-  // Populate form with salon data - fixed to always work
+  // Populate form with salon data
   useEffect(() => {
     if (salonData) {
       const salon = salonData as any;
-      // Always populate with latest salon data when available
       setFormData({
         name: salon.name || "",
         description: salon.description || "",
@@ -60,12 +59,12 @@ export default function ProfileStep({ salonId, onComplete, isCompleted }: Profil
         address: salon.address || "",
         city: salon.city || "",
         state: salon.state || "",
-        zipCode: salon.zipCode || salon.zip_code || "", // Handle both field names
+        zipCode: salon.zipCode || salon.zip_code || "",
         phone: salon.phone || "",
         email: salon.email || ""
       });
     }
-  }, [salonData]); // Removed formData.name dependency to always populate
+  }, [salonData]);
 
   // Save mutation
   const saveMutation = useMutation({

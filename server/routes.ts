@@ -29,6 +29,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database services
   await initializeServices();
   
+  
   // Setup session-based authentication
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
@@ -329,6 +330,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Login failed. Please try again." });
+    }
+  });
+
+  // Get salon information (for business setup and profile viewing)
+  app.get('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const salon = await storage.getSalon(salonId);
+      
+      if (!salon) {
+        return res.status(404).json({ error: 'Salon not found' });
+      }
+      
+      res.json(salon);
+    } catch (error) {
+      console.error('Error fetching salon:', error);
+      res.status(500).json({ error: 'Failed to fetch salon' });
     }
   });
 
