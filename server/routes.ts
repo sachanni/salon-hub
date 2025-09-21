@@ -38,8 +38,20 @@ import {
   insertBudgetSchema,
   insertFinancialReportSchema,
   insertTaxSettingSchema,
+  // Communication system schemas
+  insertMessageTemplateSchema,
+  insertCustomerSegmentSchema,
+  insertCommunicationCampaignSchema,
+  insertCommunicationHistorySchema,
+  insertCommunicationPreferencesSchema,
+  insertScheduledMessageSchema,
+  insertCommunicationAnalyticsSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
+import { communicationService, sendBookingConfirmation, sendBookingReminder } from "./communicationService";
+import { schedulingService } from "./schedulingService";
+import { communicationRateLimits, businessTierLimits, checkBusinessLimits, spikeProtection } from "./middleware/rateLimiting";
+import { analyticsService } from "./analyticsService";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database services
@@ -733,6 +745,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update booking status to confirmed
       await storage.updateBookingStatus(paymentRecord.bookingId, 'confirmed');
 
+      // Schedule booking reminders when payment is confirmed via webhook
+      try {
+        await schedulingService.scheduleBookingReminders(paymentRecord.bookingId);
+      } catch (scheduleError) {
+        console.error('Error scheduling booking reminders via webhook:', scheduleError);
+      }
+
       console.log('Payment successfully processed via webhook:', payment.id);
 
     } catch (error) {
@@ -757,6 +776,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update booking status to cancelled
       await storage.updateBookingStatus(paymentRecord.bookingId, 'cancelled');
+
+      // Send cancellation notification
+      try {
+        const booking = await storage.getBooking(paymentRecord.bookingId);
+        if (booking) {
+          await communicationService.sendMessage({
+            to: booking.customerEmail,
+            channel: 'email',
+            customContent: {
+              subject: 'Booking Cancellation - Payment Failed',
+              body: `Hi ${booking.customerName || 'Valued Customer'},\n\nWe're sorry, but your booking has been cancelled due to a payment issue. Please contact us if you'd like to reschedule.\n\nBest regards,\nYour Salon Team`
+            },
+            variables: {},
+            salonId: booking.salonId,
+            customerId: booking.customerEmail,
+            bookingId: booking.id,
+            type: 'transactional'
+          });
+        }
+      } catch (cancelError) {
+        console.error('Error sending cancellation notification:', cancelError);
+      }
 
       console.log('Payment failure processed:', payment.id);
 
@@ -1431,6 +1472,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         guestSessionId: input.booking.guestSessionId // Store guest session ID if provided
       });
 
+      // Auto-send booking confirmation if customer opted in
+      try {
+        const salon = await storage.getSalon(input.salonId);
+        const variables = {
+          customer_name: booking.customerName || 'Valued Customer',
+          salon_name: salon?.name || 'Your Salon',
+          service_name: service.name,
+          booking_date: new Date(booking.date).toLocaleDateString(),
+          booking_time: booking.time,
+          staff_name: 'Our team'
+        };
+        
+        // Send booking confirmation immediately  
+        await sendBookingConfirmation(
+          booking.salonId,
+          booking.id,
+          booking.customerEmail,
+          booking.customerPhone || undefined,
+          variables
+        );
+      } catch (commError) {
+        console.error('Error sending booking confirmation:', commError);
+        // Don't fail the booking creation if communication fails
+      }
+
       // Create payment record
       const payment = await storage.createPayment({
         bookingId: booking.id,
@@ -1561,6 +1627,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update booking status
       await storage.updateBookingStatus(payment.bookingId, 'confirmed');
+
+      // Schedule booking reminders when payment is confirmed
+      try {
+        await schedulingService.scheduleBookingReminders(payment.bookingId);
+      } catch (scheduleError) {
+        console.error('Error scheduling booking reminders:', scheduleError);
+        // Don't fail payment verification if scheduling fails
+      }
 
       console.log('Payment verified successfully:', {
         payment_id: payment.id,
@@ -3090,6 +3164,939 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching financial forecast:', error);
       res.status(500).json({ error: 'Failed to fetch financial forecast' });
+    }
+  });
+
+  // =================================
+  // COMMUNICATION SYSTEM API ENDPOINTS
+  // =================================
+  
+  // Message Template Endpoints
+  app.get('/api/salons/:salonId/message-templates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { type } = req.query;
+      const templates = await storage.getMessageTemplatesBySalonId(salonId, type);
+      res.json(templates);
+    } catch (error) {
+      console.error('Error fetching message templates:', error);
+      res.status(500).json({ error: 'Failed to fetch message templates' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/message-templates', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertMessageTemplateSchema.safeParse({
+        ...req.body,
+        salonId,
+        createdBy: req.user.id
+      });
+      
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const template = await storage.createMessageTemplate(validationResult.data);
+      res.status(201).json(template);
+    } catch (error) {
+      console.error('Error creating message template:', error);
+      res.status(500).json({ error: 'Failed to create message template' });
+    }
+  });
+  
+  app.put('/api/salons/:salonId/message-templates/:templateId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, templateId } = req.params;
+      const updates = req.body;
+      await storage.updateMessageTemplate(templateId, salonId, updates);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating message template:', error);
+      res.status(500).json({ error: 'Failed to update message template' });
+    }
+  });
+  
+  app.delete('/api/salons/:salonId/message-templates/:templateId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, templateId } = req.params;
+      await storage.deleteMessageTemplate(templateId, salonId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting message template:', error);
+      res.status(500).json({ error: 'Failed to delete message template' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/message-templates/defaults', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const templates = await storage.createDefaultMessageTemplates(salonId);
+      res.status(201).json(templates);
+    } catch (error) {
+      console.error('Error creating default message templates:', error);
+      res.status(500).json({ error: 'Failed to create default message templates' });
+    }
+  });
+  
+  // Customer Segment Endpoints
+  app.get('/api/salons/:salonId/customer-segments', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const segments = await storage.getCustomerSegmentsBySalonId(salonId);
+      res.json(segments);
+    } catch (error) {
+      console.error('Error fetching customer segments:', error);
+      res.status(500).json({ error: 'Failed to fetch customer segments' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/customer-segments', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertCustomerSegmentSchema.safeParse({
+        ...req.body,
+        salonId,
+        createdBy: req.user.id
+      });
+      
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const segment = await storage.createCustomerSegment(validationResult.data);
+      res.status(201).json(segment);
+    } catch (error) {
+      console.error('Error creating customer segment:', error);
+      res.status(500).json({ error: 'Failed to create customer segment' });
+    }
+  });
+  
+  app.put('/api/salons/:salonId/customer-segments/:segmentId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, segmentId } = req.params;
+      const updates = req.body;
+      await storage.updateCustomerSegment(segmentId, salonId, updates);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating customer segment:', error);
+      res.status(500).json({ error: 'Failed to update customer segment' });
+    }
+  });
+  
+  app.delete('/api/salons/:salonId/customer-segments/:segmentId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, segmentId } = req.params;
+      await storage.deleteCustomerSegment(segmentId, salonId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting customer segment:', error);
+      res.status(500).json({ error: 'Failed to delete customer segment' });
+    }
+  });
+  
+  app.get('/api/salons/:salonId/customer-segments/:segmentId/customers', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, segmentId } = req.params;
+      const customers = await storage.getCustomersInSegment(segmentId, salonId);
+      res.json(customers);
+    } catch (error) {
+      console.error('Error fetching segment customers:', error);
+      res.status(500).json({ error: 'Failed to fetch segment customers' });
+    }
+  });
+  
+  // Communication Campaign Endpoints
+  app.get('/api/salons/:salonId/communication-campaigns', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { status, type } = req.query;
+      const campaigns = await storage.getCommunicationCampaignsBySalonId(salonId, { status, type });
+      res.json(campaigns);
+    } catch (error) {
+      console.error('Error fetching communication campaigns:', error);
+      res.status(500).json({ error: 'Failed to fetch communication campaigns' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-campaigns', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertCommunicationCampaignSchema.safeParse({
+        ...req.body,
+        salonId,
+        createdBy: req.user.id
+      });
+      
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const campaign = await storage.createCommunicationCampaign(validationResult.data);
+      res.status(201).json(campaign);
+    } catch (error) {
+      console.error('Error creating communication campaign:', error);
+      res.status(500).json({ error: 'Failed to create communication campaign' });
+    }
+  });
+  
+  app.put('/api/salons/:salonId/communication-campaigns/:campaignId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, campaignId } = req.params;
+      const updates = req.body;
+      await storage.updateCommunicationCampaign(campaignId, salonId, updates);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating communication campaign:', error);
+      res.status(500).json({ error: 'Failed to update communication campaign' });
+    }
+  });
+  
+  app.delete('/api/salons/:salonId/communication-campaigns/:campaignId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, campaignId } = req.params;
+      await storage.deleteCommunicationCampaign(campaignId, salonId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting communication campaign:', error);
+      res.status(500).json({ error: 'Failed to delete communication campaign' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-campaigns/:campaignId/start', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { campaignId } = req.params;
+      await storage.startCommunicationCampaign(campaignId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error starting communication campaign:', error);
+      res.status(500).json({ error: 'Failed to start communication campaign' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-campaigns/:campaignId/pause', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { campaignId } = req.params;
+      await storage.pauseCommunicationCampaign(campaignId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error pausing communication campaign:', error);
+      res.status(500).json({ error: 'Failed to pause communication campaign' });
+    }
+  });
+  
+  // Communication History Endpoints
+  app.get('/api/salons/:salonId/communication-history', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = req.query;
+      const history = await storage.getCommunicationHistoryBySalonId(salonId, filters);
+      res.json(history);
+    } catch (error) {
+      console.error('Error fetching communication history:', error);
+      res.status(500).json({ error: 'Failed to fetch communication history' });
+    }
+  });
+  
+  app.get('/api/customers/:customerId/salons/:salonId/communication-history', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { customerId, salonId } = req.params;
+      const history = await storage.getCommunicationHistoryByCustomer(customerId, salonId);
+      res.json(history);
+    } catch (error) {
+      console.error('Error fetching customer communication history:', error);
+      res.status(500).json({ error: 'Failed to fetch customer communication history' });
+    }
+  });
+  
+  // Communication Preferences Endpoints
+  app.get('/api/customers/:customerId/salons/:salonId/communication-preferences', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { customerId, salonId } = req.params;
+      let preferences = await storage.getCommunicationPreferences(customerId, salonId);
+      
+      // Create default preferences if they don't exist
+      if (!preferences) {
+        preferences = await storage.createCommunicationPreferences({
+          customerId,
+          salonId,
+          emailOptIn: 1,
+          smsOptIn: 1,
+          marketingOptIn: 1,
+          bookingNotifications: 1,
+          promotionalOffers: 1,
+          birthdayOffers: 1,
+          preferredChannel: 'email'
+        });
+      }
+      
+      res.json(preferences);
+    } catch (error) {
+      console.error('Error fetching communication preferences:', error);
+      res.status(500).json({ error: 'Failed to fetch communication preferences' });
+    }
+  });
+  
+  app.put('/api/customers/:customerId/salons/:salonId/communication-preferences', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { customerId, salonId } = req.params;
+      const updates = req.body;
+      await storage.updateCommunicationPreferences(customerId, salonId, updates);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating communication preferences:', error);
+      res.status(500).json({ error: 'Failed to update communication preferences' });
+    }
+  });
+  
+  app.post('/api/customers/:customerId/salons/:salonId/unsubscribe', async (req: any, res) => {
+    try {
+      const { customerId, salonId } = req.params;
+      const { reason } = req.body;
+      await storage.unsubscribeFromCommunications(customerId, salonId, reason);
+      res.json({ success: true, message: 'Successfully unsubscribed from communications' });
+    } catch (error) {
+      console.error('Error unsubscribing from communications:', error);
+      res.status(500).json({ error: 'Failed to unsubscribe from communications' });
+    }
+  });
+  
+  // Scheduled Messages Endpoints
+  app.get('/api/salons/:salonId/scheduled-messages', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = req.query;
+      const messages = await storage.getScheduledMessagesBySalonId(salonId, filters);
+      res.json(messages);
+    } catch (error) {
+      console.error('Error fetching scheduled messages:', error);
+      res.status(500).json({ error: 'Failed to fetch scheduled messages' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/scheduled-messages', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validationResult = insertScheduledMessageSchema.safeParse({
+        ...req.body,
+        salonId
+      });
+      
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: validationResult.error.issues
+        });
+      }
+      
+      const message = await storage.createScheduledMessage(validationResult.data);
+      res.status(201).json(message);
+    } catch (error) {
+      console.error('Error creating scheduled message:', error);
+      res.status(500).json({ error: 'Failed to create scheduled message' });
+    }
+  });
+  
+  app.delete('/api/salons/:salonId/scheduled-messages/:messageId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { messageId } = req.params;
+      await storage.cancelScheduledMessage(messageId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error cancelling scheduled message:', error);
+      res.status(500).json({ error: 'Failed to cancel scheduled message' });
+    }
+  });
+  
+  // Communication Analytics & Dashboard Endpoints
+  app.get('/api/salons/:salonId/communication-dashboard/metrics', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const metrics = await analyticsService.getCommunicationDashboardMetrics(salonId, period as string);
+      res.json(metrics);
+    } catch (error) {
+      console.error('Error fetching communication dashboard metrics:', error);
+      res.status(500).json({ error: 'Failed to fetch communication dashboard metrics' });
+    }
+  });
+  
+  app.get('/api/salons/:salonId/communication-analytics', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = req.query;
+      const analytics = await storage.getCommunicationAnalytics(salonId, filters);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching communication analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch communication analytics' });
+    }
+  });
+  
+  // Enhanced analytics endpoints using the analytics service
+  app.get('/api/salons/:salonId/communication-analytics/campaigns', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { campaignId } = req.query;
+      const analytics = await analyticsService.getCampaignPerformanceAnalytics(salonId, campaignId as string);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching campaign performance analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch campaign performance analytics' });
+    }
+  });
+  
+  app.get('/api/salons/:salonId/communication-analytics/channels', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'monthly' } = req.query;
+      const analytics = await analyticsService.getChannelPerformanceAnalytics(salonId, period as string);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching channel performance analytics:', error);
+      res.status(500).json({ error: 'Failed to fetch channel performance analytics' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-analytics/snapshot', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period = 'daily' } = req.body;
+      await analyticsService.storeAnalyticsSnapshot(salonId, period);
+      res.json({ success: true, message: 'Analytics snapshot stored successfully' });
+    } catch (error) {
+      console.error('Error storing analytics snapshot:', error);
+      res.status(500).json({ error: 'Failed to store analytics snapshot' });
+    }
+  });
+  
+  // Booking Notification Automation Endpoints
+  app.post('/api/bookings/:bookingId/schedule-notifications', isAuthenticated, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      await storage.scheduleBookingNotifications(bookingId);
+      res.json({ success: true, message: 'Booking notifications scheduled successfully' });
+    } catch (error) {
+      console.error('Error scheduling booking notifications:', error);
+      res.status(500).json({ error: 'Failed to schedule booking notifications' });
+    }
+  });
+  
+  app.post('/api/bookings/:bookingId/cancel-notifications', isAuthenticated, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      await storage.cancelBookingNotifications(bookingId);
+      res.json({ success: true, message: 'Booking notifications cancelled successfully' });
+    } catch (error) {
+      console.error('Error cancelling booking notifications:', error);
+      res.status(500).json({ error: 'Failed to cancel booking notifications' });
+    }
+  });
+  
+  app.post('/api/bookings/:bookingId/send-confirmation', isAuthenticated, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      const success = await storage.sendBookingConfirmation(bookingId);
+      res.json({ success, message: success ? 'Confirmation sent successfully' : 'Failed to send confirmation' });
+    } catch (error) {
+      console.error('Error sending booking confirmation:', error);
+      res.status(500).json({ error: 'Failed to send booking confirmation' });
+    }
+  });
+  
+  app.post('/api/bookings/:bookingId/send-reminder', isAuthenticated, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      const { reminderType } = req.body;
+      const success = await storage.sendBookingReminder(bookingId, reminderType);
+      res.json({ success, message: success ? 'Reminder sent successfully' : 'Failed to send reminder' });
+    } catch (error) {
+      console.error('Error sending booking reminder:', error);
+      res.status(500).json({ error: 'Failed to send booking reminder' });
+    }
+  });
+  
+  // Template Processing Endpoints
+  app.post('/api/salons/:salonId/templates/preview', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { templateContent, bookingId, customerId } = req.body;
+      
+      const variables = await storage.getTemplateVariables(salonId, bookingId, customerId);
+      const processedContent = await storage.processTemplate(templateContent, variables);
+      
+      res.json({ 
+        processedContent,
+        variables: Object.keys(variables)
+      });
+    } catch (error) {
+      console.error('Error processing template preview:', error);
+      res.status(500).json({ error: 'Failed to process template preview' });
+    }
+  });
+  
+  app.get('/api/salons/:salonId/template-variables', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { bookingId, customerId } = req.query;
+      const variables = await storage.getTemplateVariables(salonId, bookingId, customerId);
+      res.json(variables);
+    } catch (error) {
+      console.error('Error fetching template variables:', error);
+      res.status(500).json({ error: 'Failed to fetch template variables' });
+    }
+  });
+
+  // =================================
+  // CUSTOMER SEGMENTS ENDPOINTS
+  // =================================
+  
+  app.get('/api/salons/:salonId/customer-segments', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const segments = await storage.getCustomerSegmentsBySalonId(salonId);
+      res.json(segments);
+    } catch (error) {
+      console.error('Error fetching customer segments:', error);
+      res.status(500).json({ error: 'Failed to fetch customer segments' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/customer-segments', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const segmentData = { ...req.body, salonId };
+      
+      const validationResult = insertCustomerSegmentSchema.safeParse(segmentData);
+      if (!validationResult.success) {
+        return res.status(400).json({ error: 'Invalid segment data', details: validationResult.error.errors });
+      }
+      
+      const segment = await storage.createCustomerSegment(validationResult.data);
+      
+      // Update customer count for the segment
+      await storage.updateSegmentCustomerCount(segment.id);
+      
+      res.status(201).json(segment);
+    } catch (error) {
+      console.error('Error creating customer segment:', error);
+      res.status(500).json({ error: 'Failed to create customer segment' });
+    }
+  });
+  
+  app.put('/api/salons/:salonId/customer-segments/:segmentId', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, segmentId } = req.params;
+      const updates = req.body;
+      
+      await storage.updateCustomerSegment(segmentId, salonId, updates);
+      
+      // Update customer count for the segment
+      await storage.updateSegmentCustomerCount(segmentId);
+      
+      res.json({ success: true, message: 'Customer segment updated successfully' });
+    } catch (error) {
+      console.error('Error updating customer segment:', error);
+      res.status(500).json({ error: 'Failed to update customer segment' });
+    }
+  });
+  
+  app.delete('/api/salons/:salonId/customer-segments/:segmentId', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, segmentId } = req.params;
+      await storage.deleteCustomerSegment(segmentId, salonId);
+      res.json({ success: true, message: 'Customer segment deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting customer segment:', error);
+      res.status(500).json({ error: 'Failed to delete customer segment' });
+    }
+  });
+  
+  app.get('/api/salons/:salonId/customer-segments/:segmentId/customers', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, segmentId } = req.params;
+      const customers = await storage.getCustomersInSegment(segmentId, salonId);
+      res.json(customers);
+    } catch (error) {
+      console.error('Error fetching customers in segment:', error);
+      res.status(500).json({ error: 'Failed to fetch customers in segment' });
+    }
+  });
+
+  // =================================
+  // COMMUNICATION CAMPAIGNS ENDPOINTS  
+  // =================================
+  
+  app.get('/api/salons/:salonId/communication-campaigns', communicationRateLimits.analytics, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = req.query;
+      const campaigns = await storage.getCommunicationCampaignsBySalonId(salonId, filters);
+      res.json(campaigns);
+    } catch (error) {
+      console.error('Error fetching communication campaigns:', error);
+      res.status(500).json({ error: 'Failed to fetch communication campaigns' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-campaigns', communicationRateLimits.templateOperations, checkBusinessLimits, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const campaignData = { ...req.body, salonId, createdBy: req.user.id };
+      
+      const validationResult = insertCommunicationCampaignSchema.safeParse(campaignData);
+      if (!validationResult.success) {
+        return res.status(400).json({ error: 'Invalid campaign data', details: validationResult.error.errors });
+      }
+      
+      const campaign = await storage.createCommunicationCampaign(validationResult.data);
+      res.status(201).json(campaign);
+    } catch (error) {
+      console.error('Error creating communication campaign:', error);
+      res.status(500).json({ error: 'Failed to create communication campaign' });
+    }
+  });
+  
+  app.put('/api/salons/:salonId/communication-campaigns/:campaignId', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, campaignId } = req.params;
+      const updates = req.body;
+      
+      await storage.updateCommunicationCampaign(campaignId, salonId, updates);
+      res.json({ success: true, message: 'Communication campaign updated successfully' });
+    } catch (error) {
+      console.error('Error updating communication campaign:', error);
+      res.status(500).json({ error: 'Failed to update communication campaign' });
+    }
+  });
+  
+  app.delete('/api/salons/:salonId/communication-campaigns/:campaignId', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, campaignId } = req.params;
+      await storage.deleteCommunicationCampaign(campaignId, salonId);
+      res.json({ success: true, message: 'Communication campaign deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting communication campaign:', error);
+      res.status(500).json({ error: 'Failed to delete communication campaign' });
+    }
+  });
+  
+  // Campaign execution endpoints
+  app.post('/api/salons/:salonId/communication-campaigns/:campaignId/start', communicationRateLimits.sendCampaign, checkBusinessLimits, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, campaignId } = req.params;
+      
+      // Get campaign details
+      const campaign = await storage.getCommunicationCampaign(campaignId);
+      if (!campaign) {
+        return res.status(404).json({ error: 'Campaign not found' });
+      }
+      
+      if (campaign.status !== 'draft') {
+        return res.status(400).json({ error: 'Campaign must be in draft status to start' });
+      }
+      
+      // Start the campaign
+      await storage.startCommunicationCampaign(campaignId);
+      
+      // Get customers in target segment
+      if (campaign.targetSegmentId) {
+        const customers = await storage.getCustomersInSegment(campaign.targetSegmentId, salonId);
+        
+        // Send messages to all customers in segment
+        const sendPromises = customers.map(customer => {
+          if (customer.email) {
+            return communicationService.sendMessage({
+              to: customer.email,
+              channel: campaign.channel as 'email' | 'sms',
+              templateId: campaign.templateId || undefined,
+              customContent: campaign.templateId ? undefined : {
+                subject: campaign.subject || 'Message from your salon',
+                body: campaign.content || ''
+              },
+              variables: {
+                customer_name: customer.firstName || 'Valued Customer',
+                salon_name: campaign.salonId // Would get actual salon name
+              },
+              salonId,
+              customerId: customer.id,
+              campaignId,
+              type: 'campaign'
+            });
+          }
+          return Promise.resolve({ success: false, error: 'No email address' });
+        });
+        
+        const results = await Promise.allSettled(sendPromises);
+        const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+        const failed = results.length - successful;
+        
+        // Update campaign stats
+        await storage.updateCampaignStats(campaignId, {
+          messagesSent: successful,
+          messagesFailed: failed
+        });
+        
+        res.json({ 
+          success: true, 
+          message: 'Campaign started successfully',
+          stats: { sent: successful, failed }
+        });
+      } else {
+        res.json({ success: true, message: 'Campaign started (no target segment specified)' });
+      }
+      
+    } catch (error) {
+      console.error('Error starting communication campaign:', error);
+      res.status(500).json({ error: 'Failed to start communication campaign' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-campaigns/:campaignId/pause', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { campaignId } = req.params;
+      await storage.pauseCommunicationCampaign(campaignId);
+      res.json({ success: true, message: 'Campaign paused successfully' });
+    } catch (error) {
+      console.error('Error pausing communication campaign:', error);
+      res.status(500).json({ error: 'Failed to pause communication campaign' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/communication-campaigns/:campaignId/complete', communicationRateLimits.templateOperations, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { campaignId } = req.params;
+      await storage.completeCommunicationCampaign(campaignId);
+      res.json({ success: true, message: 'Campaign completed successfully' });
+    } catch (error) {
+      console.error('Error completing communication campaign:', error);
+      res.status(500).json({ error: 'Failed to complete communication campaign' });
+    }
+  });
+
+  // =================================
+  // MESSAGE SENDING ENDPOINTS
+  // =================================
+  
+  app.post('/api/salons/:salonId/send-message', communicationRateLimits.sendMessage, spikeProtection, checkBusinessLimits, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { 
+        to, 
+        channel, 
+        templateId, 
+        customContent, 
+        variables, 
+        customerId, 
+        bookingId, 
+        type = 'transactional' 
+      } = req.body;
+      
+      // Validate required fields
+      if (!to || !channel) {
+        return res.status(400).json({ error: 'Recipient and channel are required' });
+      }
+      
+      if (!templateId && !customContent) {
+        return res.status(400).json({ error: 'Either templateId or customContent is required' });
+      }
+      
+      // Validate email/phone format
+      if (channel === 'email' && !communicationService.isValidEmail(to)) {
+        return res.status(400).json({ error: 'Invalid email address format' });
+      }
+      
+      if (channel === 'sms' && !communicationService.isValidPhoneNumber(to)) {
+        return res.status(400).json({ error: 'Invalid phone number format' });
+      }
+      
+      const result = await communicationService.sendMessage({
+        to,
+        channel: channel as 'email' | 'sms',
+        templateId,
+        customContent,
+        variables: variables || {},
+        salonId,
+        customerId,
+        bookingId,
+        type: type as any
+      });
+      
+      res.json(result);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      res.status(500).json({ error: 'Failed to send message' });
+    }
+  });
+  
+  app.post('/api/salons/:salonId/send-bulk-messages', communicationRateLimits.sendCampaign, checkBusinessLimits, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { messages } = req.body;
+      
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: 'Messages array is required' });
+      }
+      
+      if (messages.length > 1000) {
+        return res.status(400).json({ error: 'Maximum 1000 messages per bulk send' });
+      }
+      
+      // Validate each message
+      for (const msg of messages) {
+        if (!msg.to || !msg.channel) {
+          return res.status(400).json({ error: 'Each message must have recipient and channel' });
+        }
+      }
+      
+      const sendRequests = messages.map(msg => ({
+        ...msg,
+        salonId,
+        variables: msg.variables || {},
+        type: msg.type || 'marketing'
+      }));
+      
+      const results = await communicationService.sendBulkMessages(sendRequests);
+      
+      const successful = results.filter(r => r.success).length;
+      const failed = results.length - successful;
+      
+      res.json({
+        success: true,
+        results,
+        summary: {
+          total: results.length,
+          successful,
+          failed
+        }
+      });
+    } catch (error) {
+      console.error('Error sending bulk messages:', error);
+      res.status(500).json({ error: 'Failed to send bulk messages' });
+    }
+  });
+
+  // =================================
+  // SCHEDULING ENDPOINTS
+  // =================================
+  
+  app.post('/api/salons/:salonId/schedule-message', communicationRateLimits.sendMessage, checkBusinessLimits, isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const {
+        to,
+        channel,
+        templateId,
+        customContent,
+        variables,
+        scheduledFor,
+        customerId,
+        bookingId,
+        type = 'scheduled'
+      } = req.body;
+      
+      // Validate required fields
+      if (!to || !channel || !scheduledFor) {
+        return res.status(400).json({ error: 'Recipient, channel, and scheduledFor are required' });
+      }
+      
+      const scheduledDate = new Date(scheduledFor);
+      if (scheduledDate <= new Date()) {
+        return res.status(400).json({ error: 'Scheduled time must be in the future' });
+      }
+      
+      const scheduledMessage = await schedulingService.scheduleMessage({
+        salonId,
+        customerId,
+        bookingId,
+        templateId,
+        type,
+        channel: channel as 'email' | 'sms',
+        recipient: to,
+        subject: customContent?.subject,
+        content: customContent?.body || '',
+        variables: variables || {},
+        scheduledFor: scheduledDate
+      });
+      
+      res.status(201).json({
+        success: true,
+        scheduledMessage,
+        message: 'Message scheduled successfully'
+      });
+    } catch (error) {
+      console.error('Error scheduling message:', error);
+      res.status(500).json({ error: 'Failed to schedule message' });
+    }
+  });
+
+  // =================================  
+  // BOOKING AUTOMATION INTEGRATION
+  // =================================
+  
+  // Enhanced booking confirmation with communication service
+  app.post('/api/bookings/:bookingId/send-confirmation-enhanced', isAuthenticated, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      const booking = await storage.getBooking(bookingId);
+      
+      if (!booking) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      const salon = await storage.getSalon(booking.salonId);
+      const service = await storage.getService(booking.serviceId);
+      
+      const variables = {
+        customer_name: booking.customerName,
+        salon_name: salon?.name || 'Your Salon',
+        service_name: service?.name || 'Service',
+        booking_date: new Date(booking.date).toLocaleDateString(),
+        booking_time: booking.time,
+        staff_name: 'Our team' // Would get actual staff name
+      };
+      
+      const results = await sendBookingConfirmation(
+        booking.salonId,
+        booking.id,
+        booking.customerEmail,
+        booking.customerPhone || undefined,
+        variables
+      );
+      
+      res.json({
+        success: true,
+        results,
+        message: 'Booking confirmation sent successfully'
+      });
+    } catch (error) {
+      console.error('Error sending enhanced booking confirmation:', error);
+      res.status(500).json({ error: 'Failed to send booking confirmation' });
+    }
+  });
+  
+  // Schedule booking reminders with new scheduling service
+  app.post('/api/bookings/:bookingId/schedule-reminders-enhanced', isAuthenticated, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      await schedulingService.scheduleBookingReminders(bookingId);
+      
+      res.json({
+        success: true,
+        message: 'Booking reminders scheduled successfully'
+      });
+    } catch (error) {
+      console.error('Error scheduling enhanced booking reminders:', error);
+      res.status(500).json({ error: 'Failed to schedule booking reminders' });
     }
   });
 

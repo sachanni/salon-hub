@@ -1336,3 +1336,372 @@ export type InsertFinancialReport = z.infer<typeof insertFinancialReportSchema>;
 
 export type TaxSetting = typeof taxSettings.$inferSelect;
 export type InsertTaxSetting = z.infer<typeof insertTaxSettingSchema>;
+
+// =================================
+// CUSTOMER COMMUNICATION SYSTEM
+// =================================
+
+// Message Templates - reusable templates for different communication types
+export const messageTemplates = pgTable("message_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(), // Template name
+  type: varchar("type", { length: 50 }).notNull(), // booking_confirmation, booking_reminder, marketing, follow_up, birthday, etc.
+  channel: varchar("channel", { length: 20 }).notNull(), // email, sms, both
+  subject: varchar("subject", { length: 200 }), // For emails
+  content: text("content").notNull(), // Template content with placeholders
+  variables: jsonb("variables").default('[]'), // Available variables like {{customerName}}, {{appointmentTime}}
+  isActive: integer("is_active").notNull().default(1),
+  isDefault: integer("is_default").notNull().default(0), // System default templates
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("message_templates_salon_id_idx").on(table.salonId),
+  index("message_templates_type_idx").on(table.type),
+]);
+
+export const insertMessageTemplateSchema = createInsertSchema(messageTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type MessageTemplate = typeof messageTemplates.$inferSelect;
+export type InsertMessageTemplate = z.infer<typeof insertMessageTemplateSchema>;
+
+// Customer Segments - for targeted messaging
+export const customerSegments = pgTable("customer_segments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  criteria: jsonb("criteria").notNull(), // Segment criteria (booking count, last visit, services, etc.)
+  customerCount: integer("customer_count").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("customer_segments_salon_id_idx").on(table.salonId),
+]);
+
+export const insertCustomerSegmentSchema = createInsertSchema(customerSegments).omit({
+  id: true,
+  customerCount: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type CustomerSegment = typeof customerSegments.$inferSelect;
+export type InsertCustomerSegment = z.infer<typeof insertCustomerSegmentSchema>;
+
+// Communication Campaigns - marketing campaigns and automated workflows
+export const communicationCampaigns = pgTable("communication_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  type: varchar("type", { length: 50 }).notNull(), // marketing, automated, birthday, re_engagement
+  status: varchar("status", { length: 20 }).notNull().default('draft'), // draft, scheduled, running, paused, completed, cancelled
+  templateId: varchar("template_id").references(() => messageTemplates.id),
+  segmentId: varchar("segment_id").references(() => customerSegments.id), // Target segment
+  scheduledAt: timestamp("scheduled_at"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  totalRecipients: integer("total_recipients").notNull().default(0),
+  messagesSent: integer("messages_sent").notNull().default(0),
+  messagesDelivered: integer("messages_delivered").notNull().default(0),
+  messagesOpened: integer("messages_opened").notNull().default(0),
+  messagesClicked: integer("messages_clicked").notNull().default(0),
+  messagesFailed: integer("messages_failed").notNull().default(0),
+  unsubscribes: integer("unsubscribes").notNull().default(0),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("communication_campaigns_salon_id_idx").on(table.salonId),
+  index("communication_campaigns_status_idx").on(table.status),
+  index("communication_campaigns_scheduled_at_idx").on(table.scheduledAt),
+]);
+
+export const insertCommunicationCampaignSchema = createInsertSchema(communicationCampaigns).omit({
+  id: true,
+  totalRecipients: true,
+  messagesSent: true,
+  messagesDelivered: true,
+  messagesOpened: true,
+  messagesClicked: true,
+  messagesFailed: true,
+  unsubscribes: true,
+  startedAt: true,
+  completedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type CommunicationCampaign = typeof communicationCampaigns.$inferSelect;
+export type InsertCommunicationCampaign = z.infer<typeof insertCommunicationCampaignSchema>;
+
+// Communication History - tracks all sent messages
+export const communicationHistory = pgTable("communication_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  campaignId: varchar("campaign_id").references(() => communicationCampaigns.id, { onDelete: "set null" }),
+  templateId: varchar("template_id").references(() => messageTemplates.id, { onDelete: "set null" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }), // For booking-related messages
+  type: varchar("type", { length: 50 }).notNull(), // booking_confirmation, reminder, marketing, etc.
+  channel: varchar("channel", { length: 20 }).notNull(), // email, sms
+  recipient: varchar("recipient", { length: 255 }).notNull(), // email address or phone number
+  subject: varchar("subject", { length: 200 }),
+  content: text("content").notNull(),
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, sent, delivered, failed, bounced
+  providerId: varchar("provider_id"), // External provider message ID (SendGrid, Twilio)
+  sentAt: timestamp("sent_at"),
+  deliveredAt: timestamp("delivered_at"),
+  openedAt: timestamp("opened_at"),
+  clickedAt: timestamp("clicked_at"),
+  failureReason: text("failure_reason"),
+  metadata: jsonb("metadata").default('{}'), // Additional tracking data
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("communication_history_salon_id_idx").on(table.salonId),
+  index("communication_history_customer_id_idx").on(table.customerId),
+  index("communication_history_campaign_id_idx").on(table.campaignId),
+  index("communication_history_booking_id_idx").on(table.bookingId),
+  index("communication_history_status_idx").on(table.status),
+  index("communication_history_sent_at_idx").on(table.sentAt),
+]);
+
+export const insertCommunicationHistorySchema = createInsertSchema(communicationHistory).omit({
+  id: true,
+  sentAt: true,
+  deliveredAt: true,
+  openedAt: true,
+  clickedAt: true,
+  createdAt: true,
+});
+
+export type CommunicationHistory = typeof communicationHistory.$inferSelect;
+export type InsertCommunicationHistory = z.infer<typeof insertCommunicationHistorySchema>;
+
+// Communication Preferences - customer communication preferences
+export const communicationPreferences = pgTable("communication_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  emailOptIn: integer("email_opt_in").notNull().default(1), // 1 = opted in, 0 = opted out
+  smsOptIn: integer("sms_opt_in").notNull().default(1),
+  marketingOptIn: integer("marketing_opt_in").notNull().default(1), // Marketing communications
+  bookingNotifications: integer("booking_notifications").notNull().default(1), // Booking confirmations/reminders
+  promotionalOffers: integer("promotional_offers").notNull().default(1),
+  birthdayOffers: integer("birthday_offers").notNull().default(1),
+  preferredChannel: varchar("preferred_channel", { length: 20 }).default('email'), // email, sms, both
+  unsubscribedAt: timestamp("unsubscribed_at"),
+  unsubscribeReason: text("unsubscribe_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("communication_preferences_customer_id_idx").on(table.customerId),
+  index("communication_preferences_salon_id_idx").on(table.salonId),
+  unique("communication_preferences_customer_salon_unique").on(table.customerId, table.salonId),
+]);
+
+export const insertCommunicationPreferencesSchema = createInsertSchema(communicationPreferences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type CommunicationPreferences = typeof communicationPreferences.$inferSelect;
+export type InsertCommunicationPreferences = z.infer<typeof insertCommunicationPreferencesSchema>;
+
+// Scheduled Messages - for managing scheduled communications
+export const scheduledMessages = pgTable("scheduled_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").references(() => users.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "cascade" }),
+  campaignId: varchar("campaign_id").references(() => communicationCampaigns.id, { onDelete: "cascade" }),
+  templateId: varchar("template_id").references(() => messageTemplates.id, { onDelete: "set null" }),
+  type: varchar("type", { length: 50 }).notNull(), // booking_reminder, follow_up, birthday, etc.
+  channel: varchar("channel", { length: 20 }).notNull(), // email, sms
+  recipient: varchar("recipient", { length: 255 }).notNull(),
+  subject: varchar("subject", { length: 200 }),
+  content: text("content").notNull(),
+  scheduledFor: timestamp("scheduled_for").notNull(),
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, sent, failed, cancelled
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  sentAt: timestamp("sent_at"),
+  failureReason: text("failure_reason"),
+  metadata: jsonb("metadata").default('{}'),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("scheduled_messages_salon_id_idx").on(table.salonId),
+  index("scheduled_messages_scheduled_for_idx").on(table.scheduledFor),
+  index("scheduled_messages_status_idx").on(table.status),
+  index("scheduled_messages_booking_id_idx").on(table.bookingId),
+]);
+
+export const insertScheduledMessageSchema = createInsertSchema(scheduledMessages).omit({
+  id: true,
+  attempts: true,
+  lastAttemptAt: true,
+  sentAt: true,
+  createdAt: true,
+});
+
+export type ScheduledMessage = typeof scheduledMessages.$inferSelect;
+export type InsertScheduledMessage = z.infer<typeof insertScheduledMessageSchema>;
+
+// Communication Analytics - aggregate analytics data
+export const communicationAnalytics = pgTable("communication_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  campaignId: varchar("campaign_id").references(() => communicationCampaigns.id, { onDelete: "cascade" }),
+  date: timestamp("date").notNull(), // Analytics for specific date
+  channel: varchar("channel", { length: 20 }).notNull(), // email, sms
+  messagesSent: integer("messages_sent").notNull().default(0),
+  messagesDelivered: integer("messages_delivered").notNull().default(0),
+  messagesOpened: integer("messages_opened").notNull().default(0),
+  messagesClicked: integer("messages_clicked").notNull().default(0),
+  messagesFailed: integer("messages_failed").notNull().default(0),
+  unsubscribes: integer("unsubscribes").notNull().default(0),
+  bounces: integer("bounces").notNull().default(0),
+  complaints: integer("complaints").notNull().default(0),
+  revenue: integer("revenue").notNull().default(0), // Revenue attributed to communications in paisa
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("communication_analytics_salon_id_idx").on(table.salonId),
+  index("communication_analytics_date_idx").on(table.date),
+  index("communication_analytics_campaign_id_idx").on(table.campaignId),
+  unique("communication_analytics_salon_campaign_date_channel_unique").on(table.salonId, table.campaignId, table.date, table.channel),
+]);
+
+export const insertCommunicationAnalyticsSchema = createInsertSchema(communicationAnalytics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type CommunicationAnalytics = typeof communicationAnalytics.$inferSelect;
+export type InsertCommunicationAnalytics = z.infer<typeof insertCommunicationAnalyticsSchema>;
+
+// Add relations for communication tables
+export const messageTemplatesRelations = relations(messageTemplates, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [messageTemplates.salonId],
+    references: [salons.id],
+  }),
+  createdByUser: one(users, {
+    fields: [messageTemplates.createdBy],
+    references: [users.id],
+  }),
+  campaigns: many(communicationCampaigns),
+  history: many(communicationHistory),
+  scheduledMessages: many(scheduledMessages),
+}));
+
+export const customerSegmentsRelations = relations(customerSegments, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [customerSegments.salonId],
+    references: [salons.id],
+  }),
+  createdByUser: one(users, {
+    fields: [customerSegments.createdBy],
+    references: [users.id],
+  }),
+  campaigns: many(communicationCampaigns),
+}));
+
+export const communicationCampaignsRelations = relations(communicationCampaigns, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [communicationCampaigns.salonId],
+    references: [salons.id],
+  }),
+  template: one(messageTemplates, {
+    fields: [communicationCampaigns.templateId],
+    references: [messageTemplates.id],
+  }),
+  segment: one(customerSegments, {
+    fields: [communicationCampaigns.segmentId],
+    references: [customerSegments.id],
+  }),
+  createdByUser: one(users, {
+    fields: [communicationCampaigns.createdBy],
+    references: [users.id],
+  }),
+  history: many(communicationHistory),
+  analytics: many(communicationAnalytics),
+  scheduledMessages: many(scheduledMessages),
+}));
+
+export const communicationHistoryRelations = relations(communicationHistory, ({ one }) => ({
+  salon: one(salons, {
+    fields: [communicationHistory.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [communicationHistory.customerId],
+    references: [users.id],
+  }),
+  campaign: one(communicationCampaigns, {
+    fields: [communicationHistory.campaignId],
+    references: [communicationCampaigns.id],
+  }),
+  template: one(messageTemplates, {
+    fields: [communicationHistory.templateId],
+    references: [messageTemplates.id],
+  }),
+  booking: one(bookings, {
+    fields: [communicationHistory.bookingId],
+    references: [bookings.id],
+  }),
+}));
+
+export const communicationPreferencesRelations = relations(communicationPreferences, ({ one }) => ({
+  customer: one(users, {
+    fields: [communicationPreferences.customerId],
+    references: [users.id],
+  }),
+  salon: one(salons, {
+    fields: [communicationPreferences.salonId],
+    references: [salons.id],
+  }),
+}));
+
+export const scheduledMessagesRelations = relations(scheduledMessages, ({ one }) => ({
+  salon: one(salons, {
+    fields: [scheduledMessages.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [scheduledMessages.customerId],
+    references: [users.id],
+  }),
+  booking: one(bookings, {
+    fields: [scheduledMessages.bookingId],
+    references: [bookings.id],
+  }),
+  campaign: one(communicationCampaigns, {
+    fields: [scheduledMessages.campaignId],
+    references: [communicationCampaigns.id],
+  }),
+  template: one(messageTemplates, {
+    fields: [scheduledMessages.templateId],
+    references: [messageTemplates.id],
+  }),
+}));
+
+export const communicationAnalyticsRelations = relations(communicationAnalytics, ({ one }) => ({
+  salon: one(salons, {
+    fields: [communicationAnalytics.salonId],
+    references: [salons.id],
+  }),
+  campaign: one(communicationCampaigns, {
+    fields: [communicationAnalytics.campaignId],
+    references: [communicationCampaigns.id],
+  }),
+}));

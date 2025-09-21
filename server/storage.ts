@@ -28,11 +28,22 @@ import {
   type Budget, type InsertBudget,
   type FinancialReport, type InsertFinancialReport,
   type TaxSetting, type InsertTaxSetting,
+  // Communication system types
+  type MessageTemplate, type InsertMessageTemplate,
+  type CustomerSegment, type InsertCustomerSegment,
+  type CommunicationCampaign, type InsertCommunicationCampaign,
+  type CommunicationHistory, type InsertCommunicationHistory,
+  type CommunicationPreferences, type InsertCommunicationPreferences,
+  type ScheduledMessage, type InsertScheduledMessage,
+  type CommunicationAnalytics, type InsertCommunicationAnalytics,
   users, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
   // Financial system tables
-  expenseCategories, expenses, commissionRates, commissions, budgets, financialReports, taxSettings
+  expenseCategories, expenses, commissionRates, commissions, budgets, financialReports, taxSettings,
+  // Communication system tables
+  messageTemplates, customerSegments, communicationCampaigns, communicationHistory, 
+  communicationPreferences, scheduledMessages, communicationAnalytics
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
@@ -441,6 +452,146 @@ export interface IStorage {
       pessimistic: { totalRevenue: number; totalProfit: number };
     };
   }>;
+
+  // =================================
+  // COMMUNICATION SYSTEM OPERATIONS
+  // =================================
+  
+  // Message template operations
+  getMessageTemplate(id: string): Promise<MessageTemplate | undefined>;
+  getMessageTemplatesBySalonId(salonId: string, type?: string): Promise<MessageTemplate[]>;
+  getDefaultMessageTemplate(salonId: string, type: string): Promise<MessageTemplate | undefined>;
+  createMessageTemplate(template: InsertMessageTemplate): Promise<MessageTemplate>;
+  updateMessageTemplate(id: string, salonId: string, updates: Partial<InsertMessageTemplate>): Promise<void>;
+  deleteMessageTemplate(id: string, salonId: string): Promise<void>;
+  createDefaultMessageTemplates(salonId: string): Promise<MessageTemplate[]>;
+  
+  // Customer segment operations
+  getCustomerSegment(id: string): Promise<CustomerSegment | undefined>;
+  getCustomerSegmentsBySalonId(salonId: string): Promise<CustomerSegment[]>;
+  createCustomerSegment(segment: InsertCustomerSegment): Promise<CustomerSegment>;
+  updateCustomerSegment(id: string, salonId: string, updates: Partial<InsertCustomerSegment>): Promise<void>;
+  deleteCustomerSegment(id: string, salonId: string): Promise<void>;
+  updateSegmentCustomerCount(segmentId: string): Promise<void>;
+  getCustomersInSegment(segmentId: string, salonId: string): Promise<User[]>;
+  
+  // Communication campaign operations
+  getCommunicationCampaign(id: string): Promise<CommunicationCampaign | undefined>;
+  getCommunicationCampaignsBySalonId(salonId: string, filters?: { status?: string; type?: string }): Promise<CommunicationCampaign[]>;
+  createCommunicationCampaign(campaign: InsertCommunicationCampaign): Promise<CommunicationCampaign>;
+  updateCommunicationCampaign(id: string, salonId: string, updates: Partial<InsertCommunicationCampaign>): Promise<void>;
+  deleteCommunicationCampaign(id: string, salonId: string): Promise<void>;
+  startCommunicationCampaign(id: string): Promise<void>;
+  pauseCommunicationCampaign(id: string): Promise<void>;
+  completeCommunicationCampaign(id: string): Promise<void>;
+  updateCampaignStats(campaignId: string, stats: {
+    messagesSent?: number;
+    messagesDelivered?: number;
+    messagesOpened?: number;
+    messagesClicked?: number;
+    messagesFailed?: number;
+    unsubscribes?: number;
+  }): Promise<void>;
+  
+  // Communication history operations
+  getCommunicationHistory(id: string): Promise<CommunicationHistory | undefined>;
+  getCommunicationHistoryBySalonId(salonId: string, filters?: {
+    customerId?: string;
+    campaignId?: string;
+    bookingId?: string;
+    type?: string;
+    channel?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<CommunicationHistory[]>;
+  getCommunicationHistoryByCustomer(customerId: string, salonId: string): Promise<CommunicationHistory[]>;
+  createCommunicationHistory(history: InsertCommunicationHistory): Promise<CommunicationHistory>;
+  updateCommunicationHistory(id: string, updates: {
+    status?: string;
+    providerId?: string;
+    sentAt?: Date;
+    deliveredAt?: Date;
+    openedAt?: Date;
+    clickedAt?: Date;
+    failureReason?: string;
+    metadata?: any;
+  }): Promise<void>;
+  
+  // Communication preferences operations
+  getCommunicationPreferences(customerId: string, salonId: string): Promise<CommunicationPreferences | undefined>;
+  createCommunicationPreferences(preferences: InsertCommunicationPreferences): Promise<CommunicationPreferences>;
+  updateCommunicationPreferences(customerId: string, salonId: string, updates: Partial<InsertCommunicationPreferences>): Promise<void>;
+  unsubscribeFromCommunications(customerId: string, salonId: string, reason?: string): Promise<void>;
+  getUnsubscribedCustomers(salonId: string): Promise<string[]>; // Return customer IDs
+  
+  // Scheduled message operations
+  getScheduledMessage(id: string): Promise<ScheduledMessage | undefined>;
+  getScheduledMessagesBySalonId(salonId: string, filters?: {
+    status?: string;
+    type?: string;
+    scheduledBefore?: Date;
+  }): Promise<ScheduledMessage[]>;
+  getScheduledMessagesDue(beforeTime?: Date): Promise<ScheduledMessage[]>;
+  createScheduledMessage(message: InsertScheduledMessage): Promise<ScheduledMessage>;
+  updateScheduledMessage(id: string, updates: Partial<InsertScheduledMessage>): Promise<void>;
+  markScheduledMessageSent(id: string, providerId?: string): Promise<void>;
+  markScheduledMessageFailed(id: string, reason: string): Promise<void>;
+  cancelScheduledMessage(id: string): Promise<void>;
+  rescheduleMessage(id: string, newScheduleTime: Date): Promise<void>;
+  
+  // Communication analytics operations
+  getCommunicationAnalytics(salonId: string, filters?: {
+    campaignId?: string;
+    channel?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<CommunicationAnalytics[]>;
+  createCommunicationAnalytics(analytics: InsertCommunicationAnalytics): Promise<CommunicationAnalytics>;
+  updateCommunicationAnalytics(id: string, updates: Partial<InsertCommunicationAnalytics>): Promise<void>;
+  getCommunicationDashboardMetrics(salonId: string, period: string): Promise<{
+    totalMessagesSent: number;
+    totalMessagesDelivered: number;
+    totalMessagesOpened: number;
+    totalMessagesClicked: number;
+    totalMessagesFailed: number;
+    emailOpenRate: number;
+    emailClickRate: number;
+    smsDeliveryRate: number;
+    unsubscribeRate: number;
+    activeCampaigns: number;
+    topPerformingCampaigns: Array<{
+      campaignId: string;
+      campaignName: string;
+      openRate: number;
+      clickRate: number;
+      messagesSent: number;
+    }>;
+    channelPerformance: Array<{
+      channel: string;
+      messagesSent: number;
+      deliveryRate: number;
+      engagementRate: number;
+    }>;
+    recentActivity: Array<{
+      id: string;
+      type: string;
+      description: string;
+      timestamp: Date;
+    }>;
+  }>;
+  
+  // Booking notification automation
+  scheduleBookingNotifications(bookingId: string): Promise<void>;
+  cancelBookingNotifications(bookingId: string): Promise<void>;
+  sendBookingConfirmation(bookingId: string): Promise<boolean>;
+  sendBookingReminder(bookingId: string, reminderType: '24h' | '2h'): Promise<boolean>;
+  sendBookingCancellation(bookingId: string): Promise<boolean>;
+  sendFollowUpMessage(bookingId: string): Promise<boolean>;
+  
+  // Template processing and personalization
+  processTemplate(templateContent: string, variables: Record<string, any>): Promise<string>;
+  getTemplateVariables(salonId: string, bookingId?: string, customerId?: string): Promise<Record<string, any>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -3863,6 +4014,236 @@ export class DatabaseStorage implements IStorage {
       scenarios
     };
   }
+
+  // Communication system method implementations
+
+  // Scheduled message operations
+  async getScheduledMessage(id: string): Promise<ScheduledMessage | undefined> {
+    const [message] = await db.select().from(scheduledMessages).where(eq(scheduledMessages.id, id));
+    return message || undefined;
+  }
+
+  async getScheduledMessagesBySalonId(salonId: string, filters?: {
+    status?: string;
+    type?: string;
+    scheduledBefore?: Date;
+  }): Promise<ScheduledMessage[]> {
+    let query = db.select().from(scheduledMessages).where(eq(scheduledMessages.salonId, salonId));
+    
+    if (filters?.status) {
+      query = query.where(eq(scheduledMessages.status, filters.status));
+    }
+    if (filters?.type) {
+      query = query.where(eq(scheduledMessages.type, filters.type));
+    }
+    if (filters?.scheduledBefore) {
+      query = query.where(lte(scheduledMessages.scheduledFor, filters.scheduledBefore));
+    }
+    
+    return await query;
+  }
+
+  async getScheduledMessagesDue(beforeTime?: Date): Promise<ScheduledMessage[]> {
+    const cutoffTime = beforeTime || new Date();
+    
+    return await db.select()
+      .from(scheduledMessages)
+      .where(
+        and(
+          eq(scheduledMessages.status, 'pending'),
+          lte(scheduledMessages.scheduledFor, cutoffTime)
+        )
+      )
+      .orderBy(asc(scheduledMessages.scheduledFor));
+  }
+
+  async createScheduledMessage(message: InsertScheduledMessage): Promise<ScheduledMessage> {
+    const [created] = await db.insert(scheduledMessages).values({
+      ...message,
+      id: message.id || randomUUID()
+    }).returning();
+    return created;
+  }
+
+  async updateScheduledMessage(id: string, updates: Partial<InsertScheduledMessage>): Promise<void> {
+    await db.update(scheduledMessages)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(scheduledMessages.id, id));
+  }
+
+  async markScheduledMessageSent(id: string, providerId?: string): Promise<void> {
+    await db.update(scheduledMessages)
+      .set({ 
+        status: 'sent',
+        sentAt: new Date(),
+        providerId: providerId || null,
+        updatedAt: new Date()
+      })
+      .where(eq(scheduledMessages.id, id));
+  }
+
+  async markScheduledMessageFailed(id: string, reason: string): Promise<void> {
+    await db.update(scheduledMessages)
+      .set({ 
+        status: 'failed',
+        failureReason: reason,
+        updatedAt: new Date()
+      })
+      .where(eq(scheduledMessages.id, id));
+  }
+
+  async cancelScheduledMessage(id: string): Promise<void> {
+    await db.update(scheduledMessages)
+      .set({ 
+        status: 'cancelled',
+        updatedAt: new Date()
+      })
+      .where(eq(scheduledMessages.id, id));
+  }
+
+  async rescheduleMessage(id: string, newScheduleTime: Date): Promise<void> {
+    await db.update(scheduledMessages)
+      .set({ 
+        scheduledFor: newScheduleTime,
+        status: 'pending',
+        updatedAt: new Date()
+      })
+      .where(eq(scheduledMessages.id, id));
+  }
+
+  // Template processing and personalization
+  async processTemplate(templateContent: string, variables: Record<string, any>): Promise<string> {
+    let processed = templateContent;
+    
+    // Simple variable replacement - replace {{variableName}} with actual values
+    for (const [key, value] of Object.entries(variables)) {
+      const regex = new RegExp(`{{${key}}}`, 'g');
+      processed = processed.replace(regex, String(value || ''));
+    }
+    
+    return processed;
+  }
+
+  async getTemplateVariables(salonId: string, bookingId?: string, customerId?: string): Promise<Record<string, any>> {
+    const variables: Record<string, any> = {};
+    
+    // Get salon info
+    const salon = await this.getSalonById(salonId);
+    if (salon) {
+      variables.salonName = salon.name;
+      variables.salonPhone = salon.phone;
+      variables.salonEmail = salon.email;
+      variables.salonAddress = `${salon.address}, ${salon.city}, ${salon.state} ${salon.zipCode}`;
+    }
+    
+    // Get booking info if provided
+    if (bookingId) {
+      const booking = await this.getBooking(bookingId);
+      if (booking) {
+        variables.customerName = booking.customerName;
+        variables.customerEmail = booking.customerEmail;
+        variables.customerPhone = booking.customerPhone;
+        variables.bookingDate = booking.scheduledAt.toLocaleDateString();
+        variables.bookingTime = booking.scheduledAt.toLocaleTimeString();
+        
+        // Get service info
+        const service = await this.getService(booking.serviceId);
+        if (service) {
+          variables.serviceName = service.name;
+          variables.servicePrice = (service.priceInPaisa / 100).toFixed(2);
+          variables.serviceDuration = service.durationMinutes;
+        }
+      }
+    }
+    
+    // Add common variables
+    variables.currentDate = new Date().toLocaleDateString();
+    variables.currentYear = new Date().getFullYear();
+    
+    return variables;
+  }
+
+  // Basic implementations for other communication methods (stubs for now)
+  async getMessageTemplate(id: string): Promise<MessageTemplate | undefined> {
+    const [template] = await db.select().from(messageTemplates).where(eq(messageTemplates.id, id));
+    return template || undefined;
+  }
+
+  async getMessageTemplatesBySalonId(salonId: string, filters?: { type?: string; channel?: string; isActive?: boolean }): Promise<MessageTemplate[]> {
+    let query = db.select().from(messageTemplates).where(eq(messageTemplates.salonId, salonId));
+    
+    if (filters?.type) {
+      query = query.where(eq(messageTemplates.type, filters.type));
+    }
+    if (filters?.channel) {
+      query = query.where(eq(messageTemplates.channel, filters.channel));
+    }
+    if (filters?.isActive !== undefined) {
+      query = query.where(eq(messageTemplates.isActive, filters.isActive ? 1 : 0));
+    }
+    
+    return await query;
+  }
+
+  async createMessageTemplate(template: InsertMessageTemplate): Promise<MessageTemplate> {
+    const [created] = await db.insert(messageTemplates).values({
+      ...template,
+      id: template.id || randomUUID()
+    }).returning();
+    return created;
+  }
+
+  async updateMessageTemplate(id: string, salonId: string, updates: Partial<InsertMessageTemplate>): Promise<void> {
+    await db.update(messageTemplates)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(
+        eq(messageTemplates.id, id),
+        eq(messageTemplates.salonId, salonId)
+      ));
+  }
+
+  async deleteMessageTemplate(id: string, salonId: string): Promise<void> {
+    await db.delete(messageTemplates)
+      .where(and(
+        eq(messageTemplates.id, id),
+        eq(messageTemplates.salonId, salonId)
+      ));
+  }
+
+  // Booking notification automation stubs
+  async scheduleBookingNotifications(bookingId: string): Promise<void> {
+    // Implementation would schedule various notification messages
+    console.log(`Scheduling notifications for booking ${bookingId}`);
+  }
+
+  async cancelBookingNotifications(bookingId: string): Promise<void> {
+    // Implementation would cancel scheduled notifications for a booking
+    console.log(`Cancelling notifications for booking ${bookingId}`);
+  }
+
+  async sendBookingConfirmation(bookingId: string): Promise<boolean> {
+    // Implementation would send booking confirmation
+    console.log(`Sending confirmation for booking ${bookingId}`);
+    return true;
+  }
+
+  async sendBookingReminder(bookingId: string, reminderType: '24h' | '2h'): Promise<boolean> {
+    // Implementation would send booking reminder
+    console.log(`Sending ${reminderType} reminder for booking ${bookingId}`);
+    return true;
+  }
+
+  async sendBookingCancellation(bookingId: string): Promise<boolean> {
+    // Implementation would send booking cancellation notice
+    console.log(`Sending cancellation notice for booking ${bookingId}`);
+    return true;
+  }
+
+  async sendFollowUpMessage(bookingId: string): Promise<boolean> {
+    // Implementation would send follow-up message
+    console.log(`Sending follow-up message for booking ${bookingId}`);
+    return true;
+  }
 }
 
 // Example data initialization
@@ -3947,183 +4328,6 @@ async function initializeSalonsAndServices() {
 }
 
 export const storage = new DatabaseStorage();
-
-// Legacy MemStorage for reference
-class MemStorage {
-  private salons: Salon[] = [];
-  private services: Service[] = [];
-  private bookings: Booking[] = [];
-  private payments: Payment[] = [];
-
-  async getSalon(id: string): Promise<Salon | undefined> {
-    return this.salons.find(s => s.id === id);
-  }
-
-  async getAllSalons(): Promise<Salon[]> {
-    return this.salons.filter(s => s.isActive === 1);
-  }
-
-  async createSalon(salon: InsertSalon): Promise<Salon> {
-    const newSalon: Salon = {
-      id: randomUUID(),
-      ...salon,
-      description: salon.description || null,
-      website: salon.website || null,
-      imageUrl: salon.imageUrl || null,
-      openTime: salon.openTime || null,
-      closeTime: salon.closeTime || null,
-      ownerId: salon.ownerId || null,
-      orgId: salon.orgId || null,
-      isActive: salon.isActive ?? 1,
-      rating: "0.00",
-      reviewCount: 0,
-      createdAt: new Date(),
-    };
-    this.salons.push(newSalon);
-    return newSalon;
-  }
-
-  async updateSalon(id: string, updates: Partial<InsertSalon>): Promise<void> {
-    const index = this.salons.findIndex(s => s.id === id);
-    if (index !== -1) {
-      this.salons[index] = { ...this.salons[index], ...updates };
-    }
-  }
-
-  async getService(id: string): Promise<Service | undefined> {
-    return this.services.find(s => s.id === id);
-  }
-
-  async getAllServices(): Promise<Service[]> {
-    return this.services.filter(s => s.isActive === 1);
-  }
-
-  async getServicesBySalonId(salonId: string): Promise<Service[]> {
-    return this.services.filter(s => s.salonId === salonId && s.isActive === 1);
-  }
-
-  async createService(service: InsertService): Promise<Service> {
-    const newService: Service = {
-      id: randomUUID(),
-      ...service,
-      description: service.description || null,
-      category: service.category || null,
-      currency: service.currency || 'INR',
-      isActive: service.isActive ?? 1,
-      createdAt: new Date(),
-    };
-    this.services.push(newService);
-    return newService;
-  }
-
-  async getBooking(id: string): Promise<Booking | undefined> {
-    return this.bookings.find(b => b.id === id);
-  }
-
-  async createBooking(booking: InsertBooking): Promise<Booking> {
-    const newBooking: Booking = {
-      id: randomUUID(),
-      ...booking,
-      status: booking.status || 'pending',
-      currency: booking.currency || 'INR',
-      staffId: booking.staffId || null,
-      timeSlotId: booking.timeSlotId || null,
-      guestSessionId: booking.guestSessionId || null,
-      salonName: booking.salonName || null,
-      notes: booking.notes || null,
-      createdAt: new Date(),
-    };
-    this.bookings.push(newBooking);
-    return newBooking;
-  }
-
-  async updateBookingStatus(id: string, status: string): Promise<number> {
-    const booking = this.bookings.find(b => b.id === id);
-    if (booking) {
-      booking.status = status;
-      return 1;
-    }
-    return 0;
-  }
-
-  async updateBookingNotes(id: string, notes: string): Promise<number> {
-    const booking = this.bookings.find(b => b.id === id);
-    if (booking) {
-      booking.notes = notes;
-      return 1;
-    }
-    return 0;
-  }
-
-  async bulkUpdateBookingStatus(bookingIds: string[], status: string, salonId: string): Promise<number> {
-    let updatedCount = 0;
-    for (const bookingId of bookingIds) {
-      const booking = this.bookings.find(b => b.id === bookingId && b.salonId === salonId);
-      if (booking) {
-        booking.status = status;
-        updatedCount++;
-      }
-    }
-    return updatedCount;
-  }
-
-  async getPayment(id: string): Promise<Payment | undefined> {
-    return this.payments.find(p => p.id === id);
-  }
-
-  async getPaymentByBookingId(bookingId: string): Promise<Payment | undefined> {
-    return this.payments.find(p => p.bookingId === bookingId);
-  }
-
-  async getAllPayments(): Promise<Payment[]> {
-    return this.payments;
-  }
-
-  async createPayment(payment: InsertPayment): Promise<Payment> {
-    const newPayment: Payment = {
-      id: randomUUID(),
-      ...payment,
-      status: payment.status || 'pending',
-      currency: payment.currency || 'INR',
-      razorpayOrderId: payment.razorpayOrderId || null,
-      razorpayPaymentId: payment.razorpayPaymentId || null,
-      razorpaySignature: payment.razorpaySignature || null,
-      createdAt: new Date(),
-      completedAt: null,
-    };
-    this.payments.push(newPayment);
-    return newPayment;
-  }
-
-  async updatePaymentStatus(id: string, status: string, completedAt?: Date): Promise<void> {
-    const payment = this.payments.find(p => p.id === id);
-    if (payment) {
-      payment.status = status;
-      if (completedAt) {
-        payment.completedAt = completedAt;
-      }
-    }
-  }
-
-  async updatePaymentOrderId(id: string, razorpayOrderId: string): Promise<void> {
-    const payment = this.payments.find(p => p.id === id);
-    if (payment) {
-      payment.razorpayOrderId = razorpayOrderId;
-    }
-  }
-
-  async updatePaymentDetails(id: string, razorpayPaymentId: string, razorpaySignature: string): Promise<void> {
-    const payment = this.payments.find(p => p.id === id);
-    if (payment) {
-      payment.razorpayPaymentId = razorpayPaymentId;
-      payment.razorpaySignature = razorpaySignature;
-    }
-  }
-
-  async getPaymentByRazorpayOrderId(razorpayOrderId: string): Promise<Payment | undefined> {
-    return this.payments.find(p => p.razorpayOrderId === razorpayOrderId);
-  }
-}
 
 // Initialize data on startup - using database now
 async function initializeServices() {
