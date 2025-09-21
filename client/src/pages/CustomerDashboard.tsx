@@ -258,7 +258,7 @@ export default function CustomerDashboard() {
 
   // Fetch upcoming appointments using correct endpoint with status parameter
   const { data: upcomingAppointmentsData, isLoading: upcomingLoading, error: upcomingError, refetch: refetchUpcoming } = useQuery<ServerAppointment[]>({
-    queryKey: ['/api/customer/appointments', { status: 'upcoming' }],
+    queryKey: ['/api/customer/appointments?status=upcoming'],
     enabled: isAuthenticated && activeTab === "upcoming",
     staleTime: 30000
   });
@@ -287,32 +287,56 @@ export default function CustomerDashboard() {
     }
   };
 
-  // Fetch appointment history with enhanced filtering - use 'all' instead of unsupported 'history'
+  // Build query string for appointment history
+  const buildHistoryQueryString = useMemo(() => {
+    const params = new URLSearchParams();
+    const status = historyStatusFilter === 'all' ? 'history' : historyStatusFilter;
+    params.set('status', status);
+    
+    const dateRange = getDateRange(historyDateFilter);
+    if (dateRange) {
+      params.set('dateFrom', dateRange);
+    }
+    params.set('limit', '50');
+    
+    return `/api/customer/appointments?${params.toString()}`;
+  }, [historyStatusFilter, historyDateFilter]);
+
+  // Fetch appointment history with enhanced filtering - use 'history' for past appointments
   const { data: allHistoryData, isLoading: historyLoading, error: historyError, refetch: refetchHistory } = useQuery<ServerAppointment[]>({
-    queryKey: ['/api/customer/appointments', { 
-      status: historyStatusFilter === 'all' ? 'all' : historyStatusFilter,
-      dateFrom: getDateRange(historyDateFilter),
-      limit: 50 // Fetch more for better filtering
-    }],
+    queryKey: [buildHistoryQueryString],
     enabled: isAuthenticated && activeTab === "history",
     staleTime: 30000
   });
 
+  // Build query string for payment history  
+  const buildPaymentsQueryString = useMemo(() => {
+    const params = new URLSearchParams();
+    
+    if (paymentsStatusFilter !== 'all') {
+      params.set('status', paymentsStatusFilter);
+    }
+    
+    const dateRange = getDateRange(paymentsDateFilter);
+    if (dateRange && paymentsDateFilter !== 'all') {
+      params.set('dateFrom', dateRange);
+    }
+    params.set('limit', '20');
+    params.set('offset', (currentPaymentsPage * 20).toString());
+    
+    return `/api/customer/payments?${params.toString()}`;
+  }, [paymentsStatusFilter, paymentsDateFilter, currentPaymentsPage]);
+
   // Enhanced payment history fetching with filtering
   const { data: paymentHistoryData, isLoading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = useQuery<ServerPaymentRecord[]>({
-    queryKey: ['/api/customer/payments', { 
-      status: paymentsStatusFilter === 'all' ? undefined : paymentsStatusFilter,
-      dateFrom: getDateRange(paymentsDateFilter),
-      limit: 20,
-      offset: currentPaymentsPage * 20
-    }],
+    queryKey: [buildPaymentsQueryString],
     enabled: isAuthenticated && activeTab === "payments",
     staleTime: 30000
   });
 
   // Map server data to frontend types
   const dashboardStats = customerProfile ? mapDashboardStats(customerProfile) : undefined;
-  const upcomingAppointments = upcomingAppointmentsData?.map(mapAppointmentData) || [];
+  const upcomingAppointments = upcomingAppointmentsData?.appointments?.map(mapAppointmentData) || [];
   const allPaymentHistory = paymentHistoryData?.map(mapPaymentData) || [];
 
   // Filter and search payment history with memoization
@@ -380,9 +404,9 @@ export default function CustomerDashboard() {
 
   // Filter and search appointment history with memoization
   const appointmentHistory = useMemo(() => {
-    if (!allHistoryData) return [];
+    if (!allHistoryData?.appointments) return [];
     
-    let filteredHistory = allHistoryData.map(mapAppointmentData);
+    let filteredHistory = allHistoryData.appointments.map(mapAppointmentData);
     
     // Apply status filter
     if (historyStatusFilter !== 'all') {
