@@ -163,61 +163,104 @@ export default function ReviewPublishStep({
     },
   });
 
-  // Check completion status
+  // Use dashboard completion data for all validation when available
   useEffect(() => {
-    const completionData = {
-      business_info: salonData,
-      location_contact: salonData,
-      services: services,
-      staff: staff,
-      resources: resources,
-      booking_settings: bookingSettings,
-      payment_setup: payoutAccounts,
-      media: mediaAssets
-    };
-
-    let completed = 0;
-    const issues: string[] = [];
-
-    SETUP_SECTIONS.forEach(section => {
-      const data = completionData[section.id as keyof typeof completionData];
+    if (dashboardCompletion && typeof dashboardCompletion === 'object') {
+      // Use dashboard data - no issues if dashboard says sections are complete
+      const issues: string[] = [];
+      let completed = 0;
       
-      if (section.id === 'services' && (!services || services.length === 0)) {
-        issues.push('Add at least one service to your catalog');
-        return;
-      }
-      
-      if (section.id === 'staff' && (!staff || staff.length === 0)) {
-        issues.push('Add at least one staff member');
-        return;
-      }
-
-
-      if (data && typeof data === 'object') {
-        const hasRequiredFields = section.requiredFields.every(field => {
-          const value = (data as any)[field];
-          return value !== null && value !== undefined && value !== '';
-        });
-
-        if (hasRequiredFields) {
+      SETUP_SECTIONS.forEach(section => {
+        let isCompleted = false;
+        switch (section.id) {
+          case 'business_info':
+          case 'location_contact':
+            isCompleted = (dashboardCompletion as any).profile?.isComplete ?? false;
+            break;
+          case 'services':
+            isCompleted = (dashboardCompletion as any).services?.isComplete ?? false;
+            break;
+          case 'staff':
+            isCompleted = (dashboardCompletion as any).staff?.isComplete ?? false;
+            break;
+          case 'booking_settings':
+            isCompleted = (dashboardCompletion as any).settings?.isComplete ?? false;
+            break;
+          case 'media':
+            isCompleted = (dashboardCompletion as any).media?.isComplete ?? false;
+            break;
+          default:
+            isCompleted = false;
+        }
+        
+        if (isCompleted) {
           completed++;
         } else {
-          issues.push(`Complete ${section.title} with required information`);
+          issues.push(`Complete ${section.title} setup`);
         }
-      } else if (section.requiredFields.length === 0 && data) {
-        completed++;
-      } else {
-        issues.push(`Complete ${section.title} setup`);
-      }
-    });
+      });
 
-    setPublishStatus({
-      canPublish: completed >= 6, // All 6 core sections required
-      completedSections: completed,
-      totalSections: SETUP_SECTIONS.length,
-      issues
-    });
-  }, [salonData, bookingSettings, services, staff, resources, payoutAccounts, mediaAssets]);
+      setPublishStatus({
+        canPublish: completed >= 6,
+        completedSections: completed,
+        totalSections: SETUP_SECTIONS.length,
+        issues
+      });
+    } else {
+      // Fallback to old logic only if dashboard data not available
+      const completionData = {
+        business_info: salonData,
+        location_contact: salonData,
+        services: services,
+        staff: staff,
+        resources: resources,
+        booking_settings: bookingSettings,
+        payment_setup: payoutAccounts,
+        media: mediaAssets
+      };
+
+      let completed = 0;
+      const issues: string[] = [];
+
+      SETUP_SECTIONS.forEach(section => {
+        const data = completionData[section.id as keyof typeof completionData];
+        
+        if (section.id === 'services' && (!services || services.length === 0)) {
+          issues.push('Add at least one service to your catalog');
+          return;
+        }
+        
+        if (section.id === 'staff' && (!staff || staff.length === 0)) {
+          issues.push('Add at least one staff member');
+          return;
+        }
+
+        if (data && typeof data === 'object') {
+          const hasRequiredFields = section.requiredFields.every(field => {
+            const value = (data as any)[field];
+            return value !== null && value !== undefined && value !== '';
+          });
+
+          if (hasRequiredFields) {
+            completed++;
+          } else {
+            issues.push(`Complete ${section.title} with required information`);
+          }
+        } else if (section.requiredFields.length === 0 && data) {
+          completed++;
+        } else {
+          issues.push(`Complete ${section.title} setup`);
+        }
+      });
+
+      setPublishStatus({
+        canPublish: completed >= 6,
+        completedSections: completed,
+        totalSections: SETUP_SECTIONS.length,
+        issues
+      });
+    }
+  }, [dashboardCompletion, salonData, bookingSettings, services, staff, resources, payoutAccounts, mediaAssets]);
 
   const handlePublish = async () => {
     if (!publishStatus.canPublish) {
