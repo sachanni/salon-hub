@@ -54,20 +54,20 @@ export default function ProfileStep({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Load existing salon data - Use same query key as dashboard
+  // Load existing salon data - Use same query key as dashboard with proper caching
   const { data: salonData } = useQuery({
     queryKey: ['/api/salons', salonId], // Match dashboard query key
     enabled: !!salonId,
-    staleTime: 0, // Always get fresh data
+    staleTime: 5 * 60 * 1000, // 5 minutes cache - prevent excessive refetching
+    refetchOnWindowFocus: false, // Prevent refetch on focus
+    refetchOnMount: false, // Don't refetch if we already have data
   });
 
-  // Populate form with existing data
+  // Populate form with existing data - only once when data first loads
   useEffect(() => {
-    if (salonData) {
+    if (salonData && !formData.name) { // Only populate if form is empty
       const salon = salonData as any;
-      console.log('ProfileStep received salon data:', salon);
-      setFormData(prev => ({
-        ...prev,
+      setFormData({
         name: salon.name || "",
         description: salon.description || "",
         category: salon.category || "",
@@ -79,9 +79,9 @@ export default function ProfileStep({
         phone: salon.phone || "",
         email: salon.email || "",
         businessHours: salon.business_hours || salon.businessHours || ""
-      }));
+      });
     }
-  }, [salonData]);
+  }, [salonData]); // Remove formData from dependencies to prevent loops
 
   // Update salon mutation
   const updateSalonMutation = useMutation({

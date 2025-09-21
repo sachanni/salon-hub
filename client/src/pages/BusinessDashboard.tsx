@@ -96,8 +96,9 @@ export default function BusinessDashboard() {
   const { data: salon, isLoading: salonLoading } = useQuery({
     queryKey: ['/api/salons', salonId], // Use standard salon data key
     enabled: !!salonId,
-    staleTime: 0, // Always fetch fresh data
+    staleTime: 5 * 60 * 1000, // 5 minutes cache to prevent excessive requests
     refetchOnWindowFocus: false,
+    refetchOnMount: false, // Don't refetch if we already have data
   });
 
   // Select salon ID from accessible salons only
@@ -107,32 +108,20 @@ export default function BusinessDashboard() {
     }
   }, [accessibleSalons, salonId]);
 
-  // Check completion status 
+  // Check completion status - FIXED to prevent infinite loops
   useEffect(() => {
     if (salon) {
       const salonData = salon as any;
-      
-      // Debug: Log what data we actually have
-      console.log('Salon data for completion check:', {
-        name: salonData.name,
-        description: salonData.description,
-        address: salonData.address,
-        hasName: !!salonData.name,
-        hasDescription: !!salonData.description,
-        hasAddress: !!salonData.address
-      });
-      
       const profileComplete = !!(salonData.name && salonData.description && salonData.address);
-      console.log('Profile complete status:', profileComplete);
       
-      // Only update if profile completion status actually changed
+      // Only update if completion status actually changed
       setCompletionStatus(prev => {
         if (prev.profile !== profileComplete) {
           return {
             ...prev,
             profile: profileComplete,
             services: false, // Will be checked against services API
-            staff: false,    // Will be checked against staff API
+            staff: false,    // Will be checked against staff API  
             settings: false, // Will be checked against settings API
             media: false     // Will be checked against media API
           };
