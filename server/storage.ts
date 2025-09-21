@@ -503,28 +503,59 @@ export class DatabaseStorage implements IStorage {
       // Calculate date range based on period
       const endDate = new Date();
       const startDate = new Date();
+      const previousStartDate = new Date();
+      const previousEndDate = new Date();
+      
+      // Today's date for daily metrics
+      const today = new Date().toISOString().split('T')[0];
       
       switch (period) {
+        case 'daily':
+        case '1d':
+          startDate.setDate(endDate.getDate() - 1);
+          previousStartDate.setDate(endDate.getDate() - 2);
+          previousEndDate.setDate(endDate.getDate() - 1);
+          break;
+        case 'weekly':
         case 'week':
+        case '7d':
           startDate.setDate(endDate.getDate() - 7);
+          previousStartDate.setDate(endDate.getDate() - 14);
+          previousEndDate.setDate(endDate.getDate() - 7);
           break;
+        case 'monthly':
         case 'month':
+        case '30d':
           startDate.setMonth(endDate.getMonth() - 1);
+          previousStartDate.setMonth(endDate.getMonth() - 2);
+          previousEndDate.setMonth(endDate.getMonth() - 1);
           break;
+        case 'quarterly':
         case 'quarter':
+        case '90d':
           startDate.setMonth(endDate.getMonth() - 3);
+          previousStartDate.setMonth(endDate.getMonth() - 6);
+          previousEndDate.setMonth(endDate.getMonth() - 3);
           break;
+        case 'yearly':
         case 'year':
+        case '1y':
           startDate.setFullYear(endDate.getFullYear() - 1);
+          previousStartDate.setFullYear(endDate.getFullYear() - 2);
+          previousEndDate.setFullYear(endDate.getFullYear() - 1);
           break;
         default:
           startDate.setMonth(endDate.getMonth() - 1); // Default to month
+          previousStartDate.setMonth(endDate.getMonth() - 2);
+          previousEndDate.setMonth(endDate.getMonth() - 1);
       }
 
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
+      const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
+      const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
 
-      // Get total bookings and revenue
+      // Get current period stats
       const bookingStats = await db
         .select({
           totalBookings: sql<number>`count(*)`,
@@ -538,6 +569,46 @@ export class DatabaseStorage implements IStorage {
           eq(bookings.salonId, salonId),
           gte(bookings.bookingDate, startDateStr),
           lte(bookings.bookingDate, endDateStr)
+        ));
+
+      // Get previous period stats for comparison
+      const previousBookingStats = await db
+        .select({
+          totalBookings: sql<number>`count(*)`,
+          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          confirmedBookings: sql<number>`count(case when ${bookings.status} = 'confirmed' then 1 end)`,
+          cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
+          completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          gte(bookings.bookingDate, previousStartDateStr),
+          lte(bookings.bookingDate, previousEndDateStr)
+        ));
+
+      // Get today's specific data
+      const todayStats = await db
+        .select({
+          todayBookings: sql<number>`count(*)`,
+          todayRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          todayConfirmed: sql<number>`count(case when ${bookings.status} = 'confirmed' then 1 end)`
+        })
+        .from(bookings)
+        .where(and(
+          eq(bookings.salonId, salonId),
+          eq(bookings.bookingDate, today)
+        ));
+
+      // Get active staff count
+      const activeStaffCount = await db
+        .select({
+          count: sql<number>`count(*)`
+        })
+        .from(staff)
+        .where(and(
+          eq(staff.salonId, salonId),
+          eq(staff.isActive, 1)
         ));
 
       // Get popular services
@@ -599,19 +670,87 @@ export class DatabaseStorage implements IStorage {
         completedBookings: 0
       };
 
+      const previousStats = previousBookingStats[0] || {
+        totalBookings: 0,
+        totalRevenue: 0,
+        confirmedBookings: 0,
+        cancelledBookings: 0,
+        completedBookings: 0
+      };
+
+      const todayData = todayStats[0] || {
+        todayBookings: 0,
+        todayRevenue: 0,
+        todayConfirmed: 0
+      };
+
+      const staffCount = activeStaffCount[0]?.count || 0;
+
+      // Calculate trends and percentages
+      const calculateTrend = (current: number, previous: number) => {
+        if (previous === 0) return current > 0 ? { percentage: 100, trend: 'up' } : { percentage: 0, trend: 'neutral' };
+        const change = ((current - previous) / previous) * 100;
+        return {
+          percentage: Math.abs(change),
+          trend: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral'
+        };
+      };
+
+      const currentBookings = Number(stats.totalBookings) || 0;
+      const currentRevenue = Number(stats.totalRevenue) || 0;
+      const previousBookings = Number(previousStats.totalBookings) || 0;
+      const previousRevenue = Number(previousStats.totalRevenue) || 0;
+
+      const bookingsTrend = calculateTrend(currentBookings, previousBookings);
+      const revenueTrend = calculateTrend(currentRevenue, previousRevenue);
+
+      // Calculate average booking value
+      const averageBookingValue = currentBookings > 0 ? currentRevenue / currentBookings : 0;
+      const previousAverageBookingValue = previousBookings > 0 ? previousRevenue / previousBookings : 0;
+      const averageValueTrend = calculateTrend(averageBookingValue, previousAverageBookingValue);
+
       return {
         period,
         startDate: startDateStr,
         endDate: endDateStr,
         overview: {
-          totalBookings: Number(stats.totalBookings) || 0,
-          totalRevenuePaisa: Number(stats.totalRevenue) || 0,
+          // Current period data
+          totalBookings: currentBookings,
+          totalRevenuePaisa: currentRevenue,
           confirmedBookings: Number(stats.confirmedBookings) || 0,
           cancelledBookings: Number(stats.cancelledBookings) || 0,
           completedBookings: Number(stats.completedBookings) || 0,
-          cancellationRate: stats.totalBookings > 0 
-            ? ((Number(stats.cancelledBookings) || 0) / Number(stats.totalBookings) * 100).toFixed(2)
-            : '0.00'
+          cancellationRate: currentBookings > 0 
+            ? ((Number(stats.cancelledBookings) || 0) / currentBookings * 100).toFixed(2)
+            : '0.00',
+          
+          // Today's specific data
+          todayBookings: Number(todayData.todayBookings) || 0,
+          todayRevenuePaisa: Number(todayData.todayRevenue) || 0,
+          todayConfirmed: Number(todayData.todayConfirmed) || 0,
+          
+          // Staff metrics
+          activeStaffCount: Number(staffCount),
+          
+          // Average values
+          averageBookingValuePaisa: Math.round(averageBookingValue),
+          
+          // Trending data with percentages
+          bookingsTrend: {
+            percentage: bookingsTrend.percentage.toFixed(1),
+            direction: bookingsTrend.trend,
+            previousPeriodValue: previousBookings
+          },
+          revenueTrend: {
+            percentage: revenueTrend.percentage.toFixed(1),
+            direction: revenueTrend.trend,
+            previousPeriodValue: previousRevenue
+          },
+          averageValueTrend: {
+            percentage: averageValueTrend.percentage.toFixed(1),
+            direction: averageValueTrend.trend,
+            previousPeriodValue: Math.round(previousAverageBookingValue)
+          }
         },
         popularServices: popularServices.map(service => ({
           serviceName: service.serviceName,
@@ -628,7 +767,8 @@ export class DatabaseStorage implements IStorage {
           .map(performer => ({
             staffName: performer.staffName,
             bookingCount: Number(performer.bookingCount) || 0,
-            totalRevenuePaisa: Number(performer.totalRevenue) || 0
+            totalRevenuePaisa: Number(performer.totalRevenue) || 0,
+            utilization: staffCount > 0 ? ((Number(performer.bookingCount) || 0) / currentBookings * 100).toFixed(1) : '0.0'
           }))
       };
     } catch (error) {
