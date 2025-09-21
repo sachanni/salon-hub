@@ -9,6 +9,8 @@ import Home from "@/pages/Home";
 import Join from "@/pages/Join";
 import JoinCustomer from "@/pages/JoinCustomer";
 import JoinBusiness from "@/pages/JoinBusiness";
+import LoginCustomer from "@/pages/LoginCustomer";
+import LoginBusiness from "@/pages/LoginBusiness";
 import BusinessSetup from "@/pages/BusinessSetup";
 import CalendarManagement from "@/pages/CalendarManagement";
 import NotFound from "@/pages/not-found";
@@ -22,6 +24,8 @@ function Router() {
         <Route path="/join" component={Join} />
         <Route path="/join/customer" component={JoinCustomer} />
         <Route path="/join/business" component={JoinBusiness} />
+        <Route path="/login/customer" component={LoginCustomer} />
+        <Route path="/login/business" component={LoginBusiness} />
         <Route path="/business/setup" component={BusinessSetup} />
         <Route path="/calendar" component={CalendarManagement} />
         {/* Fallback to 404 */}

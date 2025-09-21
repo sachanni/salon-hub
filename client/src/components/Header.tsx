@@ -1,14 +1,23 @@
-import { User, Menu, Moon, Sun } from "lucide-react";
+import { User, Menu, Moon, Sun, ChevronDown, Building2, Scissors } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function Header() {
   const [isDark, setIsDark] = useState(false);
   const { toast } = useToast();
   const { user, isAuthenticated, login, logout } = useAuth();
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
     const theme = localStorage.getItem('theme');
@@ -92,19 +101,50 @@ export default function Header() {
                 </>
               ) : (
                 <>
-                  <Button 
-                    data-testid="button-login"
-                    variant="ghost" 
-                    onClick={handleLogin}
-                  >
-                    Log in
-                  </Button>
-                  <Button 
-                    asChild
-                    data-testid="button-signup"
-                  >
-                    <Link href="/join">Sign up</Link>
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" data-testid="button-join">
+                        Join <ChevronDown className="ml-1 h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuLabel>Create Account</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setLocation('/join/customer')}>
+                        <User className="mr-2 h-4 w-4" />
+                        Customer Account
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setLocation('/join/business')}>
+                        <Building2 className="mr-2 h-4 w-4" />
+                        Business Account
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button data-testid="button-login">
+                        Login <ChevronDown className="ml-1 h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuLabel>Sign In</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setLocation('/login/customer')}>
+                        <User className="mr-2 h-4 w-4" />
+                        Customer Login
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setLocation('/login/business')}>
+                        <Building2 className="mr-2 h-4 w-4" />
+                        Business Login
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogin}>
+                        <Scissors className="mr-2 h-4 w-4" />
+                        Login with Replit
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </>
               )}
             </div>

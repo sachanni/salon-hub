@@ -257,6 +257,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Manual login endpoint (email/password)
+  app.post('/api/auth/login', async (req: any, res) => {
+    try {
+      const { email, password } = req.body;
+
+      // Validate required fields
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      // Check if user exists
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      // Check if user has a password (could be Replit-only user)
+      if (!user.password) {
+        return res.status(401).json({ 
+          error: "This account was created with Replit Auth. Please use 'Login with Replit' button." 
+        });
+      }
+
+      // Verify password
+      const bcrypt = await import('bcryptjs');
+      const isValidPassword = await bcrypt.default.compare(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      // Check if email is verified
+      if (user.emailVerified === 0) {
+        return res.status(401).json({ 
+          error: "Please verify your email address before logging in",
+          requiresVerification: true 
+        });
+      }
+
+      // Create session user object (same format as Replit Auth)
+      const sessionUser = {
+        claims: {
+          sub: user.id,
+          email: user.email,
+          first_name: user.firstName,
+          last_name: user.lastName,
+          profile_image_url: user.profileImageUrl,
+          exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days from now
+        },
+        access_token: `manual_login_${user.id}`,
+        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
+      };
+
+      // Establish session using passport's login function
+      req.logIn(sessionUser, async (err: any) => {
+        if (err) {
+          console.error("Failed to establish session:", err);
+          return res.status(500).json({ error: "Failed to create session" });
+        }
+
+        // Check user role and setup completion for redirect
+        const roles = await storage.getUserRoles(user.id);
+        const isOwner = roles.some(role => role.name === 'owner');
+        
+        let redirectUrl = '/';
+        if (isOwner) {
+          // Check if business owner has completed setup
+          const orgMemberships = await storage.getUserOrganizations(user.id);
+          const hasCompletedSetup = orgMemberships && orgMemberships.length > 0;
+          
+          if (!hasCompletedSetup) {
+            redirectUrl = '/business/setup';
+          }
+        }
+
+        // Success response
+        const { password: _, ...userResponse } = user;
+        res.json({
+          success: true,
+          user: userResponse,
+          message: "Login successful",
+          authenticated: true,
+          redirect: redirectUrl
+        });
+      });
+
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Login failed. Please try again." });
+    }
+  });
+
   // Update salon information (for business setup)
   app.put('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
     try {
