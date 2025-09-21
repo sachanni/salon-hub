@@ -55,12 +55,13 @@ export default function BusinessInfoStep({
   // Populate form with existing data
   useEffect(() => {
     if (salonData) {
+      const salon = salonData as any;
       setFormData(prev => ({
         ...prev,
-        name: salonData.name || "",
-        description: salonData.description || "",
-        category: salonData.category || "",
-        website: salonData.website || ""
+        name: salon.name || "",
+        description: salon.description || "",
+        category: salon.category || "",
+        website: salon.website || ""
       }));
     }
   }, [salonData]);
@@ -106,7 +107,7 @@ export default function BusinessInfoStep({
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev: any) => ({ ...prev, [field]: value }));
   };
 
   return (

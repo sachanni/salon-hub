@@ -858,10 +858,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: AuthenticatedRequest, res) => {
     try {
       const { salonId } = req.params;
+      
+      // Ensure isActive is always an integer (0 or 1)
+      const normalizeIsActive = (value: any): number => {
+        if (typeof value === 'boolean') return value ? 1 : 0;
+        if (typeof value === 'number') return value ? 1 : 0;
+        if (typeof value === 'string') return value.toLowerCase() === 'true' ? 1 : 0;
+        return 1; // Default to active
+      };
+      
       const serviceData = {
         ...req.body,
         salonId,
-        isActive: 1  // Use integer 1 instead of boolean true
+        isActive: normalizeIsActive(req.body.isActive)
       };
       
       const service = await storage.createService(serviceData);
