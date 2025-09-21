@@ -342,8 +342,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!salon) {
         return res.status(404).json({ error: 'Salon not found' });
       }
+
+      // Add primary image from media assets (consistent with /api/salons endpoint)
+      const mediaAssets = await storage.getMediaAssetsBySalonId(salonId);
+      const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
+      console.log(`Salon ${salon.name}: Found ${mediaAssets?.length || 0} media assets, primary: ${primaryImage || 'none'}`);
       
-      res.json(salon);
+      const salonWithImage = {
+        ...salon,
+        image: primaryImage
+      };
+      
+      res.json(salonWithImage);
     } catch (error) {
       console.error('Error fetching salon:', error);
       res.status(500).json({ error: 'Failed to fetch salon' });
