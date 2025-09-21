@@ -61,11 +61,18 @@ export default function BusinessDashboard() {
     staleTime: 30000
   });
 
+  const { data: staff } = useQuery({
+    queryKey: ['/api/salons', salonId, 'staff'],
+    enabled: !!salonId,
+    staleTime: 30000
+  });
+
   // Fix completion logic with proper type checking
   const salon = salonData as any;
   const isProfileComplete = salon && salon.name && salon.address && salon.phone;
   const hasServices = Array.isArray(services) && services.length > 0;
-  const completionPercentage = Math.round(((isProfileComplete ? 1 : 0) + (hasServices ? 1 : 0)) / 2 * 100);
+  const hasStaff = Array.isArray(staff) && staff.length > 0;
+  const completionPercentage = Math.round(((isProfileComplete ? 1 : 0) + (hasServices ? 1 : 0) + (hasStaff ? 1 : 0)) / 3 * 100);
 
   if (!isAuthenticated) {
     return (
@@ -323,6 +330,8 @@ export default function BusinessDashboard() {
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4" />
                 Staff
+                {hasStaff && <CheckCircle className="h-3 w-3 text-green-500" />}
+                {!hasStaff && <span className="text-xs text-red-500">*</span>}
               </div>
             </button>
 
