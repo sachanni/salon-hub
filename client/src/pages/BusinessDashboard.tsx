@@ -109,7 +109,7 @@ export default function BusinessDashboard() {
     );
   }
 
-  if (authLoading || salonsLoading || salonLoading) {
+  if (salonsLoading || salonLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -157,7 +157,7 @@ export default function BusinessDashboard() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-                  {salon?.name || "Business Dashboard"}
+                  {(salon as any)?.name || "Business Dashboard"}
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Professional salon management
@@ -167,7 +167,7 @@ export default function BusinessDashboard() {
             
             <div className="flex items-center gap-4">
               {/* Email verification banner */}
-              {user && !user.emailVerified && (
+              {user && !(user as any).emailVerified && (
                 <Alert className="w-auto border-orange-200 bg-orange-50 dark:bg-orange-950/20">
                   <AlertTriangle className="h-4 w-4 text-orange-600" />
                   <AlertDescription className="text-orange-700 dark:text-orange-300 text-sm">

@@ -799,7 +799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.id;
       const orgMemberships = req.user.orgMemberships || [];
       
-      const allSalons = await storage.getSalons();
+      const allSalons = await storage.getAllSalons();
       
       const accessibleSalons = allSalons.filter(salon => {
         if (salon.ownerId === userId) return true;
