@@ -5728,6 +5728,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update customer appointment status (cancel, confirm, etc.)
+  app.patch('/api/customer/appointments/:id', requireCustomerAuth, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      
+      // Validate status parameter
+      if (!['cancelled', 'confirmed', 'pending'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status. Must be one of: cancelled, confirmed, pending' });
+      }
+      
+      // Update appointment status with customer email validation
+      await storage.updateBookingStatusWithCustomerValidation(id, req.user.email, status);
+      
+      res.json({ 
+        success: true, 
+        message: `Appointment ${status} successfully` 
+      });
+    } catch (error: any) {
+      console.error('Error updating appointment status:', error);
+      if (error.message === 'Booking not found or access denied') {
+        res.status(404).json({ error: 'Appointment not found or access denied' });
+      } else {
+        res.status(500).json({ error: 'Failed to update appointment' });
+      }
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

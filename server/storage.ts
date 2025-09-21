@@ -139,6 +139,7 @@ export interface IStorage {
   getBooking(id: string): Promise<Booking | undefined>;
   createBooking(booking: InsertBooking): Promise<Booking>;
   updateBookingStatus(id: string, status: string): Promise<number>;
+  updateBookingStatusWithCustomerValidation(bookingId: string, customerEmail: string, status: string): Promise<void>;
   updateBookingNotes(id: string, notes: string): Promise<number>;
   bulkUpdateBookingStatus(bookingIds: string[], status: string, salonId: string): Promise<number>;
   getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]>;
@@ -1250,6 +1251,20 @@ export class DatabaseStorage implements IStorage {
   async updateBookingStatus(id: string, status: string): Promise<number> {
     const result = await db.update(bookings).set({ status }).where(eq(bookings.id, id));
     return result.rowCount || 0;
+  }
+
+  async updateBookingStatusWithCustomerValidation(bookingId: string, customerEmail: string, status: string): Promise<void> {
+    const result = await db
+      .update(bookings)
+      .set({ status })
+      .where(and(
+        eq(bookings.id, bookingId),
+        eq(bookings.customerEmail, customerEmail)
+      ));
+    
+    if (result.rowCount === 0) {
+      throw new Error('Booking not found or access denied');
+    }
   }
 
   async updateBookingNotes(id: string, notes: string): Promise<number> {

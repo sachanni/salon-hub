@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import BookingModal from "@/components/BookingModal";
 import { 
   Calendar, 
   History, 
@@ -21,7 +24,13 @@ import {
   Settings,
   BookOpen,
   Star,
-  ChevronRight
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  MoreHorizontal,
+  Eye,
+  X,
+  RotateCcw
 } from "lucide-react";
 
 // Server response types (what the backend actually returns)
@@ -96,6 +105,7 @@ interface Appointment {
   duration: number;
   status: 'confirmed' | 'pending' | 'completed' | 'cancelled';
   totalPaisa: number;
+  notes?: string;
 }
 
 interface PaymentRecord {
@@ -130,7 +140,8 @@ const mapAppointmentData = (serverData: ServerAppointment): Appointment => ({
   time: serverData.bookingTime, // Map bookingTime to time
   duration: serverData.duration,
   status: serverData.status,
-  totalPaisa: serverData.totalAmountPaisa // Map totalAmountPaisa to totalPaisa
+  totalPaisa: serverData.totalAmountPaisa, // Map totalAmountPaisa to totalPaisa
+  notes: serverData.notes
 });
 
 const mapPaymentData = (serverData: ServerPaymentRecord): PaymentRecord => ({
@@ -158,6 +169,9 @@ export default function CustomerDashboard() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("upcoming");
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
+  const [rescheduleAppointment, setRescheduleAppointment] = useState<Appointment | null>(null);
 
   // Fetch customer profile with stats (replaces dashboard-stats)
   const { data: customerProfile, isLoading: profileLoading } = useQuery<ServerCustomerProfile>({
@@ -167,7 +181,7 @@ export default function CustomerDashboard() {
   });
 
   // Fetch upcoming appointments using correct endpoint with status parameter
-  const { data: upcomingAppointmentsData, isLoading: upcomingLoading } = useQuery<ServerAppointment[]>({
+  const { data: upcomingAppointmentsData, isLoading: upcomingLoading, error: upcomingError, refetch: refetchUpcoming } = useQuery<ServerAppointment[]>({
     queryKey: ['/api/customer/appointments', { status: 'upcoming' }],
     enabled: isAuthenticated && activeTab === "upcoming",
     staleTime: 30000
@@ -199,6 +213,31 @@ export default function CustomerDashboard() {
   }
 
   const statsLoading = profileLoading;
+
+  // Cancel appointment mutation
+  const cancelAppointmentMutation = useMutation({
+    mutationFn: async (appointmentId: string) => {
+      return apiRequest(`/api/customer/appointments/${appointmentId}`, {
+        method: 'PATCH',
+        body: { status: 'cancelled' }
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Appointment Cancelled",
+        description: "Your appointment has been cancelled successfully.",
+      });
+      // Invalidate and refetch appointments
+      queryClient.invalidateQueries({ queryKey: ['/api/customer/appointments'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Cancellation Failed",
+        description: error.message || "Failed to cancel appointment. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Helper functions
   const formatCurrency = (paisa: number) => {
@@ -235,6 +274,39 @@ export default function CustomerDashboard() {
       case 'refunded': return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
+  };
+
+  // Helper functions for appointment actions
+  const toggleCardExpansion = (appointmentId: string) => {
+    const newExpanded = new Set(expandedCards);
+    if (newExpanded.has(appointmentId)) {
+      newExpanded.delete(appointmentId);
+    } else {
+      newExpanded.add(appointmentId);
+    }
+    setExpandedCards(newExpanded);
+  };
+
+  const handleReschedule = (appointment: Appointment) => {
+    setRescheduleAppointment(appointment);
+    setRescheduleModalOpen(true);
+  };
+
+  const handleGetDirections = (salonName: string) => {
+    const query = encodeURIComponent(salonName);
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${query}`;
+    window.open(mapsUrl, '_blank');
+  };
+
+  const handleContactSalon = () => {
+    toast({
+      title: "Contact Information",
+      description: "Salon contact information will be available soon. You can contact them through their profile page.",
+    });
+  };
+
+  const handleCancelAppointment = (appointmentId: string) => {
+    cancelAppointmentMutation.mutate(appointmentId);
   };
 
   if (isLoading) {
@@ -429,7 +501,18 @@ export default function CustomerDashboard() {
               </Link>
             </div>
             
-            {upcomingLoading ? (
+            {upcomingError ? (
+              <div className="text-center py-8" data-testid="error-state-upcoming">
+                <div className="mx-auto h-12 w-12 text-muted-foreground mb-4 flex items-center justify-center">
+                  <Calendar className="h-8 w-8" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Failed to load appointments</h3>
+                <p className="text-muted-foreground mb-4">There was an error loading your upcoming appointments. Please try again.</p>
+                <Button onClick={() => refetchUpcoming()} variant="outline" data-testid="button-retry-upcoming">
+                  Try Again
+                </Button>
+              </div>
+            ) : upcomingLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3].map(i => (
                   <Card key={i}>
@@ -445,58 +528,181 @@ export default function CustomerDashboard() {
               </div>
             ) : upcomingAppointments && upcomingAppointments.length > 0 ? (
               <div className="space-y-4">
-                {upcomingAppointments.map((appointment) => (
-                  <Card key={appointment.id} className="hover:shadow-md transition-shadow" data-testid={`card-appointment-${appointment.id}`}>
-                    <CardContent className="p-6">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-2">
+                {upcomingAppointments.map((appointment) => {
+                  const isExpanded = expandedCards.has(appointment.id);
+                  return (
+                    <Card key={appointment.id} className="hover:shadow-md transition-all duration-200 border-l-4 border-l-blue-500" data-testid={`card-appointment-${appointment.id}`}>
+                      <CardHeader className="pb-4">
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-1">
+                            <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">{appointment.serviceName}</h3>
+                            <p className="text-muted-foreground text-sm font-medium">{appointment.salonName}</p>
+                          </div>
                           <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-lg">{appointment.serviceName}</h3>
                             <Badge className={getStatusColor(appointment.status)} data-testid={`badge-status-${appointment.id}`}>
-                              {appointment.status}
+                              {appointment.status.charAt(0).toUpperCase() + appointment.status.slice(1)}
                             </Badge>
-                          </div>
-                          <p className="text-muted-foreground">{appointment.salonName}</p>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-4 w-4" />
-                              {formatDate(appointment.date)}
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <Clock className="h-4 w-4" />
-                              {appointment.time}
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <User className="h-4 w-4" />
-                              {appointment.staffName}
-                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleCardExpansion(appointment.id)}
+                              data-testid={`button-expand-${appointment.id}`}
+                              aria-label={isExpanded ? 'Collapse appointment details' : 'Expand appointment details'}
+                            >
+                              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            </Button>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-lg">{formatCurrency(appointment.totalPaisa)}</p>
-                          <ChevronRight className="h-5 w-5 text-muted-foreground ml-auto" />
+                      </CardHeader>
+                      
+                      <CardContent className="pt-0 pb-4">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-4 text-sm">
+                            <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                              <Calendar className="h-4 w-4 text-blue-500" />
+                              <span className="font-medium">{formatDate(appointment.date)}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                              <Clock className="h-4 w-4 text-green-500" />
+                              <span className="font-medium">{appointment.time}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-4 text-sm">
+                            <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                              <User className="h-4 w-4 text-purple-500" />
+                              <span>with <span className="font-medium">{appointment.staffName}</span></span>
+                            </div>
+                            {appointment.duration && (
+                              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                                <Clock className="h-4 w-4 text-orange-500" />
+                                <span><span className="font-medium">{appointment.duration}</span> minutes</span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {isExpanded && (
+                            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Amount</span>
+                                <span className="text-lg font-bold text-gray-900 dark:text-gray-100">{formatCurrency(appointment.totalPaisa)}</span>
+                              </div>
+                              {appointment.notes && (
+                                <div className="space-y-1">
+                                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Notes</span>
+                                  <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 p-2 rounded-md">
+                                    {appointment.notes}
+                                  </p>
+                                </div>
+                              )}
+                              <div className="space-y-1">
+                                <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Appointment ID</span>
+                                <p className="text-xs font-mono text-gray-500 dark:text-gray-500">{appointment.id}</p>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                      
+                      <CardFooter className="pt-0 pb-4">
+                        <div className="flex gap-2 w-full flex-wrap">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => handleReschedule(appointment)}
+                            data-testid={`button-reschedule-${appointment.id}`}
+                            className="flex items-center gap-1"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            Reschedule
+                          </Button>
+                          
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                data-testid={`button-cancel-${appointment.id}`}
+                                className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300"
+                              >
+                                <X className="h-3 w-3" />
+                                Cancel
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Cancel Appointment</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to cancel your appointment for <strong>{appointment.serviceName}</strong> at <strong>{appointment.salonName}</strong> on {formatDate(appointment.date)} at {appointment.time}?
+                                  <br /><br />
+                                  <span className="text-sm text-muted-foreground">
+                                    Please note that cancellation policies may apply. Contact the salon if you need to reschedule instead.
+                                  </span>
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Keep Appointment</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleCancelAppointment(appointment.id)}
+                                  className="bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700"
+                                  disabled={cancelAppointmentMutation.isPending}
+                                >
+                                  {cancelAppointmentMutation.isPending ? 'Cancelling...' : 'Cancel Appointment'}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                          
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => handleGetDirections(appointment.salonName)}
+                            data-testid={`button-directions-${appointment.id}`}
+                            className="flex items-center gap-1"
+                          >
+                            <MapPin className="h-3 w-3" />
+                            Directions
+                          </Button>
+                          
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={handleContactSalon}
+                            data-testid={`button-contact-${appointment.id}`}
+                            className="flex items-center gap-1"
+                          >
+                            <Phone className="h-3 w-3" />
+                            Contact
+                          </Button>
+                          
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => toggleCardExpansion(appointment.id)}
+                            data-testid={`button-details-${appointment.id}`}
+                            className="flex items-center gap-1 ml-auto"
+                          >
+                            <Eye className="h-3 w-3" />
+                            {isExpanded ? 'Hide Details' : 'View Details'}
+                          </Button>
+                        </div>
+                      </CardFooter>
+                    </Card>
+                  );
+                })}
               </div>
             ) : (
-              <Card className="text-center py-12" data-testid="empty-upcoming">
-                <CardContent>
-                  <Calendar className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No upcoming appointments</h3>
-                  <p className="text-muted-foreground mb-6">
-                    Your upcoming appointments will appear here once you book them.
-                  </p>
-                  <Link href="/">
-                    <Button data-testid="button-book-first-appointment">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Book Your First Appointment
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
+              <div className="text-center py-8" data-testid="empty-state-upcoming">
+                <Calendar className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No upcoming appointments</h3>
+                <p className="text-muted-foreground mb-4">Book your next beauty appointment today</p>
+                <Link href="/">
+                  <Button data-testid="button-book-now-empty">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Book Now
+                  </Button>
+                </Link>
+              </div>
             )}
           </TabsContent>
 
@@ -724,6 +930,20 @@ export default function CustomerDashboard() {
           </TabsContent>
         </Tabs>
       </div>
+      
+      {/* Reschedule Modal */}
+      {rescheduleAppointment && (
+        <BookingModal
+          isOpen={rescheduleModalOpen}
+          onClose={() => {
+            setRescheduleModalOpen(false);
+            setRescheduleAppointment(null);
+          }}
+          salonName={rescheduleAppointment.salonName}
+          salonId={rescheduleAppointment.salonId}
+          staffId={rescheduleAppointment.staffId}
+        />
+      )}
     </div>
   );
 }
