@@ -37,6 +37,7 @@ export default function SalonProfile() {
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [selectedSalon, setSelectedSalon] = useState("");
   const [selectedSalonId, setSelectedSalonId] = useState("");
+  const [selectedStaffId, setSelectedStaffId] = useState("");
   const { addRecentlyViewed } = useRecentlyViewed();
 
   // Fetch salon details
@@ -70,16 +71,16 @@ export default function SalonProfile() {
   // Automatically track salon visit for recently viewed
   useEffect(() => {
     if (salon && !isSalonLoading) {
-      console.log('Tracking salon visit for recently viewed:', salon.name);
+      console.log('Tracking salon visit for recently viewed:', (salon as any)?.name);
       addRecentlyViewed({
-        id: salon.id,
-        name: salon.name,
-        rating: salon.rating || 4.5,
-        reviewCount: salon.reviewCount || 0,
-        location: salon.location || '',
-        category: salon.category || 'Beauty & Wellness',
-        priceRange: salon.priceRange || '$$',
-        image: salon.image || ''
+        id: (salon as any)?.id,
+        name: (salon as any)?.name,
+        rating: (salon as any)?.rating || 4.5,
+        reviewCount: (salon as any)?.reviewCount || 0,
+        location: (salon as any)?.location || '',
+        category: (salon as any)?.category || 'Beauty & Wellness',
+        priceRange: (salon as any)?.priceRange || '$$',
+        image: (salon as any)?.image || ''
       });
     }
   }, [salon, isSalonLoading, addRecentlyViewed]);
@@ -173,7 +174,7 @@ export default function SalonProfile() {
         {allImages.length > 0 ? (
           <img 
             src={allImages[currentImageIndex]}
-            alt={`${salon?.name} - Image ${currentImageIndex + 1}`}
+            alt={`${(salon as any)?.name} - Image ${currentImageIndex + 1}`}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -253,21 +254,21 @@ export default function SalonProfile() {
               <div className="flex items-center gap-1 bg-white/20 backdrop-blur-sm rounded-full px-3 py-1">
                 <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                 <span className="font-semibold" data-testid="text-salon-rating">
-                  {salon?.rating || 'New'}
+                  {(salon as any)?.rating || 'New'}
                 </span>
-                <span className="text-white/80">({salon?.reviewCount || 0} reviews)</span>
+                <span className="text-white/80">({(salon as any)?.reviewCount || 0} reviews)</span>
               </div>
               <Badge variant="secondary" className="bg-white/20 backdrop-blur-sm text-white border-white/30">
-                {salon?.category || 'Beauty & Wellness'}
+                {(salon as any)?.category || 'Beauty & Wellness'}
               </Badge>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold mb-2" data-testid="text-salon-name">
-              {salon?.name}
+              {(salon as any)?.name}
             </h1>
             <div className="flex items-center gap-2 text-white/90">
               <MapPin className="h-4 w-4" />
               <span className="text-sm lg:text-base" data-testid="text-salon-location">
-                {salon?.address}, {salon?.city}, {salon?.state} {salon?.zipCode}
+                {(salon as any)?.address}, {(salon as any)?.city}, {(salon as any)?.state} {(salon as any)?.zipCode}
               </span>
             </div>
           </div>
@@ -342,7 +343,7 @@ export default function SalonProfile() {
                                       size="sm" 
                                       data-testid={`button-book-service-${service.id}`}
                                       onClick={() => {
-                                        setSelectedSalon(salon?.name || '');
+                                        setSelectedSalon((salon as any)?.name || '');
                                         setSelectedSalonId(salonId || '');
                                         setIsBookingOpen(true);
                                       }}
@@ -399,11 +400,11 @@ export default function SalonProfile() {
                           ];
                           
                           return (
-                            <div key={member.id} className="text-center" data-testid={`staff-${member.id}`}>
+                            <div key={(member as any)?.id} className="text-center" data-testid={`staff-${(member as any)?.id}`}>
                               <div className="relative mx-auto mb-4">
                                 <img
                                   src={profileImages[index % profileImages.length]}
-                                  alt={member.name}
+                                  alt={(member as any)?.name}
                                   className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg"
                                 />
                                 <div className="absolute -bottom-2 -right-2 bg-green-500 h-6 w-6 rounded-full border-2 border-white flex items-center justify-center">
@@ -411,14 +412,25 @@ export default function SalonProfile() {
                                 </div>
                               </div>
                               <h4 className="font-semibold text-lg mb-1" data-testid={`text-staff-name-${member.id}`}>
-                                {member.name}
+                                {(member as any)?.name}
                               </h4>
-                              <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${member.id}`}>
-                                {member.role || 'Senior Specialist'}
+                              <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${(member as any)?.id}`}>
+                                {(member as any)?.role || 'Senior Specialist'}
                               </p>
-                              <Button variant="outline" size="sm" className="text-xs">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="text-xs"
+                                data-testid={`button-book-staff-${(member as any)?.id}`}
+                                onClick={() => {
+                                  setSelectedSalon((salon as any)?.name || '');
+                                  setSelectedSalonId(salonId || '');
+                                  setSelectedStaffId((member as any)?.id);
+                                  setIsBookingOpen(true);
+                                }}
+                              >
                                 <Calendar className="h-3 w-3 mr-1" />
-                                Book with {member.name?.split(' ')[0] || 'Specialist'}
+                                Book with {(member as any)?.name?.split(' ')[0] || 'Specialist'}
                               </Button>
                             </div>
                           );
@@ -460,11 +472,11 @@ export default function SalonProfile() {
                 <div className="space-y-6">
                   <Card>
                     <CardHeader>
-                      <CardTitle>About {salon.name}</CardTitle>
+                      <CardTitle>About {(salon as any)?.name}</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <p className="text-muted-foreground mb-6" data-testid="text-salon-description">
-                        {salon?.description || `Welcome to ${salon?.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment.`}
+                        {(salon as any)?.description || `Welcome to ${(salon as any)?.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment.`}
                       </p>
                       
                       <div className="mb-6">
@@ -480,8 +492,8 @@ export default function SalonProfile() {
                       </div>
                       
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline">{salon?.category || 'Beauty & Wellness'}</Badge>
-                        <Badge variant="outline">{salon?.priceRange || 'Mid-range'}</Badge>
+                        <Badge variant="outline">{(salon as any)?.category || 'Beauty & Wellness'}</Badge>
+                        <Badge variant="outline">{(salon as any)?.priceRange || 'Mid-range'}</Badge>
                         <Badge variant="outline">Professional</Badge>
                         <Badge variant="outline">Certified</Badge>
                       </div>
@@ -505,7 +517,7 @@ export default function SalonProfile() {
                   size="lg" 
                   data-testid="button-book-appointment"
                   onClick={() => {
-                    setSelectedSalon(salon?.name || '');
+                    setSelectedSalon((salon as any)?.name || '');
                     setSelectedSalonId(salonId || '');
                     setIsBookingOpen(true);
                   }}
@@ -521,7 +533,7 @@ export default function SalonProfile() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span>Monday - Friday</span>
-                      <span className="font-medium">{salon?.openTime || '9:00 AM'} - {salon?.closeTime || '9:00 PM'}</span>
+                      <span className="font-medium">{(salon as any)?.openTime || '9:00 AM'} - {(salon as any)?.closeTime || '9:00 PM'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Saturday</span>
@@ -540,12 +552,12 @@ export default function SalonProfile() {
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{salon?.phone || '+91 XXXXX XXXXX'}</span>
+                    <span>{(salon as any)?.phone || '+91 XXXXX XXXXX'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
                     <span className="text-muted-foreground">
-                      {salon?.city}, {salon?.state}
+                      {(salon as any)?.city}, {(salon as any)?.state}
                     </span>
                   </div>
                 </div>
@@ -561,8 +573,8 @@ export default function SalonProfile() {
                 <div>
                   <h4 className="font-semibold mb-2">Address</h4>
                   <p className="text-muted-foreground text-sm" data-testid="text-contact-address">
-                    {salon?.address}<br />
-                    {salon?.city}, {salon?.state} {salon?.zipCode}
+                    {(salon as any)?.address}<br />
+                    {(salon as any)?.city}, {(salon as any)?.state} {(salon as any)?.zipCode}
                   </p>
                 </div>
                 
@@ -577,7 +589,7 @@ export default function SalonProfile() {
                       allowFullScreen
                       referrerPolicy="no-referrer-when-downgrade"
                       src={`https://maps.google.com/maps?q=${encodeURIComponent(
-                        `${salon?.address}, ${salon?.city}, ${salon?.state} ${salon?.zipCode}`
+                        `${(salon as any)?.address}, ${(salon as any)?.city}, ${(salon as any)?.state} ${(salon as any)?.zipCode}`
                       )}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
                       className="w-full h-full"
                       title="Salon Location"
@@ -603,9 +615,13 @@ export default function SalonProfile() {
       {/* Booking Modal */}
       <BookingModal
         isOpen={isBookingOpen}
-        onClose={() => setIsBookingOpen(false)}
+        onClose={() => {
+          setIsBookingOpen(false);
+          setSelectedStaffId(""); // Clear selected staff when modal closes
+        }}
         salonName={selectedSalon}
         salonId={selectedSalonId}
+        staffId={selectedStaffId}
       />
     </div>
   );

@@ -14,17 +14,21 @@ interface BookingModalProps {
   onClose: () => void;
   salonName: string;
   salonId?: string;
+  staffId?: string; // NEW: Add this prop for staff pre-selection
 }
 
-export default function BookingModal({ isOpen, onClose, salonName, salonId }: BookingModalProps) {
+export default function BookingModal({ isOpen, onClose, salonName, salonId, staffId }: BookingModalProps) {
   const [selectedService, setSelectedService] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
+  const [selectedStaff, setSelectedStaff] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [services, setServices] = useState<Service[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
   const [isLoadingServices, setIsLoadingServices] = useState(true);
+  const [isLoadingStaff, setIsLoadingStaff] = useState(true);
   const [isGuestMode, setIsGuestMode] = useState(true); // Default to guest mode
   const [guestSessionId, setGuestSessionId] = useState<string | null>(null);
 
@@ -105,11 +109,21 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId }: Bo
     setSelectedService("");
     setSelectedDate("");
     setSelectedTime("");
+    setSelectedStaff("");
     setCustomerName("");
     setCustomerEmail("");
     setCustomerPhone("");
     setGuestSessionId(null);
   }, [salonId]);
+
+  // Handle staff pre-selection when staffId prop changes
+  useEffect(() => {
+    if (staffId && staff.length > 0) {
+      setSelectedStaff(staffId);
+    } else if (!staffId) {
+      setSelectedStaff("");
+    }
+  }, [staffId, staff]);
 
   // Fetch services from backend for the specific salon
   useEffect(() => {
@@ -147,14 +161,42 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId }: Bo
       }
     };
 
+    const fetchStaff = async () => {
+      if (!salonId) {
+        setIsLoadingStaff(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/staff?salonId=${salonId}&t=${Date.now()}`, {
+          cache: 'no-cache'
+        });
+        if (response.ok) {
+          const fetchedStaff = await response.json();
+          setStaff(fetchedStaff || []);
+        } else {
+          console.warn('Failed to fetch staff');
+          setStaff([]);
+        }
+      } catch (error) {
+        console.error('Error fetching staff:', error);
+        setStaff([]);
+      } finally {
+        setIsLoadingStaff(false);
+      }
+    };
+
     if (isOpen) {
       // Clear ALL form state when opening modal to prevent cross-salon contamination
       setSelectedService("");
       setSelectedDate("");
       setSelectedTime("");
+      setSelectedStaff("");
       setIsLoadingServices(true);
-      console.log('BookingModal opened - salonId:', salonId, 'salonName:', salonName);
+      setIsLoadingStaff(true);
+      console.log('BookingModal opened - salonId:', salonId, 'salonName:', salonName, 'staffId:', staffId);
       fetchServices();
+      fetchStaff();
     }
   }, [isOpen, salonId, toast]);
 
@@ -235,6 +277,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId }: Bo
             date: selectedDate,
             time: selectedTime,
             customer: { name: customerName, email: customerEmail, phone: customerPhone },
+            ...(selectedStaff && { staffId: selectedStaff }),
             ...(isGuestMode && currentGuestSessionId && { guestSessionId: currentGuestSessionId })
           }
         })
@@ -362,6 +405,46 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId }: Bo
         </DialogHeader>
         
         <div className="space-y-6">
+          {/* Staff Selection */}
+          {staff.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="staff">Select Staff Member (Optional)</Label>
+              <Select value={selectedStaff} onValueChange={setSelectedStaff}>
+                <SelectTrigger data-testid="select-staff">
+                  <SelectValue placeholder={staffId ? "Staff pre-selected" : "Choose a staff member (optional)"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {isLoadingStaff ? (
+                    <SelectItem value="loading" disabled>
+                      Loading staff...
+                    </SelectItem>
+                  ) : (
+                    <>
+                      <SelectItem value="">
+                        Any available staff member
+                      </SelectItem>
+                      {staff.map((member: any) => (
+                        <SelectItem key={member.id} value={member.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{member.name}</span>
+                            <span className="text-muted-foreground text-sm">
+                              - {member.role || 'Specialist'}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+              {staffId && (
+                <p className="text-sm text-muted-foreground">
+                  ✨ A specific staff member was selected for your booking
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Service Selection */}
           <div className="space-y-2">
             <Label htmlFor="service">Select Service</Label>
