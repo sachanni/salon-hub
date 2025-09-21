@@ -56,13 +56,6 @@ const SETUP_SECTIONS = [
     endpoint: '/api/salons/{salonId}/staff'
   },
   {
-    id: 'resources',
-    title: 'Resources Setup',
-    icon: Settings,
-    requiredFields: [],
-    endpoint: '/api/salons/{salonId}/resources'
-  },
-  {
     id: 'booking_settings',
     title: 'Booking Settings',
     icon: Settings,
@@ -96,6 +89,13 @@ export default function ReviewPublishStep({
     completedSections: 0,
     totalSections: SETUP_SECTIONS.length,
     issues: [] as string[]
+  });
+
+  // Use dashboard completion data instead of custom logic
+  const { data: dashboardCompletion } = useQuery({
+    queryKey: ['/api/salons', salonId, 'dashboard-completion'],
+    enabled: !!salonId,
+    staleTime: 30000
   });
   const [isPublishing, setIsPublishing] = useState(false);
   const { toast } = useToast();
@@ -246,7 +246,9 @@ export default function ReviewPublishStep({
     setIsPublishing(false);
   };
 
-  const completionPercentage = (publishStatus.completedSections / publishStatus.totalSections) * 100;
+  // Use dashboard completion data if available, otherwise fallback to old logic
+  const completionPercentage = dashboardCompletion?.overallProgress ?? 
+    ((publishStatus.completedSections / publishStatus.totalSections) * 100);
 
   return (
     <div className="space-y-6">
@@ -280,7 +282,7 @@ export default function ReviewPublishStep({
               <Progress value={completionPercentage} className="h-2" />
             </div>
 
-            {publishStatus.canPublish ? (
+            {completionPercentage >= 100 ? (
               <div className="flex items-center gap-2 text-green-600">
                 <CheckCircle className="h-5 w-5" />
                 <span className="font-medium">Ready to publish!</span>
@@ -289,7 +291,7 @@ export default function ReviewPublishStep({
               <div className="flex items-center gap-2 text-amber-600">
                 <AlertCircle className="h-5 w-5" />
                 <span className="font-medium">
-                  Complete {6 - publishStatus.completedSections} more sections to publish
+                  Complete {Math.round(100 - completionPercentage)}% more to publish
                 </span>
               </div>
             )}
@@ -305,7 +307,36 @@ export default function ReviewPublishStep({
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {SETUP_SECTIONS.map((section) => {
-              const isCompleted = publishStatus.completedSections >= SETUP_SECTIONS.indexOf(section) + 1;
+              // Use dashboard completion data instead of old sequential logic
+              let isCompleted = false;
+              if (dashboardCompletion) {
+                switch (section.id) {
+                  case 'business_info':
+                  case 'location_contact':
+                    isCompleted = dashboardCompletion.profile?.isComplete ?? false;
+                    break;
+                  case 'services':
+                    isCompleted = dashboardCompletion.services?.isComplete ?? false;
+                    break;
+                  case 'staff':
+                    isCompleted = dashboardCompletion.staff?.isComplete ?? false;
+                    break;
+                  case 'booking_settings':
+                    isCompleted = dashboardCompletion.settings?.isComplete ?? false;
+                    break;
+                  case 'media':
+                    isCompleted = dashboardCompletion.media?.isComplete ?? false;
+                    break;
+                  case 'payment_setup':
+                    isCompleted = true; // Auto-complete payment setup for now
+                    break;
+                  default:
+                    isCompleted = false;
+                }
+              } else {
+                // Fallback to old logic if dashboard data not available
+                isCompleted = publishStatus.completedSections >= SETUP_SECTIONS.indexOf(section) + 1;
+              }
               
               return (
                 <div

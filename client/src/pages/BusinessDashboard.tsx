@@ -390,7 +390,7 @@ export default function BusinessDashboard() {
             >
               <div className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
-                Settings
+                Booking Settings
                 {hasSettings && <CheckCircle className="h-3 w-3 text-green-500" />}
                 {!hasSettings && <span className="text-xs text-red-500">*</span>}
               </div>
