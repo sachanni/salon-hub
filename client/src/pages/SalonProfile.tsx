@@ -57,51 +57,21 @@ export default function SalonProfile() {
     enabled: !!salonId,
   });
 
-  // Prepare image gallery
-  const allImages = [
-    ...(mediaAssets?.map(asset => asset.fileUrl) || []),
-    // Add some default professional salon images if no media assets
-    'https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80',
-    'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80',
-    'https://images.unsplash.com/photo-1595475884552-c2b8a8b3d39a?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80',
-    'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?ixlib=rb-4.0.3&auto=format&fit=crop&w=2340&q=80'
-  ].filter((url, index, array) => array.indexOf(url) === index); // Remove duplicates
+  // Your uploaded images only - no placeholder images
+  const allImages = (mediaAssets && Array.isArray(mediaAssets)) ? 
+    mediaAssets.map((asset: any) => asset.fileUrl).filter(Boolean) : [];
 
-  // Service categories
-  const serviceCategories = services ? services.reduce((acc, service) => {
-    const category = service.category || 'General Services';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(service);
-    return acc;
-  }, {} as Record<string, typeof services>) : {};
+  // Service categories from actual data
+  const serviceCategories = (services && Array.isArray(services)) ? 
+    services.reduce((acc: Record<string, any[]>, service: any) => {
+      const category = service.category || 'General Services';
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(service);
+      return acc;
+    }, {}) : {};
 
-  // Mock reviews data (would come from API in real app)
-  const reviews = [
-    {
-      id: 1,
-      author: "Sarah M.",
-      rating: 5,
-      text: "Amazing experience! The staff was professional and the results exceeded my expectations. Highly recommend!",
-      date: "2 weeks ago",
-      verified: true
-    },
-    {
-      id: 2,
-      author: "Mike R.",
-      rating: 5,
-      text: "Clean facility, great service, and friendly staff. Will definitely be coming back!",
-      date: "1 month ago",
-      verified: true
-    },
-    {
-      id: 3,
-      author: "Lisa K.",
-      rating: 4,
-      text: "Very professional service. The therapist was skilled and knowledgeable. Beautiful salon!",
-      date: "1 month ago",
-      verified: true
-    }
-  ];
+  // No mock reviews - production ready
+  const reviews: any[] = []; // Will be populated when review API is implemented
 
   // Amenities
   const amenities = [
@@ -177,11 +147,20 @@ export default function SalonProfile() {
 
       {/* Image Gallery */}
       <div className="relative h-96 lg:h-[500px] overflow-hidden bg-gray-100">
-        <img 
-          src={allImages[currentImageIndex]}
-          alt={`${salon.name} - Image ${currentImageIndex + 1}`}
-          className="w-full h-full object-cover"
-        />
+        {allImages.length > 0 ? (
+          <img 
+            src={allImages[currentImageIndex]}
+            alt={`${salon?.name} - Image ${currentImageIndex + 1}`}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gray-100">
+            <div className="text-center text-gray-500">
+              <Camera className="h-12 w-12 mx-auto mb-2" />
+              <p>No images uploaded yet</p>
+            </div>
+          </div>
+        )}
         
         {/* Gallery Navigation */}
         {allImages.length > 1 && (
@@ -220,21 +199,21 @@ export default function SalonProfile() {
               <div className="flex items-center gap-1 bg-white/20 backdrop-blur-sm rounded-full px-3 py-1">
                 <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                 <span className="font-semibold" data-testid="text-salon-rating">
-                  {salon.rating || '4.7'}
+                  {salon?.rating || 'New'}
                 </span>
-                <span className="text-white/80">({salon.reviewCount || reviews.length} reviews)</span>
+                <span className="text-white/80">({salon?.reviewCount || 0} reviews)</span>
               </div>
               <Badge variant="secondary" className="bg-white/20 backdrop-blur-sm text-white border-white/30">
-                {salon.category || 'Beauty & Wellness'}
+                {salon?.category || 'Beauty & Wellness'}
               </Badge>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold mb-2" data-testid="text-salon-name">
-              {salon.name}
+              {salon?.name}
             </h1>
             <div className="flex items-center gap-2 text-white/90">
               <MapPin className="h-4 w-4" />
               <span className="text-sm lg:text-base" data-testid="text-salon-location">
-                {salon.address}, {salon.city}, {salon.state} {salon.zipCode}
+                {salon?.address}, {salon?.city}, {salon?.state} {salon?.zipCode}
               </span>
             </div>
           </div>
@@ -279,7 +258,7 @@ export default function SalonProfile() {
                           <div key={category}>
                             <h3 className="text-lg font-semibold mb-4 text-primary">{category}</h3>
                             <div className="space-y-4">
-                              {categoryServices.map((service) => (
+                              {categoryServices.map((service: any) => (
                                 <div key={service.id} className="flex justify-between items-start p-4 rounded-lg border hover:shadow-sm transition-shadow" data-testid={`service-${service.id}`}>
                                   <div className="flex-1">
                                     <h4 className="font-semibold text-lg mb-1" data-testid={`text-service-name-${service.id}`}>
@@ -346,9 +325,9 @@ export default function SalonProfile() {
                           </div>
                         ))}
                       </div>
-                    ) : staff && staff.length > 0 ? (
+                    ) : staff && Array.isArray(staff) && staff.length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {staff.map((member, index) => {
+                        {staff.map((member: any, index: number) => {
                           // Professional team member photos
                           const profileImages = [
                             'https://images.unsplash.com/photo-1594824720108-82cccd6946e6?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
@@ -375,14 +354,9 @@ export default function SalonProfile() {
                               <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${member.id}`}>
                                 {member.role || 'Senior Specialist'}
                               </p>
-                              <div className="flex items-center justify-center gap-1 text-sm mb-3">
-                                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                                <span className="font-medium">4.9</span>
-                                <span className="text-muted-foreground">(156 reviews)</span>
-                              </div>
                               <Button variant="outline" size="sm" className="text-xs">
                                 <Calendar className="h-3 w-3 mr-1" />
-                                Book with {member.name.split(' ')[0]}
+                                Book with {member.name?.split(' ')[0] || 'Specialist'}
                               </Button>
                             </div>
                           );
@@ -406,58 +380,14 @@ export default function SalonProfile() {
                       <Star className="h-5 w-5" />
                       Customer Reviews
                     </CardTitle>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
-                        <span className="text-2xl font-bold">4.7</span>
-                        <span className="text-muted-foreground">({reviews.length} reviews)</span>
-                      </div>
-                    </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-6">
-                      {reviews.map((review) => (
-                        <div key={review.id} className="border-b pb-6 last:border-b-0" data-testid={`review-${review.id}`}>
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
-                                <span className="font-semibold text-primary">
-                                  {review.author.charAt(0)}
-                                </span>
-                              </div>
-                              <div>
-                                <p className="font-semibold" data-testid={`text-review-author-${review.id}`}>
-                                  {review.author}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <div className="flex items-center">
-                                    {[...Array(5)].map((_, i) => (
-                                      <Star
-                                        key={i}
-                                        className={`h-4 w-4 ${
-                                          i < review.rating
-                                            ? 'fill-yellow-400 text-yellow-400'
-                                            : 'text-gray-300'
-                                        }`}
-                                      />
-                                    ))}
-                                  </div>
-                                  <span className="text-sm text-muted-foreground">{review.date}</span>
-                                  {review.verified && (
-                                    <Badge variant="secondary" className="text-xs">
-                                      <Shield className="h-3 w-3 mr-1" />
-                                      Verified
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          <p className="text-muted-foreground" data-testid={`text-review-content-${review.id}`}>
-                            {review.text}
-                          </p>
-                        </div>
-                      ))}
+                    <div className="text-center py-12">
+                      <Star className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">No reviews yet</h3>
+                      <p className="text-muted-foreground">
+                        Be the first to review this salon after booking an appointment.
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
@@ -472,7 +402,7 @@ export default function SalonProfile() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-muted-foreground mb-6" data-testid="text-salon-description">
-                        {salon.description || `Welcome to ${salon.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment. We use only the finest products and latest techniques to ensure you leave feeling refreshed and confident.`}
+                        {salon?.description || `Welcome to ${salon?.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment.`}
                       </p>
                       
                       <div className="mb-6">
@@ -488,8 +418,8 @@ export default function SalonProfile() {
                       </div>
                       
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline">{salon.category || 'Beauty & Wellness'}</Badge>
-                        <Badge variant="outline">{salon.priceRange || 'Mid-range'}</Badge>
+                        <Badge variant="outline">{salon?.category || 'Beauty & Wellness'}</Badge>
+                        <Badge variant="outline">{salon?.priceRange || 'Mid-range'}</Badge>
                         <Badge variant="outline">Professional</Badge>
                         <Badge variant="outline">Certified</Badge>
                       </div>
@@ -520,7 +450,7 @@ export default function SalonProfile() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span>Monday - Friday</span>
-                      <span className="font-medium">{salon.openTime || '9:00 AM'} - {salon.closeTime || '9:00 PM'}</span>
+                      <span className="font-medium">{salon?.openTime || '9:00 AM'} - {salon?.closeTime || '9:00 PM'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Saturday</span>
@@ -539,12 +469,12 @@ export default function SalonProfile() {
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{salon.phone || '+91 XXXXX XXXXX'}</span>
+                    <span>{salon?.phone || '+91 XXXXX XXXXX'}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
                     <span className="text-muted-foreground">
-                      {salon.city}, {salon.state}
+                      {salon?.city}, {salon?.state}
                     </span>
                   </div>
                 </div>
@@ -560,8 +490,8 @@ export default function SalonProfile() {
                 <div>
                   <h4 className="font-semibold mb-2">Address</h4>
                   <p className="text-muted-foreground text-sm" data-testid="text-contact-address">
-                    {salon.address}<br />
-                    {salon.city}, {salon.state} {salon.zipCode}
+                    {salon?.address}<br />
+                    {salon?.city}, {salon?.state} {salon?.zipCode}
                   </p>
                 </div>
                 
@@ -576,7 +506,7 @@ export default function SalonProfile() {
                       allowFullScreen
                       referrerPolicy="no-referrer-when-downgrade"
                       src={`https://maps.google.com/maps?q=${encodeURIComponent(
-                        `${salon.address}, ${salon.city}, ${salon.state} ${salon.zipCode}`
+                        `${salon?.address}, ${salon?.city}, ${salon?.state} ${salon?.zipCode}`
                       )}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
                       className="w-full h-full"
                       title="Salon Location"
