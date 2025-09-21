@@ -46,7 +46,7 @@ export default function SearchBar() {
   const [minRating, setMinRating] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [showMoreCategories, setShowMoreCategories] = useState(false);
-  const [sortBy, setSortBy] = useState("");
+  const [sortBy, setSortBy] = useState("best-match");
   const [availableToday, setAvailableToday] = useState(false);
   const [specificServices, setSpecificServices] = useState<string[]>([]);
   const [allServices, setAllServices] = useState<any[]>([]);
@@ -113,7 +113,7 @@ export default function SearchBar() {
         searchParams.append('minRating', minRating.toString());
       }
 
-      if (sortBy) {
+      if (sortBy && sortBy !== "best-match") {
         searchParams.append('sortBy', sortBy);
       }
 
@@ -151,12 +151,12 @@ export default function SearchBar() {
     setSelectedCategories([]);
     setPriceRange([0, 5000]);
     setMinRating(0);
-    setSortBy("");
+    setSortBy("best-match");
     setAvailableToday(false);
     setSpecificServices([]);
   };
 
-  const hasActiveFilters = selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || sortBy || availableToday || specificServices.length > 0;
+  const hasActiveFilters = selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || (sortBy && sortBy !== "best-match") || availableToday || specificServices.length > 0;
 
   return (
     <div className="bg-white dark:bg-card p-6 rounded-xl shadow-lg max-w-6xl mx-auto space-y-6">
@@ -345,7 +345,7 @@ export default function SearchBar() {
                     {selectedCategories.length + 
                      (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
                      (minRating > 0 ? 1 : 0) + 
-                     (sortBy ? 1 : 0) + 
+                     (sortBy && sortBy !== "best-match" ? 1 : 0) + 
                      (availableToday ? 1 : 0) + 
                      specificServices.length}
                   </Badge>
@@ -428,7 +428,7 @@ export default function SearchBar() {
                       <SelectValue placeholder="Choose sorting..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Best match</SelectItem>
+                      <SelectItem value="best-match">Best match</SelectItem>
                       <SelectItem value="price-low">Price: Low to High</SelectItem>
                       <SelectItem value="price-high">Price: High to Low</SelectItem>
                       <SelectItem value="rating">Highest Rated</SelectItem>
@@ -593,7 +593,7 @@ export default function SearchBar() {
               </Button>
             </Badge>
           )}
-          {sortBy && (
+          {sortBy && sortBy !== "best-match" && (
             <Badge variant="secondary" className="gap-1" data-testid="badge-active-sort">
               <ArrowUpDown className="h-3 w-3" />
               Sort: {sortBy === 'price-low' ? 'Price Low' : 
@@ -605,7 +605,7 @@ export default function SearchBar() {
                 variant="ghost"
                 size="sm"
                 className="h-4 w-4 p-0 hover:bg-transparent"
-                onClick={() => setSortBy("")}
+                onClick={() => setSortBy("best-match")}
                 data-testid="button-remove-sort"
                 aria-label="Remove sort filter"
               >
