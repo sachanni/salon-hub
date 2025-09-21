@@ -58,7 +58,11 @@ const DAYS_OF_WEEK = [
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 ];
 
-export default function CalendarManagement() {
+interface CalendarManagementProps {
+  salonId?: string; // Optional prop for embedding in dashboard
+}
+
+export default function CalendarManagement({ salonId: propSalonId }: CalendarManagementProps = {}) {
   const { user, isAuthenticated, isBusinessUser, token, userSalons } = useAuth();
   const { toast } = useToast();
   const [isStaffDialogOpen, setIsStaffDialogOpen] = useState(false);
@@ -66,8 +70,8 @@ export default function CalendarManagement() {
   const [editingPattern, setEditingPattern] = useState<AvailabilityPattern | null>(null);
   const [selectedSalonId, setSelectedSalonId] = useState<string>('');
 
-  // Get the first salon ID the user has access to
-  const salonId = selectedSalonId || userSalons[0]?.id || '';
+  // Get salonId from prop (dashboard embedding) or selected salon or first available salon
+  const salonId = propSalonId || selectedSalonId || userSalons[0]?.id || '';
 
   // Check authentication and permissions
   if (!isAuthenticated) {

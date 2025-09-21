@@ -36,6 +36,7 @@ import ResourcesStep from "@/components/business-setup/ResourcesStep";
 import BookingSettingsStep from "@/components/business-setup/BookingSettingsStep";
 import PaymentSetupStep from "@/components/business-setup/PaymentSetupStep";
 import MediaStep from "@/components/business-setup/MediaStep";
+import CalendarManagement from "@/pages/CalendarManagement";
 
 interface DashboardStats {
   totalBookings: number;
@@ -49,23 +50,38 @@ export default function BusinessDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [salonId, setSalonId] = useState<string | null>(null);
 
-  // Fetch user's salon information
-  const { data: organizations, isLoading: orgLoading } = useQuery({
+  // Fetch user's salon information from auth user endpoint
+  const { data: authUser, isLoading: authLoading } = useQuery({
     queryKey: ['/api/auth/user'],
     enabled: isAuthenticated && !!user,
   });
 
-  // Get salon ID from organizations
+  // Fallback: Fetch salons directly if orgMemberships doesn't have salon data
+  const { data: salons, isLoading: salonsLoading } = useQuery({
+    queryKey: ['/api/salons'],
+    enabled: isAuthenticated && !salonId,
+  });
+
+  // Get salon ID from auth user or fallback to first available salon
   useEffect(() => {
-    if (organizations?.orgMemberships?.length > 0) {
-      // For now, use the first salon - could be enhanced for multi-salon support
-      setSalonId(organizations.orgMemberships[0].salon?.id || null);
+    if (authUser?.orgMemberships?.length > 0) {
+      // Try to get salon from org memberships first
+      const orgSalonId = authUser.orgMemberships[0].salon?.id;
+      if (orgSalonId) {
+        setSalonId(orgSalonId);
+        return;
+      }
     }
-  }, [organizations]);
+    
+    // Fallback: Use first salon if available
+    if (salons?.length > 0) {
+      setSalonId(salons[0].id);
+    }
+  }, [authUser, salons]);
 
   // Fetch salon details
   const { data: salon, isLoading: salonLoading } = useQuery({
-    queryKey: ['/api/salons', salonId],
+    queryKey: [`/api/salons/${salonId}`],
     enabled: !!salonId,
   });
 
@@ -109,7 +125,7 @@ export default function BusinessDashboard() {
     );
   }
 
-  if (orgLoading || salonLoading) {
+  if (authLoading || salonsLoading || salonLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -171,9 +187,7 @@ export default function BusinessDashboard() {
                 <Alert className="w-auto border-orange-200 bg-orange-50 dark:bg-orange-950/20">
                   <AlertTriangle className="h-4 w-4 text-orange-600" />
                   <AlertDescription className="text-orange-700 dark:text-orange-300 text-sm">
-                    <Link href="/verify-email" className="underline font-medium">
-                      Verify your email
-                    </Link> for enhanced security
+                    Verify your email for enhanced security (optional)
                   </AlertDescription>
                 </Alert>
               )}
@@ -466,17 +480,13 @@ export default function BusinessDashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <Link href={`/calendar-management/${salonId}`}>
-                    <Button className="w-full" data-testid="button-open-calendar">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      Open Advanced Calendar Manager
-                    </Button>
-                  </Link>
-                  <p className="text-sm text-muted-foreground text-center">
-                    Manage staff availability patterns and regenerate time slots
-                  </p>
-                </div>
+                {salonId ? (
+                  <CalendarManagement salonId={salonId} />
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">Loading calendar management...</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
