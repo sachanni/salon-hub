@@ -1602,6 +1602,7 @@ export const messageTemplatesRelations = relations(messageTemplates, ({ one, man
   campaigns: many(communicationCampaigns),
   history: many(communicationHistory),
   scheduledMessages: many(scheduledMessages),
+  abTestCampaigns: many(abTestCampaigns),
 }));
 
 export const customerSegmentsRelations = relations(customerSegments, ({ one, many }) => ({
@@ -1614,6 +1615,7 @@ export const customerSegmentsRelations = relations(customerSegments, ({ one, man
     references: [users.id],
   }),
   campaigns: many(communicationCampaigns),
+  abTestCampaigns: many(abTestCampaigns),
 }));
 
 export const communicationCampaignsRelations = relations(communicationCampaigns, ({ one, many }) => ({
@@ -1703,6 +1705,221 @@ export const communicationAnalyticsRelations = relations(communicationAnalytics,
   campaign: one(communicationCampaigns, {
     fields: [communicationAnalytics.campaignId],
     references: [communicationCampaigns.id],
+  }),
+}));
+
+// ===== A/B TESTING FOR COMMUNICATION CAMPAIGNS =====
+
+// A/B Test Campaigns - Main A/B test configurations
+export const abTestCampaigns = pgTable("ab_test_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  campaignName: varchar("campaign_name", { length: 200 }).notNull(),
+  description: text("description"),
+  status: varchar("status", { length: 20 }).notNull().default('draft'), // draft, active, completed, paused
+  baseTemplateId: varchar("base_template_id").notNull().references(() => messageTemplates.id, { onDelete: "restrict" }),
+  testType: varchar("test_type", { length: 50 }).notNull(), // subject, content, timing, channel, multivariate
+  targetSegmentId: varchar("target_segment_id").references(() => customerSegments.id, { onDelete: "set null" }),
+  sampleSizePercentage: integer("sample_size_percentage").notNull().default(100), // 1-100
+  testDuration: integer("test_duration").notNull().default(7), // Duration in days
+  confidenceLevel: integer("confidence_level").notNull().default(95), // 90, 95, 99
+  successMetric: varchar("success_metric", { length: 50 }).notNull().default('open_rate'), // open_rate, click_rate, conversion_rate, booking_rate
+  winnerSelectionCriteria: varchar("winner_selection_criteria", { length: 50 }).notNull().default('statistical_significance'), // statistical_significance, business_rules
+  autoOptimization: integer("auto_optimization").notNull().default(0), // Boolean: auto-select winner
+  createdAt: timestamp("created_at").defaultNow(),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdBy: varchar("created_by").references(() => users.id),
+}, (table) => [
+  index("ab_test_campaigns_salon_id_idx").on(table.salonId),
+  index("ab_test_campaigns_status_idx").on(table.status),
+  index("ab_test_campaigns_test_type_idx").on(table.testType),
+  index("ab_test_campaigns_started_at_idx").on(table.startedAt),
+  index("ab_test_campaigns_completed_at_idx").on(table.completedAt),
+  check("sample_size_valid", sql`sample_size_percentage >= 1 AND sample_size_percentage <= 100`),
+  check("test_duration_valid", sql`test_duration >= 1`),
+  check("confidence_level_valid", sql`confidence_level IN (90, 95, 99)`),
+  check("auto_optimization_valid", sql`auto_optimization IN (0,1)`),
+]);
+
+export const insertAbTestCampaignSchema = createInsertSchema(abTestCampaigns).omit({
+  id: true,
+  createdAt: true,
+  startedAt: true,
+  completedAt: true,
+});
+
+export type AbTestCampaign = typeof abTestCampaigns.$inferSelect;
+export type InsertAbTestCampaign = z.infer<typeof insertAbTestCampaignSchema>;
+
+// Test Variants - Individual test variations
+export const testVariants = pgTable("test_variants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  testCampaignId: varchar("test_campaign_id").notNull().references(() => abTestCampaigns.id, { onDelete: "cascade" }),
+  variantName: varchar("variant_name", { length: 100 }).notNull(),
+  isControl: integer("is_control").notNull().default(0), // Boolean: control variant
+  templateOverrides: jsonb("template_overrides").default('{}'), // JSON: subject, content, timing modifications
+  channelOverride: varchar("channel_override", { length: 20 }), // email, sms, both - overrides base template channel
+  priority: integer("priority").notNull().default(0), // For ordering variants
+  audiencePercentage: integer("audience_percentage").notNull(), // Percentage of test audience for this variant
+  status: varchar("status", { length: 20 }).notNull().default('active'), // active, paused, winner, loser
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("test_variants_campaign_id_idx").on(table.testCampaignId),
+  index("test_variants_status_idx").on(table.status),
+  index("test_variants_priority_idx").on(table.priority),
+  unique("test_variants_campaign_name_unique").on(table.testCampaignId, table.variantName),
+  check("is_control_valid", sql`is_control IN (0,1)`),
+  check("audience_percentage_valid", sql`audience_percentage >= 1 AND audience_percentage <= 100`),
+  check("priority_valid", sql`priority >= 0`),
+]);
+
+export const insertTestVariantSchema = createInsertSchema(testVariants).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type TestVariant = typeof testVariants.$inferSelect;
+export type InsertTestVariant = z.infer<typeof insertTestVariantSchema>;
+
+// Test Metrics - Performance tracking per variant
+export const testMetrics = pgTable("test_metrics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  testCampaignId: varchar("test_campaign_id").notNull().references(() => abTestCampaigns.id, { onDelete: "cascade" }),
+  variantId: varchar("variant_id").notNull().references(() => testVariants.id, { onDelete: "cascade" }),
+  metricDate: timestamp("metric_date").notNull(), // Date for daily aggregated metrics
+  participantCount: integer("participant_count").notNull().default(0), // Number of users in this variant
+  sentCount: integer("sent_count").notNull().default(0),
+  deliveredCount: integer("delivered_count").notNull().default(0),
+  openCount: integer("open_count").notNull().default(0),
+  clickCount: integer("click_count").notNull().default(0),
+  replyCount: integer("reply_count").notNull().default(0),
+  bookingCount: integer("booking_count").notNull().default(0),
+  conversionCount: integer("conversion_count").notNull().default(0),
+  bounceCount: integer("bounce_count").notNull().default(0),
+  unsubscribeCount: integer("unsubscribe_count").notNull().default(0),
+  openRate: decimal("open_rate", { precision: 5, scale: 4 }).default('0.0000'), // Calculated: openCount/deliveredCount
+  clickRate: decimal("click_rate", { precision: 5, scale: 4 }).default('0.0000'), // Calculated: clickCount/deliveredCount
+  conversionRate: decimal("conversion_rate", { precision: 5, scale: 4 }).default('0.0000'), // Calculated: conversionCount/deliveredCount
+  bookingRate: decimal("booking_rate", { precision: 5, scale: 4 }).default('0.0000'), // Calculated: bookingCount/deliveredCount
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("test_metrics_campaign_id_idx").on(table.testCampaignId),
+  index("test_metrics_variant_id_idx").on(table.variantId),
+  index("test_metrics_date_idx").on(table.metricDate),
+  unique("test_metrics_variant_date_unique").on(table.variantId, table.metricDate),
+  check("participant_count_valid", sql`participant_count >= 0`),
+  check("sent_count_valid", sql`sent_count >= 0`),
+  check("delivered_count_valid", sql`delivered_count >= 0`),
+  check("open_count_valid", sql`open_count >= 0`),
+  check("click_count_valid", sql`click_count >= 0`),
+  check("reply_count_valid", sql`reply_count >= 0`),
+  check("booking_count_valid", sql`booking_count >= 0`),
+  check("conversion_count_valid", sql`conversion_count >= 0`),
+  check("bounce_count_valid", sql`bounce_count >= 0`),
+  check("unsubscribe_count_valid", sql`unsubscribe_count >= 0`),
+  check("rates_valid", sql`open_rate >= 0 AND click_rate >= 0 AND conversion_rate >= 0 AND booking_rate >= 0`),
+]);
+
+export const insertTestMetricSchema = createInsertSchema(testMetrics).omit({
+  id: true,
+  openRate: true, // Calculated field
+  clickRate: true, // Calculated field
+  conversionRate: true, // Calculated field
+  bookingRate: true, // Calculated field
+  updatedAt: true,
+});
+
+export type TestMetric = typeof testMetrics.$inferSelect;
+export type InsertTestMetric = z.infer<typeof insertTestMetricSchema>;
+
+// Test Results - Final test outcomes and decisions
+export const testResults = pgTable("test_results", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  testCampaignId: varchar("test_campaign_id").notNull().references(() => abTestCampaigns.id, { onDelete: "cascade" }).unique(),
+  winnerVariantId: varchar("winner_variant_id").references(() => testVariants.id, { onDelete: "set null" }),
+  completedAt: timestamp("completed_at").notNull(),
+  statisticalSignificance: decimal("statistical_significance", { precision: 5, scale: 4 }), // P-value or confidence level achieved
+  confidenceLevel: integer("confidence_level"), // Actual confidence level achieved
+  pValue: decimal("p_value", { precision: 10, scale: 9 }), // Statistical p-value
+  performanceImprovement: decimal("performance_improvement", { precision: 5, scale: 4 }), // % improvement of winner over control
+  resultSummary: jsonb("result_summary").default('{}'), // JSON: detailed results, variant performance comparison
+  actionTaken: varchar("action_taken", { length: 50 }).notNull(), // manual_selection, auto_winner, inconclusive
+  implementedAt: timestamp("implemented_at"), // When the winning variant was implemented
+  notes: text("notes"), // Additional notes about the test conclusion
+}, (table) => [
+  index("test_results_campaign_id_idx").on(table.testCampaignId),
+  index("test_results_winner_variant_idx").on(table.winnerVariantId),
+  index("test_results_completed_at_idx").on(table.completedAt),
+  index("test_results_implemented_at_idx").on(table.implementedAt),
+  check("confidence_level_valid", sql`confidence_level IS NULL OR confidence_level IN (90, 95, 99)`),
+  check("statistical_significance_valid", sql`statistical_significance IS NULL OR (statistical_significance >= 0 AND statistical_significance <= 1)`),
+  check("p_value_valid", sql`p_value IS NULL OR (p_value >= 0 AND p_value <= 1)`),
+]);
+
+export const insertTestResultSchema = createInsertSchema(testResults).omit({
+  id: true,
+});
+
+export type TestResult = typeof testResults.$inferSelect;
+export type InsertTestResult = z.infer<typeof insertTestResultSchema>;
+
+// A/B Testing Relations
+export const abTestCampaignsRelations = relations(abTestCampaigns, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [abTestCampaigns.salonId],
+    references: [salons.id],
+  }),
+  baseTemplate: one(messageTemplates, {
+    fields: [abTestCampaigns.baseTemplateId],
+    references: [messageTemplates.id],
+  }),
+  targetSegment: one(customerSegments, {
+    fields: [abTestCampaigns.targetSegmentId],
+    references: [customerSegments.id],
+  }),
+  createdByUser: one(users, {
+    fields: [abTestCampaigns.createdBy],
+    references: [users.id],
+  }),
+  variants: many(testVariants),
+  metrics: many(testMetrics),
+  result: one(testResults, {
+    fields: [abTestCampaigns.id],
+    references: [testResults.testCampaignId],
+  }),
+}));
+
+export const testVariantsRelations = relations(testVariants, ({ one, many }) => ({
+  testCampaign: one(abTestCampaigns, {
+    fields: [testVariants.testCampaignId],
+    references: [abTestCampaigns.id],
+  }),
+  metrics: many(testMetrics),
+  winnerResults: many(testResults),
+}));
+
+export const testMetricsRelations = relations(testMetrics, ({ one }) => ({
+  testCampaign: one(abTestCampaigns, {
+    fields: [testMetrics.testCampaignId],
+    references: [abTestCampaigns.id],
+  }),
+  variant: one(testVariants, {
+    fields: [testMetrics.variantId],
+    references: [testVariants.id],
+  }),
+}));
+
+export const testResultsRelations = relations(testResults, ({ one }) => ({
+  testCampaign: one(abTestCampaigns, {
+    fields: [testResults.testCampaignId],
+    references: [abTestCampaigns.id],
+  }),
+  winnerVariant: one(testVariants, {
+    fields: [testResults.winnerVariantId],
+    references: [testVariants.id],
   }),
 }));
 
