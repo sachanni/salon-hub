@@ -38,6 +38,24 @@ interface Booking {
   notes?: string;
   serviceName?: string;
   staffName?: string;
+  staffId?: string;
+}
+
+interface Staff {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  specialties?: string[];
+  isActive: number;
+}
+
+interface TimeSlot {
+  id: string;
+  time: string;
+  display: string;
+  hour: number;
+  minute: number;
 }
 
 interface BookingCalendarViewProps {
@@ -69,6 +87,32 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
   const [bookingToMove, setBookingToMove] = useState<Booking | null>(null);
   const [moveTargetDate, setMoveTargetDate] = useState<string>('');
   const { toast } = useToast();
+
+  // Helper function to generate time slots
+  const generateTimeSlots = (startHour = 9, endHour = 18, intervalMinutes = 30): TimeSlot[] => {
+    const slots: TimeSlot[] = [];
+    
+    for (let hour = startHour; hour < endHour; hour++) {
+      for (let minute = 0; minute < 60; minute += intervalMinutes) {
+        const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+        const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+        const ampm = hour < 12 ? 'AM' : 'PM';
+        const display = `${displayHour}:${minute.toString().padStart(2, '0')} ${ampm}`;
+        
+        slots.push({
+          id: `${hour}-${minute}`,
+          time,
+          display,
+          hour,
+          minute
+        });
+      }
+    }
+    
+    return slots;
+  };
+
+  const timeSlots = generateTimeSlots();
 
   // Calculate date range based on view mode
   const getDateRange = () => {
@@ -118,6 +162,24 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     },
     enabled: !!salonId
   });
+
+  // Fetch salon staff data
+  const { data: staff = [], isLoading: staffLoading } = useQuery({
+    queryKey: ['/api/salons', salonId, 'staff'],
+    queryFn: async () => {
+      const response = await fetch(`/api/salons/${salonId}/staff`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch staff');
+      }
+      
+      return response.json() as Promise<Staff[]>;
+    },
+    enabled: !!salonId
+  });
+
+  // Filter active staff members only
+  const activeStaff = staff.filter(member => member.isActive === 1);
 
   // Update booking status
   const updateBookingStatus = async (bookingId: string, newStatus: string) => {
@@ -220,6 +282,24 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     const dateStr = format(date, 'yyyy-MM-dd');
     return bookings.filter(booking => booking.bookingDate === dateStr)
                   .sort((a, b) => a.bookingTime.localeCompare(b.bookingTime));
+  };
+
+  // Get bookings for a specific date and time slot
+  const getBookingsForTimeSlot = (date: Date, timeSlot: TimeSlot) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return bookings.filter(booking => {
+      return booking.bookingDate === dateStr && booking.bookingTime === timeSlot.time;
+    });
+  };
+
+  // Get booking for specific staff and time slot
+  const getBookingForStaffTimeSlot = (date: Date, timeSlot: TimeSlot, staffId: string) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return bookings.find(booking => {
+      return booking.bookingDate === dateStr && 
+             booking.bookingTime === timeSlot.time && 
+             booking.staffId === staffId;
+    });
   };
 
   // Generate days for the current view
@@ -438,9 +518,10 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
 
       {/* Calendar Grid */}
       {viewMode === 'day' ? (
-        /* Day View - Single Column Layout */
+        /* Day View - Timeline Grid Layout */
         <div className="space-y-4" data-testid="day-view-container">
-          <Card className="min-h-96">
+          {/* Timeline Header */}
+          <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -452,92 +533,186 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                   </Badge>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  Hourly timeline view coming soon
+                  {staffLoading ? 'Loading staff...' : `${activeStaff.length} staff members`}
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {getBookingsForDate(currentDate).length === 0 ? (
-                <div className="text-center text-muted-foreground py-8" data-testid="text-no-appointments">
-                  <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No appointments scheduled for this day</p>
-                </div>
-              ) : (
-                getBookingsForDate(currentDate).map((booking) => {
-                  const StatusIcon = statusIcons[booking.status];
-                  const isDraggable = ['pending', 'confirmed'].includes(booking.status);
-                  const isBeingDragged = draggedBooking?.id === booking.id;
-                  
-                  return (
-                    <div
-                      key={booking.id}
-                      draggable={isDraggable}
-                      tabIndex={0}
-                      role="button"
-                      aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
-                      className={`p-4 rounded-lg border cursor-pointer hover:bg-muted/50 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
-                        isBeingDragged ? 'opacity-50 scale-95 shadow-lg' : ''
-                      } ${isDraggable ? 'cursor-move' : ''} transition-all duration-200`}
-                      onClick={() => setSelectedBooking(booking)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          setSelectedBooking(booking);
-                        } else if (e.key === ' ' && isDraggable) {
-                          e.preventDefault();
-                          handleMoveBooking(booking);
-                        }
-                      }}
-                      onDragStart={(e) => handleDragStart(e, booking)}
-                      onDragEnd={handleDragEnd}
-                      data-testid={`day-booking-item-${booking.id}`}
-                      title={isDraggable ? `Drag to reschedule ${booking.customerName}'s appointment` : `${booking.status} booking - cannot be moved`}
+          </Card>
+
+          {/* Timeline Grid */}
+          {staffLoading ? (
+            <Card>
+              <CardContent className="flex items-center justify-center py-8">
+                <div className="text-lg">Loading timeline...</div>
+              </CardContent>
+            </Card>
+          ) : activeStaff.length === 0 ? (
+            <Card>
+              <CardContent className="text-center py-8">
+                <User className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-muted-foreground">No active staff members found</p>
+                <p className="text-sm text-muted-foreground mt-2">Add staff members to see the timeline view</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto" data-testid="timeline-grid-container">
+                <div 
+                  className="min-w-fit"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `100px repeat(${activeStaff.length}, minmax(200px, 1fr))`,
+                    minWidth: `${100 + activeStaff.length * 200}px`
+                  }}
+                >
+                  {/* Header Row */}
+                  <div className="sticky top-0 z-20 bg-background border-b border-border p-3 flex items-center justify-center font-medium text-sm">
+                    Time
+                  </div>
+                  {activeStaff.map((staffMember) => (
+                    <div 
+                      key={staffMember.id}
+                      className="sticky top-0 z-20 bg-background border-b border-l border-border p-3 text-center"
+                      data-testid={`staff-header-${staffMember.id}`}
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <StatusIcon className="h-4 w-4" />
-                          {isDraggable && <GripVertical className="h-4 w-4 text-muted-foreground" />}
-                          <Clock className="h-4 w-4" />
-                          <span className="font-semibold text-lg">{booking.bookingTime}</span>
+                      <div className="font-medium">{staffMember.name}</div>
+                      {staffMember.specialties && staffMember.specialties.length > 0 && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {staffMember.specialties.slice(0, 2).join(', ')}
+                          {staffMember.specialties.length > 2 && '...'}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">
-                            {formatCurrency(booking.totalAmountPaisa, booking.currency)}
-                          </span>
-                          {isDraggable && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 hover:bg-background/50"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMoveBooking(booking);
-                              }}
-                              aria-label={`Move ${booking.customerName}'s appointment`}
-                              data-testid={`button-day-move-${booking.id}`}
-                            >
-                              <Move className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{booking.customerName}</span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {booking.serviceName || 'Service'}
-                        </div>
-                        {booking.staffName && (
-                          <div className="text-sm text-muted-foreground">
-                            with {booking.staffName}
-                          </div>
-                        )}
-                      </div>
+                      )}
                     </div>
-                  );
-                })
-              )}
+                  ))}
+
+                  {/* Time Slots and Booking Cells */}
+                  {timeSlots.map((timeSlot, timeIndex) => {
+                    const isEvenRow = timeIndex % 2 === 0;
+                    
+                    return [
+                      // Time Label Cell
+                      <div
+                        key={`time-${timeSlot.id}`}
+                        className={`border-b border-border p-3 flex items-center justify-center text-sm font-medium sticky left-0 z-10 ${
+                          isEvenRow ? 'bg-muted/30' : 'bg-background'
+                        }`}
+                        data-testid={`time-slot-${timeSlot.id}`}
+                      >
+                        {timeSlot.display}
+                      </div>,
+
+                      // Staff Booking Cells
+                      ...activeStaff.map((staffMember) => {
+                        const booking = getBookingForStaffTimeSlot(currentDate, timeSlot, staffMember.id);
+                        const StatusIcon = booking ? statusIcons[booking.status] : null;
+                        const isDraggable = booking ? ['pending', 'confirmed'].includes(booking.status) : false;
+                        const isBeingDragged = draggedBooking?.id === booking?.id;
+
+                        return (
+                          <div
+                            key={`cell-${timeSlot.id}-${staffMember.id}`}
+                            className={`border-b border-l border-border min-h-16 relative ${
+                              isEvenRow ? 'bg-muted/30' : 'bg-background'
+                            } hover:bg-muted/50 transition-colors duration-200`}
+                            data-testid={`timeline-cell-${timeSlot.id}-${staffMember.id}`}
+                          >
+                            {booking ? (
+                              <div
+                                draggable={isDraggable}
+                                tabIndex={0}
+                                role="button"
+                                aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
+                                className={`absolute inset-1 p-2 rounded cursor-pointer hover:opacity-80 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
+                                  isBeingDragged ? 'opacity-50 scale-95 shadow-lg' : ''
+                                } ${isDraggable ? 'cursor-move' : ''} transition-all duration-200`}
+                                onClick={() => setSelectedBooking(booking)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    setSelectedBooking(booking);
+                                  } else if (e.key === ' ' && isDraggable) {
+                                    e.preventDefault();
+                                    handleMoveBooking(booking);
+                                  }
+                                }}
+                                onDragStart={(e) => handleDragStart(e, booking)}
+                                onDragEnd={handleDragEnd}
+                                data-testid={`timeline-booking-${booking.id}`}
+                                title={isDraggable ? `Drag to reschedule ${booking.customerName}'s appointment` : `${booking.status} booking - cannot be moved`}
+                              >
+                                <div className="flex items-center gap-1 mb-1">
+                                  {StatusIcon && <StatusIcon className="h-3 w-3" />}
+                                  {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground" />}
+                                  <span className="text-xs font-medium truncate flex-1">
+                                    {booking.customerName}
+                                  </span>
+                                </div>
+                                <div className="text-xs truncate">
+                                  {booking.serviceName || 'Service'}
+                                </div>
+                                <div className="text-xs font-medium mt-1">
+                                  {formatCurrency(booking.totalAmountPaisa, booking.currency)}
+                                </div>
+                                {isDraggable && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="absolute top-1 right-1 h-5 w-5 p-0 hover:bg-background/50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMoveBooking(booking);
+                                    }}
+                                    aria-label={`Move ${booking.customerName}'s appointment`}
+                                    data-testid={`button-timeline-move-${booking.id}`}
+                                  >
+                                    <Move className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            ) : (
+                              // Empty time slot
+                              <div 
+                                className="absolute inset-1 flex items-center justify-center text-xs text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors"
+                                data-testid={`empty-slot-${timeSlot.id}-${staffMember.id}`}
+                              >
+                                Available
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    ];
+                  }).flat()}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Timeline Legend */}
+          <Card>
+            <CardContent className="py-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300"></div>
+                    <span>Pending</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-green-100 border border-green-300"></div>
+                    <span>Confirmed</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-blue-100 border border-blue-300"></div>
+                    <span>Completed</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-red-100 border border-red-300"></div>
+                    <span>Cancelled</span>
+                  </div>
+                </div>
+                <div className="hidden md:block">
+                  💡 Click appointments for details • Drag confirmed/pending to reschedule
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
