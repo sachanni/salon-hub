@@ -77,65 +77,142 @@ export default function SearchBar() {
     fetchServices();
   }, []);
 
-  // Debounced search function for autocomplete
+  // Show popular suggestions when focused without query (Fresha-style)
+  const showPopularSuggestions = useCallback(() => {
+    setIsSearching(false);
+    const suggestions = [];
+
+    // Add "All treatments" option at top
+    suggestions.push({
+      type: 'all',
+      id: 'all-treatments',
+      title: 'All treatments',
+      subtitle: 'Browse all available services',
+      icon: LayoutGrid
+    });
+
+    // Add popular categories
+    const topCategories = popularCategories.slice(0, 6).map(category => ({
+      type: 'category',
+      id: category.id,
+      title: category.label,
+      subtitle: `Top category • ${category.group}`,
+      icon: category.icon,
+      color: category.color
+    }));
+    suggestions.push(...topCategories);
+
+    // Add some popular services from the most common categories
+    const popularServiceCategories = ['hair', 'facials', 'nails', 'massage'];
+    const popularServices = allServices
+      .filter(service => 
+        popularServiceCategories.some(cat => 
+          service.category?.toLowerCase().includes(cat) || 
+          service.name?.toLowerCase().includes(cat)
+        )
+      )
+      .slice(0, 3)
+      .map(service => ({
+        type: 'service',
+        id: service.id,
+        title: service.name,
+        subtitle: `Popular • ₹${Math.round(service.priceInPaisa / 100)} • ${service.durationMinutes}min`,
+        category: service.category
+      }));
+    suggestions.push(...popularServices);
+
+    setAutocompleteSuggestions(suggestions.slice(0, 10));
+  }, [allServices]);
+
+  // Debounced search function for autocomplete with improved relevance
   const performSearch = useCallback(async (query: string) => {
-    if (!query || query.length < 2) {
-      setAutocompleteSuggestions([]);
-      setIsSearching(false);
+    if (!query || query.length < 1) {
+      showPopularSuggestions();
       return;
     }
 
     setIsSearching(true);
     const suggestions = [];
+    const queryLower = query.toLowerCase();
 
     try {
-      // Search in categories
-      const matchingCategories = serviceCategories.filter(category => 
-        category.label.toLowerCase().includes(query.toLowerCase())
+      // 1. Exact category matches first (highest priority)
+      const exactCategoryMatches = serviceCategories.filter(category => 
+        category.label.toLowerCase().includes(queryLower) || 
+        category.id.toLowerCase().includes(queryLower)
       ).map(category => ({
         type: 'category',
         id: category.id,
         title: category.label,
         subtitle: `Category • ${category.group}`,
         icon: category.icon,
-        color: category.color
+        color: category.color,
+        relevance: category.label.toLowerCase() === queryLower ? 100 : 
+                  category.label.toLowerCase().startsWith(queryLower) ? 90 : 70
       }));
-      suggestions.push(...matchingCategories.slice(0, 3));
+      suggestions.push(...exactCategoryMatches);
 
-      // Search in services
-      const matchingServices = allServices.filter(service => 
-        service.name?.toLowerCase().includes(query.toLowerCase()) ||
-        service.category?.toLowerCase().includes(query.toLowerCase())
-      ).map(service => ({
-        type: 'service',
-        id: service.id,
-        title: service.name,
-        subtitle: `Service • ₹${Math.round(service.priceInPaisa / 100)} • ${service.durationMinutes}min`,
-        category: service.category
-      }));
-      suggestions.push(...matchingServices.slice(0, 4));
+      // 2. Services matching query (name or category)
+      const matchingServices = allServices.filter(service => {
+        const serviceName = service.name?.toLowerCase() || '';
+        const serviceCategory = service.category?.toLowerCase() || '';
+        const serviceDescription = service.description?.toLowerCase() || '';
+        
+        return serviceName.includes(queryLower) || 
+               serviceCategory.includes(queryLower) ||
+               serviceDescription.includes(queryLower);
+      }).map(service => {
+        const serviceName = service.name?.toLowerCase() || '';
+        const serviceCategory = service.category?.toLowerCase() || '';
+        
+        // Calculate relevance score
+        let relevance = 0;
+        if (serviceName.startsWith(queryLower)) relevance = 95;
+        else if (serviceName.includes(queryLower)) relevance = 85;
+        else if (serviceCategory.includes(queryLower)) relevance = 75;
+        else relevance = 60;
+        
+        return {
+          type: 'service',
+          id: service.id,
+          title: service.name,
+          subtitle: `Service • ₹${Math.round(service.priceInPaisa / 100)} • ${service.durationMinutes}min${service.category ? ` • ${service.category}` : ''}`,
+          category: service.category,
+          relevance
+        };
+      });
+      
+      // Sort services by relevance
+      matchingServices.sort((a, b) => b.relevance - a.relevance);
+      suggestions.push(...matchingServices.slice(0, 5));
 
-      // Search in salons
+      // 3. Salons with matching services or names
       const salonsResponse = await fetch(`/api/salons?service=${encodeURIComponent(query)}&limit=3`);
       if (salonsResponse.ok) {
         const salons = await salonsResponse.json();
-        const salonSuggestions = salons.results?.slice(0, 3).map((salon: any) => ({
+        const salonSuggestions = salons.results?.filter(salon => salon).slice(0, 3).map((salon: any) => ({
           type: 'salon',
           id: salon.id,
           title: salon.name,
           subtitle: `Salon • ${salon.address?.split(',')[0] || 'Location'} • ${salon.rating ? `${salon.rating}★` : 'New'}`,
-          image: salon.image
+          image: salon.image,
+          relevance: salon.name?.toLowerCase().includes(queryLower) ? 80 : 60
         })) || [];
         suggestions.push(...salonSuggestions);
       }
 
-      setAutocompleteSuggestions(suggestions.slice(0, 8)); // Limit to 8 total suggestions
+      // Sort all suggestions by relevance and limit
+      const sortedSuggestions = suggestions
+        .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+        .slice(0, 8);
+      
+      setAutocompleteSuggestions(sortedSuggestions);
     } catch (error) {
       console.error('Error performing search:', error);
     } finally {
       setIsSearching(false);
     }
-  }, [allServices]);
+  }, [allServices, showPopularSuggestions]);
 
   // Debounced search with cleanup
   const handleServiceInputChange = useCallback((value: string) => {
@@ -157,27 +234,40 @@ export default function SearchBar() {
 
   // Handle suggestion selection
   const handleSuggestionSelect = (suggestion: any) => {
-    if (suggestion.type === 'category') {
-      // Select the category
+    if (suggestion.type === 'all') {
+      // Clear search and show all results
+      setService('');
+      setSelectedCategories([]);
+      setSpecificServices([]);
+      handleSearch(); // Trigger search with no filters
+    } else if (suggestion.type === 'category') {
+      // Select the category and trigger search
       setService(suggestion.title);
       setSelectedCategories([suggestion.id]);
+      handleSearch(); // Auto-trigger search
     } else if (suggestion.type === 'service') {
-      // Set the service name
+      // Set the service name and trigger search
       setService(suggestion.title);
       setSpecificServices([suggestion.id]);
+      handleSearch(); // Auto-trigger search
     } else if (suggestion.type === 'salon') {
-      // Set salon name and potentially perform search
+      // Set salon name and trigger search
       setService(suggestion.title);
+      handleSearch(); // Auto-trigger search
     }
     
     setShowAutocomplete(false);
     setAutocompleteSuggestions([]);
   };
 
-  // Handle input focus
+  // Handle input focus - show popular suggestions like Fresha
   const handleServiceInputFocus = () => {
-    if (service.length > 0) {
-      setShowAutocomplete(true);
+    setShowAutocomplete(true);
+    if (service.length === 0) {
+      // Show popular suggestions when clicking empty input (Fresha-style)
+      showPopularSuggestions();
+    } else {
+      // If there's text, perform search
       if (autocompleteSuggestions.length === 0) {
         performSearch(service);
       }
@@ -190,6 +280,13 @@ export default function SearchBar() {
       setShowAutocomplete(false);
     }, 200);
   };
+
+  // Initialize popular suggestions when component mounts
+  useEffect(() => {
+    if (allServices.length > 0) {
+      showPopularSuggestions();
+    }
+  }, [allServices, showPopularSuggestions]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -441,33 +538,54 @@ export default function SearchBar() {
                 
                 {!isSearching && autocompleteSuggestions.length > 0 && (
                   <div className="py-1">
+                    {/* Add section headers for better organization */}
+                    {service.length === 0 && autocompleteSuggestions.some(s => s.type === 'all') && (
+                      <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border">
+                        Quick access
+                      </div>
+                    )}
                     {autocompleteSuggestions.map((suggestion, index) => {
                       const IconComponent = suggestion.icon || Search;
+                      const showSectionHeader = service.length === 0 && index > 0 && 
+                        autocompleteSuggestions[index-1].type !== suggestion.type;
+                      
                       return (
-                        <div
-                          key={`${suggestion.type}-${suggestion.id}-${index}`}
-                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() => handleSuggestionSelect(suggestion)}
-                          data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
-                        >
-                          {suggestion.type === 'category' && (
-                            <div className={`p-1.5 rounded ${suggestion.color}`}>
-                              <IconComponent className="h-3 w-3" />
+                        <div key={`${suggestion.type}-${suggestion.id}-${index}`}>
+                          {showSectionHeader && (
+                            <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border mt-2">
+                              {suggestion.type === 'category' ? 'Top categories' :
+                               suggestion.type === 'service' ? 'Popular services' : 'Suggestions'}
                             </div>
                           )}
-                          {suggestion.type === 'service' && (
-                            <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                              <Sparkles className="h-3 w-3" />
+                          <div
+                            className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                            onClick={() => handleSuggestionSelect(suggestion)}
+                            data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
+                          >
+                            {suggestion.type === 'all' && (
+                              <div className="p-1.5 rounded bg-gray-500/10 text-gray-700 dark:text-gray-300">
+                                <LayoutGrid className="h-3 w-3" />
+                              </div>
+                            )}
+                            {suggestion.type === 'category' && (
+                              <div className={`p-1.5 rounded ${suggestion.color}`}>
+                                <IconComponent className="h-3 w-3" />
+                              </div>
+                            )}
+                            {suggestion.type === 'service' && (
+                              <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                                <Sparkles className="h-3 w-3" />
+                              </div>
+                            )}
+                            {suggestion.type === 'salon' && (
+                              <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                                <MapPin className="h-3 w-3" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{suggestion.title}</div>
+                              <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
                             </div>
-                          )}
-                          {suggestion.type === 'salon' && (
-                            <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                              <MapPin className="h-3 w-3" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{suggestion.title}</div>
-                            <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
                           </div>
                         </div>
                       );
