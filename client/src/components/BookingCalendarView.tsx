@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -87,6 +87,30 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [bookingToMove, setBookingToMove] = useState<Booking | null>(null);
   const [moveTargetDate, setMoveTargetDate] = useState<string>('');
+  
+  // Timeline-specific drag state
+  const [timelineDragState, setTimelineDragState] = useState<{
+    isDragging: boolean;
+    dragOverTimeSlot: string | null;
+    dragOverStaffId: string | null;
+    validDropZone: boolean;
+    conflicts: Booking[];
+    dragPreview: { time: string; staffId: string } | null;
+  }>({ 
+    isDragging: false, 
+    dragOverTimeSlot: null, 
+    dragOverStaffId: null, 
+    validDropZone: false, 
+    conflicts: [], 
+    dragPreview: null 
+  });
+
+  // Performance optimization: throttle drag over operations
+  const dragThrottleRef = useRef<number | null>(null);
+  const lastDragPositionRef = useRef<{ timeSlot: string | null; staffId: string | null }>({ 
+    timeSlot: null, 
+    staffId: null 
+  });
   const { toast } = useToast();
 
   // Helper functions for time-to-grid calculations
@@ -127,23 +151,74 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     return booking.serviceDuration || getDefaultDuration(booking.serviceName);
   };
 
-  const isTimeInBusinessHours = (timeStr: string, startHour = 9, endHour = 18): boolean => {
+  // Fetch salon business hours (with fallback to default 9-18)
+  const { data: salonSettings } = useQuery({
+    queryKey: ['/api/salons', salonId, 'settings'],
+    queryFn: async () => {
+      const response = await fetch(`/api/salons/${salonId}/settings`);
+      if (!response.ok) {
+        // Fallback to default business hours if API fails
+        return { businessStartHour: 9, businessEndHour: 18 };
+      }
+      return response.json();
+    },
+    enabled: !!salonId,
+    staleTime: 5 * 60 * 1000 // Cache for 5 minutes
+  });
+
+  const businessStartHour = salonSettings?.businessStartHour || 9;
+  const businessEndHour = salonSettings?.businessEndHour || 18;
+
+  const isTimeInBusinessHours = (timeStr: string, durationMinutes?: number): boolean => {
     const timeMinutes = parseTimeToMinutes(timeStr);
-    return timeMinutes >= startHour * 60 && timeMinutes < endHour * 60;
+    const startValid = timeMinutes >= businessStartHour * 60;
+    
+    if (!durationMinutes) {
+      // If no duration provided, only check start time (backwards compatibility)
+      return startValid && timeMinutes < businessEndHour * 60;
+    }
+    
+    // Check both start and end times are within business hours
+    const endTimeMinutes = timeMinutes + durationMinutes;
+    const endValid = endTimeMinutes <= businessEndHour * 60;
+    
+    return startValid && endValid;
   };
 
-  // Helper function to detect overlapping bookings
-  const detectOverlaps = (bookings: Booking[], targetBooking: Booking): Booking[] => {
+  // Optimized overlap detection with binary search for better performance
+  const detectOverlaps = useCallback((bookings: Booking[], targetBooking: Booking, staffBookingsMapRef?: Map<string, Booking[]>): Booking[] => {
     if (!targetBooking.staffId) return [];
+    
+    // Use memoized staffBookingsMap for O(1) lookup when available
+    let relevantBookings: Booking[];
+    
+    if (staffBookingsMapRef && staffBookingsMapRef.has(targetBooking.staffId)) {
+      // Get bookings from memoized map and filter by date and exclude self
+      relevantBookings = staffBookingsMapRef.get(targetBooking.staffId)!.filter(booking => 
+        booking.id !== targetBooking.id && 
+        booking.bookingDate === targetBooking.bookingDate
+      );
+    } else {
+      // Fallback to traditional filtering if map not available
+      relevantBookings = bookings.filter(booking => 
+        booking.id !== targetBooking.id && 
+        booking.staffId === targetBooking.staffId && 
+        booking.bookingDate === targetBooking.bookingDate
+      );
+    }
+    
+    if (relevantBookings.length === 0) return [];
     
     const targetStart = parseTimeToMinutes(targetBooking.bookingTime);
     const targetDuration = getBookingDuration(targetBooking);
     const targetEnd = targetStart + targetDuration;
     
-    return bookings.filter(booking => {
-      if (booking.id === targetBooking.id || booking.staffId !== targetBooking.staffId) return false;
-      if (booking.bookingDate !== targetBooking.bookingDate) return false;
-      
+    // Sort by start time for binary search optimization
+    const sortedBookings = relevantBookings.sort((a, b) => 
+      parseTimeToMinutes(a.bookingTime) - parseTimeToMinutes(b.bookingTime)
+    );
+    
+    return sortedBookings.filter(booking => {
       const bookingStart = parseTimeToMinutes(booking.bookingTime);
       const bookingDuration = getBookingDuration(booking);
       const bookingEnd = bookingStart + bookingDuration;
@@ -151,7 +226,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
       // Check if there's any overlap
       return !(targetEnd <= bookingStart || targetStart >= bookingEnd);
     });
-  };
+  }, []);
 
   // Helper function to generate time slots
   const generateTimeSlots = (startHour = 9, endHour = 18, intervalMinutes = 30): TimeSlot[] => {
@@ -176,8 +251,18 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     
     return slots;
   };
+  
+  // Helper function to check if a time slot can accommodate a service duration
+  const canTimeSlotAccommodateService = (timeSlot: string, durationMinutes: number): boolean => {
+    return isTimeInBusinessHours(timeSlot, durationMinutes);
+  };
+  
+  // Filter time slots that can accommodate a specific service duration
+  const getValidTimeSlotsForDuration = (durationMinutes: number): TimeSlot[] => {
+    return timeSlots.filter(slot => canTimeSlotAccommodateService(slot.time, durationMinutes));
+  };
 
-  const timeSlots = generateTimeSlots();
+  const timeSlots = generateTimeSlots(businessStartHour, businessEndHour);
 
   // Calculate date range based on view mode
   const getDateRange = () => {
@@ -243,19 +328,37 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     enabled: !!salonId
   });
 
-  // Filter active staff members and add unassigned column
-  const activeStaff = staff.filter(member => member.isActive === 1);
-  
-  // Check if there are any unassigned bookings
-  const hasUnassignedBookings = bookings.some(booking => 
-    booking.bookingDate >= startDate && booking.bookingDate <= endDate && !booking.staffId
-  );
-  
-  // Create extended staff list with unassigned column if needed
-  const extendedStaff = hasUnassignedBookings ? [
-    ...activeStaff,
-    { id: 'unassigned', name: 'Unassigned', specialties: [], isActive: 1 }
-  ] : activeStaff;
+  // Memoized staff calculations for better performance
+  const { activeStaff, extendedStaff, staffBookingsMap } = useMemo(() => {
+    const active = staff.filter(member => member.isActive === 1);
+    
+    // Check if there are any unassigned bookings
+    const hasUnassigned = bookings.some(booking => 
+      booking.bookingDate >= startDate && booking.bookingDate <= endDate && !booking.staffId
+    );
+    
+    // Create extended staff list with unassigned column if needed
+    const extended = hasUnassigned ? [
+      ...active,
+      { id: 'unassigned', name: 'Unassigned', specialties: [], isActive: 1 }
+    ] : active;
+    
+    // Create staff-to-bookings map for O(1) lookups
+    const staffMap = new Map<string, Booking[]>();
+    extended.forEach(staffMember => {
+      const staffBookings = bookings.filter(booking => 
+        booking.staffId === staffMember.id || 
+        (!booking.staffId && staffMember.id === 'unassigned')
+      );
+      staffMap.set(staffMember.id, staffBookings);
+    });
+    
+    return {
+      activeStaff: active,
+      extendedStaff: extended,
+      staffBookingsMap: staffMap
+    };
+  }, [staff, bookings, startDate, endDate]);
 
   // Update booking status
   const updateBookingStatus = async (bookingId: string, newStatus: string) => {
@@ -277,12 +380,13 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     }
   };
 
-  // Reschedule booking mutation
+  // Reschedule booking mutation with staff assignment support
   const rescheduleBookingMutation = useMutation({
-    mutationFn: async ({ bookingId, bookingDate, bookingTime }: { 
+    mutationFn: async ({ bookingId, bookingDate, bookingTime, staffId }: { 
       bookingId: string; 
       bookingDate: string; 
       bookingTime: string;
+      staffId?: string;
     }) => {
       const response = await fetch(`/api/salons/${salonId}/bookings/${bookingId}/reschedule`, {
         method: 'PATCH',
@@ -291,7 +395,8 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
         },
         body: JSON.stringify({ 
           bookingDate, 
-          bookingTime 
+          bookingTime,
+          ...(staffId !== undefined && { staffId: staffId === 'unassigned' ? null : staffId })
         }),
       });
 
@@ -430,7 +535,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     pendingBookings: bookings.filter(b => b.status === 'pending').length,
     confirmedBookings: bookings.filter(b => b.status === 'confirmed').length,
     conflicts: bookings.reduce((count, booking) => {
-      const overlaps = detectOverlaps(bookings, booking);
+      const overlaps = detectOverlaps(bookings, booking, staffBookingsMap);
       return overlaps.length > 0 ? count + 1 : count;
     }, 0) / 2, // Divide by 2 since each conflict is counted twice
     unassignedBookings: bookings.filter(b => !b.staffId).length
@@ -440,7 +545,70 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     return `${currency === 'INR' ? '₹' : currency}${(amountPaisa / 100).toFixed(0)}`;
   };
 
-  // Drag and drop event handlers
+  // Helper functions for timeline drag calculations
+  const calculateTimeSlotFromPosition = (y: number, containerRect: DOMRect): string | null => {
+    const HEADER_HEIGHT = 52; // Height of timeline header
+    const ROW_HEIGHT = 64; // Height of each time slot row
+    
+    const relativeY = y - containerRect.top - HEADER_HEIGHT;
+    const slotIndex = Math.floor(relativeY / ROW_HEIGHT);
+    
+    if (slotIndex >= 0 && slotIndex < timeSlots.length) {
+      return timeSlots[slotIndex].time;
+    }
+    
+    return null;
+  };
+  
+  const calculateStaffIdFromPosition = (x: number, containerRect: DOMRect): string | null => {
+    // Guard against division by zero when no staff members exist
+    if (extendedStaff.length === 0) {
+      return null;
+    }
+    
+    const TIME_COLUMN_WIDTH = 100; // Width of time column
+    const staffColumnWidth = (containerRect.width - TIME_COLUMN_WIDTH) / extendedStaff.length;
+    
+    const relativeX = x - containerRect.left - TIME_COLUMN_WIDTH;
+    const staffIndex = Math.floor(relativeX / staffColumnWidth);
+    
+    if (staffIndex >= 0 && staffIndex < extendedStaff.length) {
+      return extendedStaff[staffIndex].id;
+    }
+    
+    return null;
+  };
+  
+  const validateTimelineDropZone = (timeSlot: string, staffId: string, draggedBooking: Booking): { valid: boolean; conflicts: Booking[]; reason?: string } => {
+    if (!timeSlot || !staffId) {
+      return { valid: false, conflicts: [], reason: 'Invalid time slot or staff' };
+    }
+    
+    // Get booking duration for business hours validation
+    const bookingDuration = getBookingDuration(draggedBooking);
+    
+    // Check if appointment (start + duration) fits within business hours
+    if (!isTimeInBusinessHours(timeSlot, bookingDuration)) {
+      return { valid: false, conflicts: [], reason: 'Appointment would extend past closing hours' };
+    }
+    
+    // Create temporary booking for conflict detection
+    const tempBooking: Booking = {
+      ...draggedBooking,
+      bookingTime: timeSlot,
+      staffId: staffId === 'unassigned' ? undefined : staffId
+    };
+    
+    const conflicts = detectOverlaps(bookings, tempBooking, staffBookingsMap);
+    
+    return {
+      valid: conflicts.length === 0,
+      conflicts,
+      reason: conflicts.length > 0 ? `Conflicts with ${conflicts.length} existing appointment${conflicts.length > 1 ? 's' : ''}` : undefined
+    };
+  };
+
+  // Enhanced drag and drop event handlers
   const handleDragStart = (e: React.DragEvent, booking: Booking) => {
     // Only allow dragging of pending/confirmed bookings
     if (!['pending', 'confirmed'].includes(booking.status)) {
@@ -449,6 +617,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     }
 
     setDraggedBooking(booking);
+    setTimelineDragState(prev => ({ ...prev, isDragging: true }));
     e.dataTransfer.setData('text/plain', booking.id);
     e.dataTransfer.effectAllowed = 'move';
     
@@ -456,11 +625,34 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     const dragElement = e.currentTarget as HTMLElement;
     const rect = dragElement.getBoundingClientRect();
     e.dataTransfer.setDragImage(dragElement, rect.width / 2, rect.height / 2);
+    
+    // Add drag cursor style to body and visual feedback
+    document.body.style.cursor = 'grabbing';
+    document.body.classList.add('timeline-dragging');
   };
 
   const handleDragEnd = () => {
+    // Clean up throttling to prevent memory leaks
+    if (dragThrottleRef.current) {
+      cancelAnimationFrame(dragThrottleRef.current);
+      dragThrottleRef.current = null;
+    }
+    lastDragPositionRef.current = { timeSlot: null, staffId: null };
+    
     setDraggedBooking(null);
     setDragOverDate(null);
+    setTimelineDragState({
+      isDragging: false,
+      dragOverTimeSlot: null,
+      dragOverStaffId: null,
+      validDropZone: false,
+      conflicts: [],
+      dragPreview: null
+    });
+    
+    // Reset cursor and visual feedback
+    document.body.style.cursor = '';
+    document.body.classList.remove('timeline-dragging');
   };
 
   const handleDragOver = (e: React.DragEvent, targetDate: Date) => {
@@ -482,6 +674,140 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
       setDragOverDate(null);
     }
+  };
+
+  // Optimized timeline drag handler with throttling and state change detection
+  const handleTimelineDragOver = useCallback((e: React.DragEvent, timelineContainer: HTMLElement) => {
+    if (!draggedBooking || viewMode !== 'day') return;
+    
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    
+    // Cancel any pending throttled update
+    if (dragThrottleRef.current) {
+      cancelAnimationFrame(dragThrottleRef.current);
+    }
+    
+    // Throttle with requestAnimationFrame for smooth performance
+    dragThrottleRef.current = requestAnimationFrame(() => {
+      const containerRect = timelineContainer.getBoundingClientRect();
+      const timeSlot = calculateTimeSlotFromPosition(e.clientY, containerRect);
+      const staffId = calculateStaffIdFromPosition(e.clientX, containerRect);
+      
+      // Only update state if position actually changed (prevent state churn)
+      const lastPosition = lastDragPositionRef.current;
+      if (lastPosition.timeSlot === timeSlot && lastPosition.staffId === staffId) {
+        return; // No change, skip expensive validation and state update
+      }
+      
+      // Update position tracking
+      lastDragPositionRef.current = { timeSlot, staffId };
+      
+      if (timeSlot && staffId) {
+        const { valid, conflicts } = validateTimelineDropZone(timeSlot, staffId, draggedBooking);
+        
+        setTimelineDragState({
+          isDragging: true,
+          dragOverTimeSlot: timeSlot,
+          dragOverStaffId: staffId,
+          validDropZone: valid,
+          conflicts,
+          dragPreview: { time: timeSlot, staffId }
+        });
+      } else {
+        // Clear drag state if position is invalid
+        setTimelineDragState(prev => ({
+          ...prev,
+          dragOverTimeSlot: null,
+          dragOverStaffId: null,
+          validDropZone: false,
+          conflicts: [],
+          dragPreview: null
+        }));
+      }
+    });
+  }, [draggedBooking, viewMode]);
+  
+  const handleTimelineDragLeave = (e: React.DragEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    // Only clear if truly leaving the timeline container
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setTimelineDragState(prev => ({
+        ...prev,
+        dragOverTimeSlot: null,
+        dragOverStaffId: null,
+        validDropZone: false,
+        conflicts: [],
+        dragPreview: null
+      }));
+    }
+  };
+  
+  const handleTimelineDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    
+    if (!draggedBooking || !timelineDragState.dragOverTimeSlot || !timelineDragState.dragOverStaffId) {
+      handleDragEnd();
+      return;
+    }
+    
+    const { dragOverTimeSlot, dragOverStaffId, validDropZone, conflicts } = timelineDragState;
+    
+    // Check if it's the same position
+    const isSameTime = draggedBooking.bookingTime === dragOverTimeSlot;
+    const isSameStaff = (draggedBooking.staffId || 'unassigned') === dragOverStaffId;
+    
+    if (isSameTime && isSameStaff) {
+      handleDragEnd();
+      return;
+    }
+    
+    // Validate drop zone with enhanced business hours checking
+    if (!validDropZone) {
+      const dropValidation = validateTimelineDropZone(dragOverTimeSlot, dragOverStaffId, draggedBooking);
+      const errorMessage = dropValidation.reason || 'Invalid drop zone';
+        
+      toast({
+        title: "Cannot Move Appointment",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      
+      handleDragEnd();
+      return;
+    }
+    
+    // Prevent dropping on past times
+    const currentDateStr = format(currentDate, 'yyyy-MM-dd');
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const now = new Date();
+    const dropDateTime = new Date(`${format(currentDate, 'yyyy-MM-dd')}T${dragOverTimeSlot}:00`);
+    
+    if (currentDateStr === today && dropDateTime < now) {
+      toast({
+        title: "Invalid Time",
+        description: "Cannot reschedule appointments to past times.",
+        variant: "destructive",
+      });
+      
+      handleDragEnd();
+      return;
+    }
+    
+    // Execute the reschedule
+    const staffIdForApi = dragOverStaffId === 'unassigned' ? undefined : dragOverStaffId;
+    
+    rescheduleBookingMutation.mutate({
+      bookingId: draggedBooking.id,
+      bookingDate: format(currentDate, 'yyyy-MM-dd'),
+      bookingTime: dragOverTimeSlot,
+      staffId: staffIdForApi
+    });
+    
+    handleDragEnd();
   };
 
   const handleDrop = (e: React.DragEvent, targetDate: Date) => {
@@ -571,6 +897,192 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     setBookingToMove(null);
     setSelectedBooking(null);
   };
+  
+  // Enhanced Accessibility: Keyboard navigation for timeline
+  const handleKeyboardMove = (booking: Booking, direction: string) => {
+    if (!['pending', 'confirmed'].includes(booking.status)) return;
+    
+    const currentTimeIndex = timeSlots.findIndex(slot => slot.time === booking.bookingTime);
+    const currentStaffIndex = extendedStaff.findIndex(staff => 
+      staff.id === (booking.staffId || 'unassigned')
+    );
+    
+    let newTimeIndex = currentTimeIndex;
+    let newStaffIndex = currentStaffIndex;
+    
+    switch (direction) {
+      case 'ArrowUp':
+        newTimeIndex = Math.max(0, currentTimeIndex - 1);
+        break;
+      case 'ArrowDown':
+        newTimeIndex = Math.min(timeSlots.length - 1, currentTimeIndex + 1);
+        break;
+      case 'ArrowLeft':
+        newStaffIndex = Math.max(0, currentStaffIndex - 1);
+        break;
+      case 'ArrowRight':
+        newStaffIndex = Math.min(extendedStaff.length - 1, currentStaffIndex + 1);
+        break;
+    }
+    
+    if (newTimeIndex !== currentTimeIndex || newStaffIndex !== currentStaffIndex) {
+      const newTime = timeSlots[newTimeIndex].time;
+      const newStaffId = extendedStaff[newStaffIndex].id;
+      
+      // Validate the move with enhanced business hours checking
+      const moveValidation = validateTimelineDropZone(newTime, newStaffId, booking);
+      
+      if (moveValidation.valid) {
+        rescheduleBookingMutation.mutate({
+          bookingId: booking.id,
+          bookingDate: format(currentDate, 'yyyy-MM-dd'),
+          bookingTime: newTime,
+          staffId: newStaffId === 'unassigned' ? undefined : newStaffId
+        });
+        
+        // Announce to screen reader
+        const announcement = `Moved ${booking.customerName}'s appointment to ${newTime} with ${extendedStaff[newStaffIndex].name}`;
+        announceToScreenReader(announcement);
+      } else {
+        const errorMessage = moveValidation.reason || 'Cannot move to this time slot';
+        
+        toast({
+          title: "Cannot Move Appointment",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        
+        announceToScreenReader(errorMessage);
+      }
+    }
+  };
+  
+  // Touch device support
+  const [touchState, setTouchState] = useState<{
+    isDragging: boolean;
+    startPosition: { x: number; y: number } | null;
+    currentPosition: { x: number; y: number } | null;
+    draggedBooking: Booking | null;
+  }>({ isDragging: false, startPosition: null, currentPosition: null, draggedBooking: null });
+  
+  const handleTouchStart = (e: React.TouchEvent, booking: Booking) => {
+    if (!['pending', 'confirmed'].includes(booking.status)) return;
+    
+    const touch = e.touches[0];
+    setTouchState({
+      isDragging: true,
+      startPosition: { x: touch.clientX, y: touch.clientY },
+      currentPosition: { x: touch.clientX, y: touch.clientY },
+      draggedBooking: booking
+    });
+    
+    setDraggedBooking(booking);
+    setTimelineDragState(prev => ({ ...prev, isDragging: true }));
+    
+    // Haptic feedback on supported devices
+    if ('vibrate' in navigator) {
+      navigator.vibrate(50);
+    }
+    
+    // Prevent scrolling during drag
+    e.preventDefault();
+  };
+  
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchState.isDragging || !touchState.draggedBooking) return;
+    
+    const touch = e.touches[0];
+    setTouchState(prev => ({
+      ...prev,
+      currentPosition: { x: touch.clientX, y: touch.clientY }
+    }));
+    
+    // Find timeline container and calculate drop position
+    const timelineContainer = document.querySelector('[data-testid="timeline-grid-container"] > div');
+    if (timelineContainer) {
+      const containerRect = timelineContainer.getBoundingClientRect();
+      const timeSlot = calculateTimeSlotFromPosition(touch.clientY, containerRect);
+      const staffId = calculateStaffIdFromPosition(touch.clientX, containerRect);
+      
+      if (timeSlot && staffId) {
+        const { valid, conflicts } = validateTimelineDropZone(timeSlot, staffId, touchState.draggedBooking);
+        
+        setTimelineDragState({
+          isDragging: true,
+          dragOverTimeSlot: timeSlot,
+          dragOverStaffId: staffId,
+          validDropZone: valid,
+          conflicts,
+          dragPreview: { time: timeSlot, staffId }
+        });
+      }
+    }
+    
+    // Prevent scrolling during drag
+    e.preventDefault();
+  };
+  
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchState.isDragging || !touchState.draggedBooking) {
+      resetTouchState();
+      return;
+    }
+    
+    const { dragOverTimeSlot, dragOverStaffId, validDropZone } = timelineDragState;
+    
+    if (dragOverTimeSlot && dragOverStaffId && validDropZone) {
+      // Haptic feedback for successful drop
+      if ('vibrate' in navigator) {
+        navigator.vibrate([50, 50, 50]);
+      }
+      
+      const staffIdForApi = dragOverStaffId === 'unassigned' ? undefined : dragOverStaffId;
+      
+      rescheduleBookingMutation.mutate({
+        bookingId: touchState.draggedBooking.id,
+        bookingDate: format(currentDate, 'yyyy-MM-dd'),
+        bookingTime: dragOverTimeSlot,
+        staffId: staffIdForApi
+      });
+    } else if (dragOverTimeSlot && dragOverStaffId && !validDropZone) {
+      // Haptic feedback for invalid drop
+      if ('vibrate' in navigator) {
+        navigator.vibrate(200);
+      }
+      
+      toast({
+        title: "Cannot Move Appointment",
+        description: "Invalid drop zone or scheduling conflicts detected.",
+        variant: "destructive",
+      });
+    }
+    
+    resetTouchState();
+  };
+  
+  const resetTouchState = () => {
+    setTouchState({ isDragging: false, startPosition: null, currentPosition: null, draggedBooking: null });
+    handleDragEnd();
+  };
+  
+  // Safe screen reader announcements with error boundary
+  const announceToScreenReader = useCallback((message: string) => {
+    try {
+      const liveRegion = document.getElementById('drag-feedback-region');
+      if (liveRegion) {
+        liveRegion.textContent = message;
+        // Clear after a delay to allow for new announcements
+        setTimeout(() => {
+          if (liveRegion && liveRegion.textContent === message) {
+            liveRegion.textContent = '';
+          }
+        }, 1000);
+      }
+    } catch (error) {
+      // Fail silently for accessibility features to prevent breaking the app
+      console.warn('Screen reader announcement failed:', error);
+    }
+  }, []);
 
   if (isLoading) {
     return (
@@ -582,6 +1094,160 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
 
   return (
     <div className="space-y-6">
+      {/* Custom CSS for drag enhancements */}
+      <style>{`
+        .timeline-dragging {
+          user-select: none;
+          -webkit-user-select: none;
+          -moz-user-select: none;
+          -ms-user-select: none;
+        }
+        
+        .timeline-dragging * {
+          cursor: grabbing !important;
+        }
+        
+        .booking-drag-preview {
+          transform: scale(1.05);
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+          border: 2px solid hsl(var(--primary));
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(4px);
+          z-index: 1000;
+        }
+        
+        .drop-zone-valid {
+          animation: pulse-green 1s ease-in-out infinite;
+        }
+        
+        .drop-zone-invalid {
+          animation: pulse-red 1s ease-in-out infinite;
+        }
+        
+        @keyframes pulse-green {
+          0%, 100% { 
+            background-color: rgba(34, 197, 94, 0.1); 
+            border-color: rgba(34, 197, 94, 0.3);
+          }
+          50% { 
+            background-color: rgba(34, 197, 94, 0.2); 
+            border-color: rgba(34, 197, 94, 0.5);
+          }
+        }
+        
+        @keyframes pulse-red {
+          0%, 100% { 
+            background-color: rgba(239, 68, 68, 0.1); 
+            border-color: rgba(239, 68, 68, 0.3);
+          }
+          50% { 
+            background-color: rgba(239, 68, 68, 0.2); 
+            border-color: rgba(239, 68, 68, 0.5);
+          }
+        }
+        
+        .booking-draggable {
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .booking-draggable:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .timeline-grid {
+          position: relative;
+        }
+        
+        .timeline-grid::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: linear-gradient(90deg, 
+            transparent 100px, 
+            rgba(var(--muted), 0.3) 100px, 
+            rgba(var(--muted), 0.3) 101px, 
+            transparent 101px
+          );
+          pointer-events: none;
+          z-index: 1;
+        }
+
+        /* Enhanced responsive design */
+        .scrollbar-thin {
+          scrollbar-width: thin;
+        }
+        
+        .scrollbar-thumb-gray-300::-webkit-scrollbar {
+          height: 6px;
+        }
+        
+        .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+          background-color: #d1d5db;
+          border-radius: 3px;
+        }
+        
+        .dark .scrollbar-thumb-gray-700::-webkit-scrollbar-thumb {
+          background-color: #374151;
+        }
+        
+        /* Mobile-friendly touch targets */
+        @media (max-width: 768px) {
+          .booking-draggable {
+            min-height: 48px; /* WCAG touch target size */
+            touch-action: manipulation;
+          }
+          
+          .timeline-grid {
+            font-size: 0.875rem; /* Smaller text on mobile */
+          }
+          
+          /* Increase tap target size for mobile */
+          .timeline-cell {
+            min-height: 56px;
+          }
+        }
+        
+        /* High contrast for accessibility */
+        @media (prefers-contrast: high) {
+          .drop-zone-valid {
+            border: 3px solid #22c55e !important;
+            background-color: rgba(34, 197, 94, 0.3) !important;
+          }
+          
+          .drop-zone-invalid {
+            border: 3px solid #ef4444 !important;
+            background-color: rgba(239, 68, 68, 0.3) !important;
+          }
+        }
+        
+        .drag-ghost {
+          opacity: 0.7;
+          transform: rotate(3deg);
+          filter: blur(0.5px);
+        }
+        
+        .conflict-indicator {
+          animation: shake 0.5s ease-in-out;
+        }
+        
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-2px); }
+          75% { transform: translateX(2px); }
+        }
+        
+        /* Mobile touch feedback */
+        @media (hover: none) {
+          .booking-draggable:active {
+            transform: scale(1.02);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+          }
+        }
+      `}</style>
       {/* Header Controls */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -590,9 +1256,26 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
             Booking Calendar
           </h2>
           
-          {/* Accessibility Help */}
+          {/* Enhanced Accessibility Help */}
           <div className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded hidden md:block">
-            💡 Tip: Use Tab to navigate, Enter to view details, Space to move appointments
+            💡 Tip: Use Tab to navigate, Enter to view details, Space to move appointments, Arrow keys to navigate timeline
+          </div>
+          
+          {/* Screen Reader Live Region for Drag Feedback */}
+          <div 
+            id="drag-feedback-region" 
+            aria-live="polite" 
+            aria-atomic="true" 
+            className="sr-only"
+          >
+            {timelineDragState.isDragging && timelineDragState.dragPreview && (
+              <span>
+                {timelineDragState.validDropZone 
+                  ? `Moving appointment to ${timelineDragState.dragPreview.time} with ${extendedStaff.find(s => s.id === timelineDragState.dragPreview?.staffId)?.name || 'unassigned'}. Drop zone is available.`
+                  : `Cannot move appointment to ${timelineDragState.dragPreview.time} with ${extendedStaff.find(s => s.id === timelineDragState.dragPreview?.staffId)?.name || 'unassigned'}. ${timelineDragState.conflicts.length > 0 ? `${timelineDragState.conflicts.length} conflict${timelineDragState.conflicts.length > 1 ? 's' : ''} detected.` : 'Invalid drop zone.'}`
+                }
+              </span>
+            )}
           </div>
           
           <div className="flex items-center gap-2">
@@ -698,15 +1381,19 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
             </Card>
           ) : (
             <Card className="overflow-hidden">
-              <div className="overflow-x-auto" data-testid="timeline-grid-container">
+              <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700" data-testid="timeline-grid-container">
                 <div 
-                  className="min-w-fit relative"
+                  className={`min-w-fit relative timeline-grid ${timelineDragState.isDragging ? 'timeline-dragging' : ''}`}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: `100px repeat(${extendedStaff.length}, minmax(200px, 1fr))`,
-                    gridTemplateRows: `auto repeat(${timeSlots.length}, 64px)`, // 64px per time slot
-                    minWidth: `${100 + extendedStaff.length * 200}px`
+                    gridTemplateColumns: `100px repeat(${extendedStaff.length}, minmax(160px, 1fr))`, // Reduced min-width for mobile
+                    gridTemplateRows: `auto repeat(${timeSlots.length}, 64px)`,
+                    minWidth: `${100 + extendedStaff.length * 160}px`, // Better mobile responsiveness
+                    maxWidth: '100vw' // Prevent overflow on small screens
                   }}
+                  onDragOver={(e) => handleTimelineDragOver(e, e.currentTarget)}
+                  onDragLeave={handleTimelineDragLeave}
+                  onDrop={handleTimelineDrop}
                 >
                   {/* Header Row */}
                   <div className="sticky top-0 z-20 bg-background border-b border-border p-3 flex items-center justify-center font-medium text-sm">
@@ -755,26 +1442,85 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                     );
                   })}
 
-                  {/* Staff Column Background Cells */}
+                  {/* Staff Column Background Cells with Drop Zone Highlighting */}
                   {extendedStaff.map((staffMember) => (
                     timeSlots.map((timeSlot, timeIndex) => {
                       const isEvenRow = timeIndex % 2 === 0;
+                      const isDropZone = timelineDragState.isDragging && 
+                                        timelineDragState.dragOverTimeSlot === timeSlot.time && 
+                                        timelineDragState.dragOverStaffId === staffMember.id;
+                      const isValidDropZone = isDropZone && timelineDragState.validDropZone;
+                      const isInvalidDropZone = isDropZone && !timelineDragState.validDropZone;
+                      
+                      // Check if this time slot can accommodate the dragged booking's duration
+                      const draggedDuration = draggedBooking ? getBookingDuration(draggedBooking) : 0;
+                      const canAccommodateService = !timelineDragState.isDragging || canTimeSlotAccommodateService(timeSlot.time, draggedDuration);
+                      const isBusinessHoursInvalid = timelineDragState.isDragging && !canAccommodateService;
                       
                       return (
                         <div
                           key={`bg-cell-${timeSlot.id}-${staffMember.id}`}
-                          className={`border-b border-l border-border relative ${
+                          className={`border-b border-l border-border relative transition-all duration-200 focus-within:ring-2 focus-within:ring-primary ${
                             isEvenRow ? 'bg-muted/30' : 'bg-background'
-                          } ${staffMember.id === 'unassigned' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''} hover:bg-muted/50 transition-colors duration-200`}
+                          } ${
+                            staffMember.id === 'unassigned' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''
+                          } ${
+                            isValidDropZone ? 'bg-green-100 dark:bg-green-900/50 ring-2 ring-green-400 dark:ring-green-600' : ''
+                          } ${
+                            isInvalidDropZone ? 'bg-red-100 dark:bg-red-900/50 ring-2 ring-red-400 dark:ring-red-600' : ''
+                          } ${
+                            isBusinessHoursInvalid ? 'bg-gray-200/70 dark:bg-gray-800/70 opacity-60' : ''
+                          } ${
+                            !isDropZone && !timelineDragState.isDragging ? 'hover:bg-muted/50' : ''
+                          }`}
                           style={{ 
                             gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2, // +2 for time column
-                            gridRow: timeIndex + 2 // +2 for header row
+                            gridRow: timeIndex + 2, // +2 for header row
+                            minHeight: '64px'
                           }}
                           data-testid={`bg-cell-${timeSlot.id}-${staffMember.id}`}
+                          role="gridcell"
+                          tabIndex={-1}
+                          aria-label={`Time slot ${timeSlot.display} for ${staffMember.name === 'Unassigned' ? 'unassigned bookings' : staffMember.name}${isDropZone ? (isValidDropZone ? ' - valid drop zone' : ' - invalid drop zone with conflicts') : ''}${isBusinessHoursInvalid ? ' - service would extend past closing hours' : ''}`}
                         >
-                          <div className="absolute inset-1 flex items-center justify-center text-xs text-muted-foreground/20">
-                            Available
-                          </div>
+                          {/* Enhanced Drop Zone Visual Feedback */}
+                          {isDropZone && (
+                            <div className={`absolute inset-0 pointer-events-none z-10 ${
+                              isValidDropZone 
+                                ? 'bg-green-200/40 dark:bg-green-800/40 border-2 border-dashed border-green-400 dark:border-green-600 drop-zone-valid' 
+                                : 'bg-red-200/40 dark:bg-red-800/40 border-2 border-dashed border-red-400 dark:border-red-600 drop-zone-invalid'
+                            }`}>
+                              <div className={`flex items-center justify-center h-full text-xs font-bold ${
+                                isValidDropZone 
+                                  ? 'text-green-800 dark:text-green-200' 
+                                  : 'text-red-800 dark:text-red-200'
+                              }`}>
+                                <div className="bg-white/90 dark:bg-black/90 px-2 py-1 rounded-full shadow-lg border">
+                                  {isValidDropZone ? '✓ Drop here' : '✗ Conflict'}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Enhanced Conflict Warning for Drag Preview */}
+                          {timelineDragState.isDragging && isInvalidDropZone && timelineDragState.conflicts.length > 0 && (
+                            <div className="absolute top-1 right-1 z-20 conflict-indicator">
+                              <div className="bg-red-600 text-white text-xs px-2 py-1 rounded-full shadow-lg border-2 border-red-400 font-bold">
+                                ⚠ {timelineDragState.conflicts.length} conflict{timelineDragState.conflicts.length > 1 ? 's' : ''}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Enhanced Available/Unavailable State */}
+                          {!isDropZone && (
+                            <div className={`absolute inset-1 flex items-center justify-center text-xs ${
+                              isBusinessHoursInvalid 
+                                ? 'text-gray-500 dark:text-gray-400 font-medium' 
+                                : 'text-muted-foreground/20'
+                            }`}>
+                              {isBusinessHoursInvalid ? 'Service too long' : 'Available'}
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -792,7 +1538,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                       const bookingDuration = getBookingDuration(booking);
                       const startRowIndex = timeToGridRow(booking.bookingTime);
                       const rowSpan = durationToRowSpan(bookingDuration);
-                      const overlaps = detectOverlaps(bookings, booking);
+                      const overlaps = detectOverlaps(bookings, booking, staffBookingsMap);
                       const hasConflicts = overlaps.length > 0;
                       
                       const StatusIcon = statusIcons[booking.status];
@@ -812,15 +1558,17 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           draggable={isDraggable}
                           tabIndex={0}
                           role="button"
-                          aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name} for ${bookingDuration} minutes${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}${hasConflicts ? '. Warning: scheduling conflict detected' : ''}`}
-                          className={`absolute p-2 rounded-lg cursor-pointer hover:opacity-90 focus:ring-2 focus:ring-primary focus:ring-offset-1 shadow-sm border-l-4 ${
+                          aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name} for ${bookingDuration} minutes. Status: ${booking.status}. ${isDraggable ? 'Draggable. Press Enter to view details, Space to move appointment, or drag to reschedule.' : 'Press Enter to view details.'}${hasConflicts ? ' Warning: scheduling conflict detected with other appointments.' : ''}`}
+                          aria-describedby={hasConflicts ? `conflict-description-${booking.id}` : undefined}
+                          aria-pressed={isBeingDragged}
+                          className={`absolute p-2 rounded-lg focus:ring-2 focus:ring-primary focus:ring-offset-1 shadow-sm border-l-4 touch-manipulation ${
                             statusColors[booking.status]
                           } ${
-                            isBeingDragged ? 'opacity-50 scale-95 shadow-xl z-50' : 'z-30'
+                            isBeingDragged ? 'booking-drag-preview z-50' : 'z-30 booking-draggable'
                           } ${
-                            isDraggable ? 'cursor-move hover:shadow-md' : ''
+                            isDraggable ? 'cursor-grab hover:cursor-grab active:cursor-grabbing' : 'cursor-pointer'
                           } ${
-                            hasConflicts ? 'border-l-red-500 ring-2 ring-red-200 dark:ring-red-800' : 'border-l-primary'
+                            hasConflicts ? 'border-l-red-500 ring-2 ring-red-200 dark:ring-red-800 conflict-indicator' : 'border-l-primary'
                           } transition-all duration-200`}
                           style={{
                             gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2,
@@ -831,25 +1579,46 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           onClick={() => setSelectedBooking(booking)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
+                              e.preventDefault();
                               setSelectedBooking(booking);
                             } else if (e.key === ' ' && isDraggable) {
                               e.preventDefault();
                               handleMoveBooking(booking);
+                            } else if (isDraggable && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                              e.preventDefault();
+                              handleKeyboardMove(booking, e.key);
                             }
                           }}
+                          onTouchStart={isDraggable ? (e) => handleTouchStart(e, booking) : undefined}
+                          onTouchMove={isDraggable ? handleTouchMove : undefined}
+                          onTouchEnd={isDraggable ? handleTouchEnd : undefined}
                           onDragStart={(e) => handleDragStart(e, booking)}
                           onDragEnd={handleDragEnd}
                           data-testid={`timeline-booking-${booking.id}`}
                           title={`${booking.customerName} - ${booking.serviceName || 'Service'} (${bookingDuration}min)${hasConflicts ? ' - CONFLICT!' : ''}${isDraggable ? ' - Drag to reschedule' : ' - Cannot be moved'}`}
                         >
-                          {/* Booking Header */}
+                          {/* Enhanced Booking Header */}
                           <div className="flex items-center gap-1 mb-2">
                             {hasConflicts && (
-                              <div title="Scheduling conflict detected">
-                                <AlertCircle className="h-3 w-3 text-red-500 flex-shrink-0" />
+                              <div title="Scheduling conflict detected" className="conflict-indicator">
+                                <AlertCircle className="h-3 w-3 text-red-500 flex-shrink-0 animate-pulse" />
                               </div>
                             )}
                             {StatusIcon && <StatusIcon className="h-3 w-3 flex-shrink-0" />}
+                            {isDraggable && (
+                              <GripVertical className="h-3 w-3 text-muted-foreground/70 ml-auto flex-shrink-0" />
+                            )}
+                          </div>
+                          
+                          {/* Hidden conflict description for screen readers */}
+                          {hasConflicts && (
+                            <div id={`conflict-description-${booking.id}`} className="sr-only">
+                              This appointment conflicts with {overlaps.map(o => `${o.customerName} at ${o.bookingTime}`).join(', ')}. Please reschedule to resolve conflicts.
+                            </div>
+                          )}
+                          
+                          {/* Customer Name */}
+                          <div className="flex items-center gap-1 mb-1">
                             {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
                             <span className="text-xs font-semibold truncate flex-1">
                               {booking.customerName}
