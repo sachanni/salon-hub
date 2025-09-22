@@ -349,6 +349,7 @@ export const bookings = pgTable("bookings", {
   status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, confirmed, cancelled, completed
   totalAmountPaisa: integer("total_amount_paisa").notNull(),
   currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  paymentMethod: varchar("payment_method", { length: 20 }).notNull().default('pay_now'), // pay_now, pay_at_salon
   notes: text("notes"), // Special requests or notes
   guestSessionId: text("guest_session_id"), // For tracking guest user sessions
   createdAt: timestamp("created_at").defaultNow(),
@@ -521,6 +522,7 @@ export const createPaymentOrderSchema = z.object({
     }),
     notes: z.string().optional(),
     guestSessionId: z.string().optional(), // For guest session tracking
+    paymentMethod: z.enum(['pay_now', 'pay_at_salon']).default('pay_now'), // Payment method selection
   }),
 });
 

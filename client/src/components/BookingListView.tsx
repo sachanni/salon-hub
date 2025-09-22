@@ -52,6 +52,7 @@ interface Booking {
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
   totalAmountPaisa: number;
   currency: string;
+  paymentMethod?: 'pay_now' | 'pay_at_salon';
   notes?: string;
   createdAt: string;
 }
@@ -602,6 +603,7 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
                   <TableHead>Date & Time</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Amount</TableHead>
+                  <TableHead>Payment</TableHead>
                   <TableHead>Notes</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -609,7 +611,7 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
               <TableBody>
                 {paginatedBookings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8">
+                    <TableCell colSpan={9} className="text-center py-8">
                       <div className="text-muted-foreground">
                         <Calendar className="mx-auto h-12 w-12 mb-4" />
                         <p>No bookings found</p>
@@ -685,6 +687,34 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
                           <span data-testid={`booking-amount-${booking.id}`}>
                             {formatCurrency(booking.totalAmountPaisa, booking.currency)}
                           </span>
+                        </div>
+                      </TableCell>
+                      
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {booking.paymentMethod === 'pay_at_salon' ? (
+                            <>
+                              <Clock className="w-4 h-4 text-amber-600" />
+                              <Badge 
+                                variant="outline" 
+                                className="text-amber-700 border-amber-300 bg-amber-50 dark:bg-amber-950 dark:text-amber-300"
+                                data-testid={`payment-method-${booking.id}`}
+                              >
+                                Pay at Salon
+                              </Badge>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-4 h-4 text-green-600" />
+                              <Badge 
+                                variant="outline" 
+                                className="text-green-700 border-green-300 bg-green-50 dark:bg-green-950 dark:text-green-300"
+                                data-testid={`payment-method-${booking.id}`}
+                              >
+                                Paid Online
+                              </Badge>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                       

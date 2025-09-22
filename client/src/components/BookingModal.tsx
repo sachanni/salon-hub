@@ -33,6 +33,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
   const [isLoadingServices, setIsLoadingServices] = useState(true);
   const [isGuestMode, setIsGuestMode] = useState(true); // Default to guest mode
   const [guestSessionId, setGuestSessionId] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'pay_now' | 'pay_at_salon'>('pay_now');
 
   const { toast } = useToast();
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -126,6 +127,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
     setCustomerEmail("");
     setCustomerPhone("");
     setGuestSessionId(null);
+    setPaymentMethod('pay_now');
   }, [salonId]);
 
   // Handle staff pre-selection when validStaffId prop changes
@@ -275,6 +277,7 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
             date: selectedDate,
             time: selectedTime,
             customer: { name: customerName, email: customerEmail, phone: customerPhone },
+            paymentMethod: paymentMethod,
             ...(selectedStaff && { staffId: selectedStaff }),
             ...(isGuestMode && currentGuestSessionId && { guestSessionId: currentGuestSessionId })
           }
@@ -287,81 +290,109 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
 
       const order = await response.json();
 
-      // Check if Razorpay is loaded
-      if (typeof (window as any).Razorpay === 'undefined') {
-        toast({
-          title: "Payment Error",
-          description: "Payment system not loaded. Please refresh the page and try again.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      // Initialize Razorpay checkout
-      const options = {
-        key: await fetch('/api/razorpay-key').then(r => r.json()).then(d => d.key),
-        amount: order.amount,
-        currency: order.currency,
-        name: 'SalonHub',
-        description: `${selectedServiceDetails.name} at ${salonName}`,
-        order_id: order.id,
-        handler: async function (response: any) {
-          try {
-            // Verify payment on backend
-            const verifyResponse = await fetch('/api/verify-payment', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature
-              })
-            });
-
-            if (verifyResponse.ok) {
-              // Update guest data with successful booking timestamp
-              if (isGuestMode && customerEmail) {
-                saveGuestData(customerEmail, customerPhone);
-              }
-              
-              toast({
-                title: "Booking Confirmed!",
-                description: "Your appointment has been successfully booked. You'll receive a confirmation email shortly."
-              });
-              onClose();
-            } else {
-              throw new Error('Payment verification failed');
-            }
-          } catch (error) {
-            toast({
-              title: "Payment Verification Failed",
-              description: "There was an issue verifying your payment. Please contact support.",
-              variant: "destructive"
-            });
-          }
-        },
-        prefill: {
-          name: customerName,
-          email: customerEmail,
-          contact: customerPhone
-        },
-        theme: {
-          color: '#8B5CF6' // Purple color from design guidelines
+      // Handle different payment methods
+      if (paymentMethod === 'pay_at_salon') {
+        // For "pay at salon", booking is confirmed without online payment
+        // Update guest data with successful booking timestamp
+        if (isGuestMode && customerEmail) {
+          saveGuestData(customerEmail, customerPhone);
         }
-      };
-
-      try {
-        const razorpay = new (window as any).Razorpay(options);
-        razorpay.open();
-      } catch (razorpayError) {
-        console.error('Razorpay initialization error:', razorpayError);
+        
         toast({
-          title: "Payment Error",
-          description: "Unable to initialize payment. Please refresh the page and try again.",
-          variant: "destructive"
+          title: "Booking Confirmed!",
+          description: "Your appointment has been reserved. Please pay at the salon when you arrive for your appointment."
         });
+        onClose();
+      } else {
+        // Handle "pay now" with Razorpay
+        // Check if Razorpay is loaded
+        if (typeof (window as any).Razorpay === 'undefined') {
+          toast({
+            title: "Payment Error",
+            description: "Payment system not loaded. Please refresh the page and try again.",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        // Initialize Razorpay checkout
+        // Fetch Razorpay key with proper error handling
+        const keyResponse = await fetch('/api/razorpay-key');
+        if (!keyResponse.ok) {
+          toast({
+            title: "Payment Error",
+            description: "Unable to load payment configuration. Please refresh the page and try again.",
+            variant: "destructive"
+          });
+          return;
+        }
+        const keyData = await keyResponse.json();
+        
+        const options = {
+          key: keyData.key,
+          amount: order.amount,
+          currency: order.currency,
+          name: 'SalonHub',
+          description: `${selectedServiceDetails.name} at ${salonName}`,
+          order_id: order.id,
+          handler: async function (response: any) {
+            try {
+              // Verify payment on backend
+              const verifyResponse = await fetch('/api/verify-payment', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature
+                })
+              });
+
+              if (verifyResponse.ok) {
+                // Update guest data with successful booking timestamp
+                if (isGuestMode && customerEmail) {
+                  saveGuestData(customerEmail, customerPhone);
+                }
+                
+                toast({
+                  title: "Booking Confirmed!",
+                  description: "Your appointment has been successfully booked. You'll receive a confirmation email shortly."
+                });
+                onClose();
+              } else {
+                throw new Error('Payment verification failed');
+              }
+            } catch (error) {
+              toast({
+                title: "Payment Verification Failed",
+                description: "There was an issue verifying your payment. Please contact support.",
+                variant: "destructive"
+              });
+            }
+          },
+          prefill: {
+            name: customerName,
+            email: customerEmail,
+            contact: customerPhone
+          },
+          theme: {
+            color: '#8B5CF6' // Purple color from design guidelines
+          }
+        };
+
+        try {
+          const razorpay = new (window as any).Razorpay(options);
+          razorpay.open();
+        } catch (razorpayError) {
+          console.error('Razorpay initialization error:', razorpayError);
+          toast({
+            title: "Payment Error",
+            description: "Unable to initialize payment. Please refresh the page and try again.",
+            variant: "destructive"
+          });
+        }
       }
 
     } catch (error) {
@@ -599,10 +630,57 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
             )}
           </div>
 
+          {/* Payment Method Selection */}
+          <div className="space-y-4 p-4 border border-border rounded-lg">
+            <h3 className="font-semibold flex items-center gap-2">
+              <CreditCard className="h-4 w-4" />
+              Payment Method
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                data-testid="button-pay-now"
+                type="button"
+                variant={paymentMethod === 'pay_now' ? 'default' : 'outline'}
+                onClick={() => setPaymentMethod('pay_now')}
+                className="h-auto p-4 flex flex-col items-center gap-2"
+              >
+                <CreditCard className="h-5 w-5" />
+                <div className="text-center">
+                  <div className="font-medium">Pay Now</div>
+                  <div className="text-xs text-muted-foreground">
+                    Secure online payment
+                  </div>
+                </div>
+              </Button>
+              <Button
+                data-testid="button-pay-at-salon"
+                type="button"
+                variant={paymentMethod === 'pay_at_salon' ? 'default' : 'outline'}
+                onClick={() => setPaymentMethod('pay_at_salon')}
+                className="h-auto p-4 flex flex-col items-center gap-2"
+              >
+                <Clock className="h-5 w-5" />
+                <div className="text-center">
+                  <div className="font-medium">Pay at Salon</div>
+                  <div className="text-xs text-muted-foreground">
+                    Pay when you arrive
+                  </div>
+                </div>
+              </Button>
+            </div>
+            {paymentMethod === 'pay_at_salon' && (
+              <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  Your appointment will be reserved. Payment can be made at the salon when you arrive.
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Customer Information */}
           <div className="space-y-4">
             <h3 className="font-semibold flex items-center gap-2">
-              <CreditCard className="h-4 w-4" />
+              <User className="h-4 w-4" />
               {isGuestMode ? "Contact Information" : "Your Information"}
             </h3>
             <div className="grid grid-cols-1 gap-4">
@@ -694,7 +772,8 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
               }
               className="flex-1"
             >
-              {isProcessingPayment ? "Processing..." : "Pay & Book Appointment"}
+              {isProcessingPayment ? "Processing..." : 
+                paymentMethod === 'pay_at_salon' ? "Book Appointment" : "Pay & Book Appointment"}
             </Button>
           </div>
         </div>

@@ -1536,7 +1536,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create payment order endpoint - SERVER-SIDE PRICE CALCULATION
   app.post('/api/create-payment-order', async (req, res) => {
     try {
-      if (!razorpay) {
+      // Check if Razorpay is needed (only for "pay_now" bookings)
+      if (!razorpay && req.body.booking?.paymentMethod !== 'pay_at_salon') {
         return res.status(503).json({ error: 'Payment service not configured' });
       }
       // DEBUG: Log minimal identifiers (no PII)
@@ -1627,9 +1628,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerPhone: input.booking.customer.phone || '', // Empty string for guest bookings
         bookingDate: input.booking.date,
         bookingTime: input.booking.time,
-        status: 'pending',
+        status: input.booking.paymentMethod === 'pay_at_salon' ? 'confirmed' : 'pending',
         totalAmountPaisa: service.priceInPaisa, // SERVER-CONTROLLED AMOUNT
         currency: service.currency,
+        paymentMethod: input.booking.paymentMethod || 'pay_now', // Include payment method
         notes: input.booking.notes,
         guestSessionId: input.booking.guestSessionId // Store guest session ID if provided
       });
@@ -1659,42 +1661,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Don't fail the booking creation if communication fails
       }
 
-      // Create payment record
-      const payment = await storage.createPayment({
-        bookingId: booking.id,
-        amountPaisa: service.priceInPaisa, // SERVER-CONTROLLED AMOUNT
-        currency: service.currency,
-        status: 'pending',
-        razorpayOrderId: null,
-        razorpayPaymentId: null,
-        razorpaySignature: null
-      });
-
-      // Create Razorpay order
-      const razorpayOrderOptions = {
-        amount: service.priceInPaisa, // Amount in paisa - SERVER CONTROLLED
-        currency: service.currency,
-        receipt: `bk_${Date.now()}`, // Use timestamp to fit 40 char limit
-        notes: {
+      // Handle different payment methods
+      if (input.booking.paymentMethod === 'pay_at_salon') {
+        // For "pay at salon", no immediate payment processing needed
+        // Just return booking confirmation details
+        res.json({
           booking_id: booking.id,
-          payment_id: payment.id,
-          service_name: service.name,
-          customer_email: input.booking.customer.email
-        }
-      };
+          payment_method: 'pay_at_salon',
+          amount: service.priceInPaisa,
+          currency: service.currency,
+          status: 'confirmed'
+        });
+      } else {
+        // Handle "pay now" with Razorpay
+        // Create payment record
+        const payment = await storage.createPayment({
+          bookingId: booking.id,
+          amountPaisa: service.priceInPaisa, // SERVER-CONTROLLED AMOUNT
+          currency: service.currency,
+          status: 'pending',
+          razorpayOrderId: null,
+          razorpayPaymentId: null,
+          razorpaySignature: null
+        });
 
-      const order = await razorpay.orders.create(razorpayOrderOptions);
-      
-      // Update payment with Razorpay order ID
-      await storage.updatePaymentOrderId(payment.id, order.id);
+        // Create Razorpay order
+        const razorpayOrderOptions = {
+          amount: service.priceInPaisa, // Amount in paisa - SERVER CONTROLLED
+          currency: service.currency,
+          receipt: `bk_${Date.now()}`, // Use timestamp to fit 40 char limit
+          notes: {
+            booking_id: booking.id,
+            payment_id: payment.id,
+            service_name: service.name,
+            customer_email: input.booking.customer.email
+          }
+        };
 
-      res.json({
-        id: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        booking_id: booking.id,
-        payment_id: payment.id
-      });
+        const order = await razorpay.orders.create(razorpayOrderOptions);
+        
+        // Update payment with Razorpay order ID
+        await storage.updatePaymentOrderId(payment.id, order.id);
+
+        res.json({
+          id: order.id,
+          amount: order.amount,
+          currency: order.currency,
+          booking_id: booking.id,
+          payment_id: payment.id
+        });
+      }
     } catch (error) {
       console.error('Error creating payment order:', error);
       res.status(500).json({ error: 'Failed to create payment order' });
