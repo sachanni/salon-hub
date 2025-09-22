@@ -1329,8 +1329,28 @@ export class DatabaseStorage implements IStorage {
       }
 
       return await db
-        .select()
+        .select({
+          id: bookings.id,
+          serviceId: bookings.serviceId,
+          staffId: bookings.staffId,
+          customerName: bookings.customerName,
+          customerEmail: bookings.customerEmail,
+          customerPhone: bookings.customerPhone,
+          salonName: bookings.salonName,
+          bookingDate: bookings.bookingDate,
+          bookingTime: bookings.bookingTime,
+          status: bookings.status,
+          totalAmountPaisa: bookings.totalAmountPaisa,
+          currency: bookings.currency,
+          notes: bookings.notes,
+          guestSessionId: bookings.guestSessionId,
+          createdAt: bookings.createdAt,
+          salonId: bookings.salonId,
+          serviceName: services.name,
+          serviceDuration: services.durationMinutes
+        })
         .from(bookings)
+        .leftJoin(services, eq(bookings.serviceId, services.id))
         .where(and(...conditions))
         .orderBy(desc(bookings.createdAt));
     } catch (error) {

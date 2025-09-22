@@ -1654,14 +1654,15 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                               </div>
                             )}
                             
-                            {/* Status Badge */}
-                            <div className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
-                              booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
-                              booking.status === 'confirmed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' :
-                              booking.status === 'completed' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' :
-                              'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
-                            }`}>
-                              {booking.status.toUpperCase()}
+                            {/* Status Badge - Compact Design */}
+                            <div className={`inline-flex items-center justify-center w-2 h-2 rounded-full ${
+                              booking.status === 'pending' ? 'bg-yellow-400 border border-yellow-600' :
+                              booking.status === 'confirmed' ? 'bg-green-400 border border-green-600' :
+                              booking.status === 'completed' ? 'bg-blue-400 border border-blue-600' :
+                              'bg-red-400 border border-red-600'
+                            }`} 
+                            title={`Status: ${booking.status.toUpperCase()}`}
+                            aria-label={`Booking status: ${booking.status}`}>
                             </div>
                           </div>
                           
