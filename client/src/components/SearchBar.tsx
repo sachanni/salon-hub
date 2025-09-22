@@ -1,4 +1,4 @@
-import { Search, MapPin, Calendar, Scissors, Paintbrush2, Sparkles, Dumbbell, Heart, Star, SlidersHorizontal, LayoutGrid, ChevronDown, Zap, Smile, User, Stethoscope, Brain, ArrowUpDown, Clock, CheckCircle } from "lucide-react";
+import { Search, MapPin, Calendar, Scissors, Paintbrush2, Sparkles, Dumbbell, Heart, Star, SlidersHorizontal, LayoutGrid, ChevronDown, Zap, Smile, User, Stethoscope, Brain, ArrowUpDown, Clock, CheckCircle, Home, Building2, Navigation, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +57,14 @@ export default function SearchBar() {
   const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Location autocomplete state
+  const [showLocationAutocomplete, setShowLocationAutocomplete] = useState(false);
+  const [locationSuggestions, setLocationSuggestions] = useState<any[]>([]);
+  const [isLocationSearching, setIsLocationSearching] = useState(false);
+  const [savedLocations, setSavedLocations] = useState<any[]>([]);
+  const [currentLocationStatus, setCurrentLocationStatus] = useState<'idle' | 'detecting' | 'success' | 'error'>('idle');
+  const locationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const popularCategories = serviceCategories.filter(cat => cat.popular);
   const hiddenCategoriesCount = serviceCategories.filter(cat => !cat.popular).length;
@@ -281,6 +289,18 @@ export default function SearchBar() {
     }, 200);
   };
 
+  // Load saved locations from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('salonhub_saved_locations');
+    if (saved) {
+      try {
+        setSavedLocations(JSON.parse(saved));
+      } catch (error) {
+        console.error('Error loading saved locations:', error);
+      }
+    }
+  }, []);
+
   // Initialize popular suggestions when component mounts
   useEffect(() => {
     if (allServices.length > 0) {
@@ -288,11 +308,215 @@ export default function SearchBar() {
     }
   }, [allServices, showPopularSuggestions]);
 
+  // Get current location
+  const getCurrentLocation = useCallback(() => {
+    setCurrentLocationStatus('detecting');
+    
+    if (!navigator.geolocation) {
+      setCurrentLocationStatus('error');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          // Use reverse geocoding to get readable location
+          // For now, we'll use a placeholder until we integrate a geocoding service
+          const { latitude, longitude } = position.coords;
+          setLocation(`Current location (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`);
+          setCurrentLocationStatus('success');
+          setShowLocationAutocomplete(false);
+        } catch (error) {
+          console.error('Error getting location name:', error);
+          setCurrentLocationStatus('error');
+        }
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        setCurrentLocationStatus('error');
+      },
+      { timeout: 10000, enableHighAccuracy: false }
+    );
+  }, []);
+
+  // Save location (Home/Work)
+  const saveLocation = useCallback((type: 'home' | 'work', address: string) => {
+    const newLocation = {
+      id: type,
+      type,
+      address,
+      label: type === 'home' ? 'Home' : 'Work',
+      icon: type === 'home' ? Home : Building2
+    };
+    
+    const updatedLocations = savedLocations.filter(loc => loc.type !== type);
+    updatedLocations.push(newLocation);
+    
+    setSavedLocations(updatedLocations);
+    localStorage.setItem('salonhub_saved_locations', JSON.stringify(updatedLocations));
+    setLocation(address);
+    setShowLocationAutocomplete(false);
+  }, [savedLocations]);
+
+  // Location search function
+  const performLocationSearch = useCallback(async (query: string) => {
+    if (!query || query.length < 2) {
+      setLocationSuggestions([]);
+      setIsLocationSearching(false);
+      return;
+    }
+
+    setIsLocationSearching(true);
+    const suggestions = [];
+
+    try {
+      // For demo purposes, we'll use mock location data
+      // In production, you'd integrate with Google Places API or similar
+      const mockLocations = [
+        { name: 'Mumbai, Maharashtra', type: 'city', region: 'Western India' },
+        { name: 'Delhi, NCT', type: 'city', region: 'Northern India' },
+        { name: 'Bangalore, Karnataka', type: 'city', region: 'Southern India' },
+        { name: 'Pune, Maharashtra', type: 'city', region: 'Western India' },
+        { name: 'Hyderabad, Telangana', type: 'city', region: 'Southern India' },
+        { name: 'Chennai, Tamil Nadu', type: 'city', region: 'Southern India' },
+        { name: 'Kolkata, West Bengal', type: 'city', region: 'Eastern India' },
+        { name: 'Ahmedabad, Gujarat', type: 'city', region: 'Western India' },
+        { name: 'Jaipur, Rajasthan', type: 'city', region: 'Northern India' },
+        { name: 'Gurgaon, Haryana', type: 'city', region: 'Northern India' },
+        { name: 'Noida, Uttar Pradesh', type: 'city', region: 'Northern India' },
+        { name: 'Bandra West, Mumbai', type: 'area', region: 'Mumbai' },
+        { name: 'Koramangala, Bangalore', type: 'area', region: 'Bangalore' },
+        { name: 'CP, Delhi', type: 'area', region: 'Delhi' },
+        { name: 'Hitech City, Hyderabad', type: 'area', region: 'Hyderabad' }
+      ];
+
+      const queryLower = query.toLowerCase();
+      const matchingLocations = mockLocations
+        .filter(loc => loc.name.toLowerCase().includes(queryLower))
+        .slice(0, 6)
+        .map(loc => ({
+          type: 'location',
+          id: loc.name.toLowerCase().replace(/\s+/g, '-'),
+          title: loc.name,
+          subtitle: `${loc.type === 'city' ? 'City' : 'Area'} • ${loc.region}`,
+          address: loc.name
+        }));
+
+      suggestions.push(...matchingLocations);
+      setLocationSuggestions(suggestions);
+    } catch (error) {
+      console.error('Error performing location search:', error);
+    } finally {
+      setIsLocationSearching(false);
+    }
+  }, []);
+
+  // Debounced location search
+  const handleLocationInputChange = useCallback((value: string) => {
+    setLocation(value);
+    
+    if (locationTimeoutRef.current) {
+      clearTimeout(locationTimeoutRef.current);
+    }
+    
+    setShowLocationAutocomplete(value.length > 0 || true); // Always show for empty too
+    
+    locationTimeoutRef.current = setTimeout(() => {
+      performLocationSearch(value);
+    }, 300);
+  }, [performLocationSearch]);
+
+  // Show location suggestions on focus
+  const handleLocationInputFocus = () => {
+    setShowLocationAutocomplete(true);
+    if (location.length === 0) {
+      // Show saved locations and current location option
+      const suggestions = [];
+      
+      // Add current location option
+      suggestions.push({
+        type: 'current',
+        id: 'current-location',
+        title: 'Current location',
+        subtitle: 'Use my current location',
+        icon: Navigation
+      });
+      
+      // Add saved locations
+      savedLocations.forEach(savedLoc => {
+        suggestions.push({
+          type: 'saved',
+          id: savedLoc.id,
+          title: savedLoc.label,
+          subtitle: savedLoc.address,
+          icon: savedLoc.icon,
+          address: savedLoc.address
+        });
+      });
+      
+      // Add "Add Home" and "Add Work" if not already saved
+      if (!savedLocations.find(loc => loc.type === 'home')) {
+        suggestions.push({
+          type: 'add-saved',
+          id: 'add-home',
+          title: 'Add Home',
+          subtitle: 'Save your home address',
+          icon: Home,
+          saveType: 'home'
+        });
+      }
+      
+      if (!savedLocations.find(loc => loc.type === 'work')) {
+        suggestions.push({
+          type: 'add-saved',
+          id: 'add-work',
+          title: 'Add Work',
+          subtitle: 'Save your work address',
+          icon: Building2,
+          saveType: 'work'
+        });
+      }
+      
+      setLocationSuggestions(suggestions);
+    } else {
+      performLocationSearch(location);
+    }
+  };
+
+  // Handle location suggestion selection
+  const handleLocationSuggestionSelect = (suggestion: any) => {
+    if (suggestion.type === 'current') {
+      getCurrentLocation();
+    } else if (suggestion.type === 'saved') {
+      setLocation(suggestion.address);
+      setShowLocationAutocomplete(false);
+    } else if (suggestion.type === 'add-saved') {
+      // For demo, we'll prompt for address (in production, use a proper modal)
+      const address = prompt(`Enter your ${suggestion.saveType} address:`);
+      if (address) {
+        saveLocation(suggestion.saveType, address);
+      }
+    } else if (suggestion.type === 'location') {
+      setLocation(suggestion.address);
+      setShowLocationAutocomplete(false);
+    }
+  };
+
+  // Handle location input blur
+  const handleLocationInputBlur = () => {
+    setTimeout(() => {
+      setShowLocationAutocomplete(false);
+    }, 200);
+  };
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
+      }
+      if (locationTimeoutRef.current) {
+        clearTimeout(locationTimeoutRef.current);
       }
     };
   }, []);
@@ -607,14 +831,100 @@ export default function SearchBar() {
         <div className="md:col-span-3 space-y-2">
           <label className="text-sm font-medium text-muted-foreground">Where?</label>
           <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+            {currentLocationStatus === 'detecting' ? (
+              <Navigation className="absolute left-3 top-1/2 transform -translate-y-1/2 text-primary h-4 w-4 animate-pulse" />
+            ) : (
+              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+            )}
             <Input
               data-testid="input-location"
-              placeholder="City, area, or postcode"
+              placeholder="Current location"
               value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="pl-10 h-12"
+              onChange={(e) => handleLocationInputChange(e.target.value)}
+              onFocus={handleLocationInputFocus}
+              onBlur={handleLocationInputBlur}
+              className="pl-10 h-12 text-foreground caret-foreground"
+              autoComplete="off"
+              style={{ caretColor: 'currentColor' }}
             />
+            
+            {/* Location Autocomplete Dropdown */}
+            {showLocationAutocomplete && (locationSuggestions.length > 0 || isLocationSearching) && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto">
+                {isLocationSearching && (
+                  <div className="flex items-center justify-center py-3 text-muted-foreground">
+                    <MapPin className="h-4 w-4 animate-spin mr-2" />
+                    Finding locations...
+                  </div>
+                )}
+                
+                {!isLocationSearching && locationSuggestions.length > 0 && (
+                  <div className="py-1">
+                    {/* Current location and saved locations */}
+                    {location.length === 0 && (
+                      <>
+                        {locationSuggestions.filter(s => s.type === 'current').length > 0 && (
+                          <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border">
+                            Quick access
+                          </div>
+                        )}
+                        {locationSuggestions.filter(s => s.type === 'saved').length > 0 && (
+                          <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border mt-2">
+                            Saved locations
+                            <button className="float-right text-primary hover:text-primary/80 text-xs">
+                              Manage
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    
+                    {locationSuggestions.map((suggestion, index) => {
+                      const IconComponent = suggestion.icon || MapPin;
+                      return (
+                        <div
+                          key={`${suggestion.type}-${suggestion.id}-${index}`}
+                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                          onClick={() => handleLocationSuggestionSelect(suggestion)}
+                          data-testid={`location-suggestion-${suggestion.type}-${suggestion.id}`}
+                        >
+                          {suggestion.type === 'current' && (
+                            <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                              <Navigation className="h-3 w-3" />
+                            </div>
+                          )}
+                          {suggestion.type === 'saved' && (
+                            <div className="p-1.5 rounded bg-green-500/10 text-green-700 dark:text-green-300">
+                              <IconComponent className="h-3 w-3" />
+                            </div>
+                          )}
+                          {suggestion.type === 'add-saved' && (
+                            <div className="p-1.5 rounded bg-gray-500/10 text-gray-700 dark:text-gray-300">
+                              <IconComponent className="h-3 w-3" />
+                            </div>
+                          )}
+                          {suggestion.type === 'location' && (
+                            <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                              <MapPin className="h-3 w-3" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{suggestion.title}</div>
+                            <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                {!isLocationSearching && locationSuggestions.length === 0 && (
+                  <div className="py-3 px-3 text-muted-foreground text-sm text-center">
+                    No locations found
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
