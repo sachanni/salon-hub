@@ -1431,9 +1431,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                     return (
                       <div
                         key={`time-${timeSlot.id}`}
-                        className={`border-b border-border p-3 flex items-center justify-center text-sm font-medium sticky left-0 z-10 ${
-                          isEvenRow ? 'bg-muted/30' : 'bg-background'
-                        }`}
+                        className={`border-b border-border p-3 flex items-center justify-center text-sm font-medium sticky left-0 z-10 bg-white dark:bg-gray-900`}
                         style={{ gridRow: timeIndex + 2 }} // +2 to account for header row
                         data-testid={`time-slot-${timeSlot.id}`}
                       >
@@ -1460,9 +1458,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                       return (
                         <div
                           key={`bg-cell-${timeSlot.id}-${staffMember.id}`}
-                          className={`border-b border-l border-border relative transition-all duration-200 focus-within:ring-2 focus-within:ring-primary ${
-                            isEvenRow ? 'bg-muted/30' : 'bg-background'
-                          } ${
+                          className={`border-b border-l border-border relative transition-all duration-200 focus-within:ring-2 focus-within:ring-primary bg-white dark:bg-gray-900 ${
                             staffMember.id === 'unassigned' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''
                           } ${
                             isValidDropZone ? 'bg-green-100 dark:bg-green-900/50 ring-2 ring-green-400 dark:ring-green-600' : ''
@@ -1561,7 +1557,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name} for ${bookingDuration} minutes. Status: ${booking.status}. ${isDraggable ? 'Draggable. Press Enter to view details, Space to move appointment, or drag to reschedule.' : 'Press Enter to view details.'}${hasConflicts ? ' Warning: scheduling conflict detected with other appointments.' : ''}`}
                           aria-describedby={hasConflicts ? `conflict-description-${booking.id}` : undefined}
                           aria-pressed={isBeingDragged}
-                          className={`absolute p-2 rounded-lg focus:ring-2 focus:ring-primary focus:ring-offset-1 shadow-sm border-l-4 touch-manipulation ${
+                          className={`p-2 rounded-lg focus:ring-2 focus:ring-primary focus:ring-offset-1 shadow-sm border-l-4 touch-manipulation ${
                             statusColors[booking.status]
                           } ${
                             isBeingDragged ? 'booking-drag-preview z-50' : 'z-30 booking-draggable'
@@ -1573,11 +1569,8 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           style={{
                             gridColumn: extendedStaff.findIndex(s => s.id === (booking.staffId || 'unassigned')) + 2,
                             gridRow: `${startRowIndex + 2} / span ${actualRowSpan}`,
-                            margin: '2px', // Small margin for clean visual separation
-                            padding: '6px', // Internal spacing for content  
-                            minHeight: `${actualRowSpan * 64 - 4}px`, // Full row height minus margin
-                            maxHeight: `${actualRowSpan * 64 - 4}px`, // Prevent height overflow
-                            boxSizing: 'border-box', // Include padding in width calculation
+                            margin: '1px',
+                            boxSizing: 'border-box'
                           }}
                           onClick={() => setSelectedBooking(booking)}
                           onKeyDown={(e) => {
