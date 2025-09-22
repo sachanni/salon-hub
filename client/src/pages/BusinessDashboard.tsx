@@ -8,6 +8,23 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
+  SidebarInset,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { 
   Building, 
   Scissors, 
@@ -23,8 +40,13 @@ import {
   TrendingDown,
   Minus,
   MessageSquare,
-  Package
+  Package,
+  Home,
+  ChevronDown,
+  Menu,
+  Cog
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "wouter";
 import type { Salon } from "@/../../shared/schema";
 import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
@@ -107,6 +129,7 @@ export default function BusinessDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [salonId, setSalonId] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState("monthly");
+  const isMobile = useIsMobile();
 
   // Fetch user's salons
   const { data: salons, isLoading: salonsLoading } = useQuery({
@@ -275,6 +298,257 @@ export default function BusinessDashboard() {
       description: "Great progress! You can now move to the next step.",
     });
   };
+
+  // Navigation structure with grouped sections
+  const navigationSections = [
+    {
+      id: "overview",
+      label: "Overview",
+      icon: Home,
+      items: [
+        { id: "overview", label: "Dashboard", icon: BarChart }
+      ]
+    },
+    {
+      id: "calendar",
+      label: "Calendar & Bookings",
+      icon: Calendar,
+      items: [
+        { id: "calendar", label: "Bookings & Calendar", icon: Calendar }
+      ]
+    },
+    {
+      id: "business",
+      label: "Business Management",
+      icon: Building,
+      items: [
+        { id: "services", label: "Services", icon: Scissors, isComplete: hasServices },
+        { id: "staff", label: "Staff", icon: Users, isComplete: hasStaff },
+        { id: "media", label: "Media Gallery", icon: Camera, isComplete: hasMedia },
+        { id: "inventory", label: "Inventory", icon: Package }
+      ]
+    },
+    {
+      id: "analytics",
+      label: "Analytics & Reports",
+      icon: BarChart,
+      items: [
+        { id: "analytics", label: "Advanced Analytics", icon: TrendingUp },
+        { id: "financials", label: "Financial Reports", icon: CreditCard }
+      ]
+    },
+    {
+      id: "communications",
+      label: "Communications",
+      icon: MessageSquare,
+      items: [
+        { id: "communications", label: "Customer Communications", icon: MessageSquare }
+      ]
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: Settings,
+      items: [
+        { id: "profile", label: "Business Profile", icon: Building, isComplete: isProfileComplete },
+        { id: "settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings },
+        { id: "publish", label: "Publish Business", icon: CheckCircle, progress: completionPercentage }
+      ]
+    }
+  ];
+
+  // Sidebar navigation component
+  const SidebarNavigation = () => (
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="border-b border-sidebar-border">
+        <div className="flex items-center gap-3 px-3 py-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Building className="h-4 w-4" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold group-data-[collapsible=icon]:hidden">
+              Business Dashboard
+            </span>
+            <span className="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+              {salonData?.name || 'Professional Management'}
+            </span>
+          </div>
+        </div>
+      </SidebarHeader>
+      <SidebarContent>
+        <ScrollArea className="flex-1">
+          <div className="p-2">
+            <Accordion type="multiple" defaultValue={["overview", "business"]} className="w-full">
+              {navigationSections.map((section) => (
+                section.items.length === 1 ? (
+                  // Single item sections (no accordion)
+                  <div key={section.id} className="mb-2">
+                    <SidebarGroup>
+                      <SidebarGroupContent>
+                        <SidebarMenu>
+                          <SidebarMenuItem>
+                            <SidebarMenuButton
+                              onClick={() => setActiveTab(section.items[0].id)}
+                              isActive={activeTab === section.items[0].id}
+                              tooltip={section.label}
+                              className="w-full justify-start"
+                              data-testid={`nav-${section.items[0].id}`}
+                            >
+                              <section.icon className="h-4 w-4" />
+                              <span className="group-data-[collapsible=icon]:hidden">{section.label}</span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        </SidebarMenu>
+                      </SidebarGroupContent>
+                    </SidebarGroup>
+                  </div>
+                ) : (
+                  // Multi-item sections (with accordion)
+                  <AccordionItem key={section.id} value={section.id} className="border-none">
+                    <AccordionTrigger className="group-data-[collapsible=icon]:justify-center px-3 py-2 hover:no-underline hover:bg-sidebar-accent hover:text-sidebar-accent-foreground rounded-md">
+                      <div className="flex items-center gap-3">
+                        <section.icon className="h-4 w-4" />
+                        <span className="group-data-[collapsible=icon]:hidden text-sm font-medium">
+                          {section.label}
+                        </span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-2">
+                      <SidebarGroup>
+                        <SidebarGroupContent>
+                          <SidebarMenu>
+                            {section.items.map((item) => (
+                              <SidebarMenuItem key={item.id}>
+                                <SidebarMenuButton
+                                  onClick={() => setActiveTab(item.id)}
+                                  isActive={activeTab === item.id}
+                                  tooltip={item.label}
+                                  className="w-full justify-start ml-6 group-data-[collapsible=icon]:ml-0"
+                                  data-testid={`nav-${item.id}`}
+                                >
+                                  <item.icon className="h-4 w-4" />
+                                  <span className="group-data-[collapsible=icon]:hidden flex items-center gap-2">
+                                    {item.label}
+                                    {item.isComplete && (
+                                      <CheckCircle className="h-3 w-3 text-green-500" />
+                                    )}
+                                    {item.isComplete === false && (
+                                      <span className="text-xs text-red-500">*</span>
+                                    )}
+                                    {'progress' in item && item.progress !== undefined && item.progress < 100 && (
+                                      <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
+                                    )}
+                                    {'progress' in item && item.progress === 100 && (
+                                      <CheckCircle className="h-3 w-3 text-green-500" />
+                                    )}
+                                  </span>
+                                </SidebarMenuButton>
+                              </SidebarMenuItem>
+                            ))}
+                          </SidebarMenu>
+                        </SidebarGroupContent>
+                      </SidebarGroup>
+                    </AccordionContent>
+                  </AccordionItem>
+                )
+              ))}
+            </Accordion>
+          </div>
+        </ScrollArea>
+      </SidebarContent>
+    </Sidebar>
+  );
+
+  // Mobile navigation component
+  const MobileNavigation = () => (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon" className="md:hidden">
+          <Menu className="h-4 w-4" />
+          <span className="sr-only">Toggle Navigation</span>
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-72 p-0">
+        <div className="flex h-full flex-col">
+          <div className="border-b border-border p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <Building className="h-4 w-4" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold">Business Dashboard</span>
+                <span className="text-xs text-muted-foreground">
+                  {salonData?.name || 'Professional Management'}
+                </span>
+              </div>
+            </div>
+          </div>
+          <ScrollArea className="flex-1">
+            <div className="p-4">
+              <Accordion type="multiple" defaultValue={["overview", "business"]} className="w-full">
+                {navigationSections.map((section) => (
+                  section.items.length === 1 ? (
+                    // Single item sections
+                    <div key={section.id} className="mb-2">
+                      <Button
+                        variant={activeTab === section.items[0].id ? "default" : "ghost"}
+                        onClick={() => setActiveTab(section.items[0].id)}
+                        className="w-full justify-start"
+                        data-testid={`mobile-nav-${section.items[0].id}`}
+                      >
+                        <section.icon className="h-4 w-4 mr-3" />
+                        {section.label}
+                      </Button>
+                    </div>
+                  ) : (
+                    // Multi-item sections
+                    <AccordionItem key={section.id} value={section.id} className="border-none">
+                      <AccordionTrigger className="px-3 py-2 hover:no-underline hover:bg-accent rounded-md">
+                        <div className="flex items-center gap-3">
+                          <section.icon className="h-4 w-4" />
+                          <span className="text-sm font-medium">{section.label}</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-2">
+                        <div className="space-y-1 ml-6">
+                          {section.items.map((item) => (
+                            <Button
+                              key={item.id}
+                              variant={activeTab === item.id ? "default" : "ghost"}
+                              onClick={() => setActiveTab(item.id)}
+                              className="w-full justify-start h-8"
+                              data-testid={`mobile-nav-${item.id}`}
+                            >
+                              <item.icon className="h-4 w-4 mr-3" />
+                              <span className="flex items-center gap-2 text-sm">
+                                {item.label}
+                                {item.isComplete && (
+                                  <CheckCircle className="h-3 w-3 text-green-500" />
+                                )}
+                                {item.isComplete === false && (
+                                  <span className="text-xs text-red-500">*</span>
+                                )}
+                                {'progress' in item && item.progress !== undefined && item.progress < 100 && (
+                                  <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
+                                )}
+                                {'progress' in item && item.progress === 100 && (
+                                  <CheckCircle className="h-3 w-3 text-green-500" />
+                                )}
+                              </span>
+                            </Button>
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )
+                ))}
+              </Accordion>
+            </div>
+          </ScrollArea>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
 
   const renderTabContent = () => {
     if (activeTab === "overview") {
@@ -865,226 +1139,46 @@ export default function BusinessDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b bg-white dark:bg-gray-900">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+    <SidebarProvider defaultOpen={true}>
+      <div className="min-h-screen bg-background flex w-full">
+        {/* Desktop Sidebar */}
+        <SidebarNavigation />
+        
+        {/* Main Content */}
+        <SidebarInset className="flex-1">
+          {/* Header */}
+          <header className="flex h-16 items-center gap-3 border-b bg-sidebar px-4 md:px-6">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-                <Building className="h-6 w-6 text-blue-600" />
-              </div>
-              <div>
-                <h1 className="text-xl font-semibold">Business Dashboard</h1>
-                <p className="text-sm text-muted-foreground">Professional salon management</p>
+              <SidebarTrigger className="md:hidden" />
+              <MobileNavigation />
+              
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground md:hidden">
+                  <Building className="h-4 w-4" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-semibold md:text-xl">Business Dashboard</h1>
+                  <p className="text-xs text-muted-foreground md:text-sm">Professional salon management</p>
+                </div>
               </div>
             </div>
             
-            {completionPercentage === 100 && (
-              <Badge variant="default" className="bg-green-100 text-green-800">
-                <CheckCircle className="h-3 w-3 mr-1" />
-                Setup Complete
-              </Badge>
-            )}
-          </div>
-        </div>
+            <div className="ml-auto flex items-center gap-2">
+              {completionPercentage === 100 && (
+                <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Setup Complete
+                </Badge>
+              )}
+            </div>
+          </header>
+
+          {/* Content */}
+          <main className="flex-1 overflow-auto">
+            {renderTabContent()}
+          </main>
+        </SidebarInset>
       </div>
-
-      {/* Navigation */}
-      <div className="border-b bg-white dark:bg-gray-900">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-8">
-            <button
-              onClick={() => setActiveTab("overview")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "overview" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <BarChart className="h-4 w-4" />
-                Overview
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("profile")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "profile" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Building className="h-4 w-4" />
-                Profile
-                {isProfileComplete && <CheckCircle className="h-3 w-3 text-green-500" />}
-                {!isProfileComplete && <span className="text-xs text-red-500">*</span>}
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("services")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "services" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Scissors className="h-4 w-4" />
-                Services
-                {hasServices && <CheckCircle className="h-3 w-3 text-green-500" />}
-                {!hasServices && <span className="text-xs text-red-500">*</span>}
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("staff")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "staff" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Staff
-                {hasStaff && <CheckCircle className="h-3 w-3 text-green-500" />}
-                {!hasStaff && <span className="text-xs text-red-500">*</span>}
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("settings")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "settings" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Booking Settings
-                {hasSettings && <CheckCircle className="h-3 w-3 text-green-500" />}
-                {!hasSettings && <span className="text-xs text-red-500">*</span>}
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("media")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "media" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Camera className="h-4 w-4" />
-                Media
-                {hasMedia && <CheckCircle className="h-3 w-3 text-green-500" />}
-                {!hasMedia && <span className="text-xs text-red-500">*</span>}
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("analytics")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "analytics" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4" />
-                Advanced Analytics
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("financials")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "financials" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-              data-testid="tab-financials"
-            >
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4" />
-                Financial Reports
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("communications")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "communications" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-              data-testid="tab-communications"
-            >
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                Communications
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("calendar")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "calendar" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-              data-testid="tab-calendar"
-            >
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                Calendar & Bookings
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("inventory")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "inventory" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-              data-testid="tab-inventory"
-            >
-              <div className="flex items-center gap-2">
-                <Package className="h-4 w-4" />
-                Inventory
-              </div>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("publish")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "publish" 
-                  ? "border-blue-500 text-blue-600" 
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4" />
-                Publish
-                {completionPercentage === 100 && <CheckCircle className="h-3 w-3 text-green-500" />}
-                {completionPercentage < 100 && <span className="text-xs text-amber-500">({Math.round(completionPercentage)}%)</span>}
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="max-w-7xl mx-auto">
-        {renderTabContent()}
-      </div>
-    </div>
+    </SidebarProvider>
   );
 }
