@@ -119,7 +119,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     return hours * 60 + minutes;
   };
 
-  const timeToGridRow = (timeStr: string, startHour = 9): number => {
+  const timeToGridRow = (timeStr: string, startHour = businessStartHour): number => {
     const timeMinutes = parseTimeToMinutes(timeStr);
     const startMinutes = startHour * 60;
     const slotIndex = Math.floor((timeMinutes - startMinutes) / 30);
@@ -1573,8 +1573,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           style={{
                             gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2,
                             gridRow: `${startRowIndex + 2} / span ${actualRowSpan}`,
-                            margin: '2px',
-                            minHeight: `${actualRowSpan * 64 - 4}px`, // 64px per row minus margin
+                            margin: '1px', // Reduced margin for better alignment
+                            minHeight: `${actualRowSpan * 64 - 2}px`, // Match reduced margin
+                            maxHeight: `${actualRowSpan * 64 - 2}px`, // Prevent height overflow
                           }}
                           onClick={() => setSelectedBooking(booking)}
                           onKeyDown={(e) => {
