@@ -25,8 +25,10 @@ import {
   // Booking validation schemas
   updateBookingSchema,
   bulkUpdateBookingSchema,
+  rescheduleBookingInputSchema,
   type UpdateBookingInput,
   type BulkUpdateBookingInput,
+  type RescheduleBookingInput,
   validateStatusTransition,
   // Customer profile validation schemas
   updateCustomerNotesSchema,
@@ -93,6 +95,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', // CSRF protection for session-authenticated endpoints
       maxAge: sessionTtl,
     },
   }));
@@ -1138,6 +1141,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'Failed to update bookings' });
     }
   });
+
+  // Reschedule booking (drag-and-drop support)
+  app.patch('/api/salons/:salonId/bookings/:bookingId/reschedule', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, bookingId } = req.params;
+      
+      // Validate input using Zod schema
+      const validationResult = rescheduleBookingInputSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid input',
+          details: validationResult.error.issues
+        });
+      }
+
+      const input: RescheduleBookingInput = validationResult.data;
+      
+      // Get the current booking to verify it belongs to the salon
+      const currentBooking = await storage.getBooking(bookingId);
+      if (!currentBooking) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      // SECURITY: Verify booking belongs to the specified salon
+      if (currentBooking.salonId !== salonId) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+
+      // Check if booking can be rescheduled (only pending and confirmed bookings)
+      if (!['pending', 'confirmed'].includes(currentBooking.status)) {
+        return res.status(400).json({ 
+          error: `Cannot reschedule a ${currentBooking.status} booking. Only pending and confirmed bookings can be rescheduled.`
+        });
+      }
+
+      // Prevent rescheduling to past dates
+      const today = new Date().toISOString().split('T')[0];
+      if (input.bookingDate < today) {
+        return res.status(400).json({ 
+          error: 'Cannot reschedule booking to a past date'
+        });
+      }
+
+      // Perform the reschedule with conflict validation
+      const updatedBooking = await storage.rescheduleBooking(bookingId, {
+        bookingDate: input.bookingDate,
+        bookingTime: input.bookingTime,
+        staffId: input.staffId
+      });
+
+      res.json({ 
+        success: true, 
+        message: 'Booking rescheduled successfully',
+        booking: updatedBooking
+      });
+    } catch (error) {
+      console.error('Error rescheduling booking:', error);
+      
+      // Handle specific conflict errors with 409 status
+      if (error instanceof Error) {
+        if (error.message.includes('not available') || error.message.includes('conflicts with existing booking')) {
+          return res.status(409).json({ 
+            error: 'Scheduling conflict',
+            details: error.message
+          });
+        }
+        if (error.message.includes('not found')) {
+          return res.status(404).json({ error: error.message });
+        }
+      }
+      
+      res.status(500).json({ error: 'Failed to reschedule booking' });
+    }
+  });
   
   // Get salon dashboard analytics
   app.get('/api/salons/:salonId/analytics', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
@@ -1492,6 +1569,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (service.salonId !== input.salonId) {
         console.log(`Service-salon mismatch: service ${input.serviceId} belongs to salon ${service.salonId}, not ${input.salonId}`);
         return res.status(400).json({ error: 'Service does not belong to the specified salon' });
+      }
+
+      // CONFLICT VALIDATION: Check for overlapping bookings before creating
+      try {
+        const { start, end } = storage.computeBookingTimeRange(
+          input.booking.date, 
+          input.booking.time, 
+          service.durationMinutes
+        );
+
+        // Check for overlapping bookings (no staff ID specified yet, so check all)
+        const overlappingBookings = await storage.findOverlappingBookings(
+          input.salonId, 
+          null, // No specific staff member yet
+          start, 
+          end
+        );
+
+        if (overlappingBookings.length > 0) {
+          return res.status(409).json({ 
+            error: 'Scheduling conflict',
+            details: 'This time slot conflicts with an existing booking. Please choose a different time.'
+          });
+        }
+
+        // Prevent booking in the past
+        const now = new Date();
+        if (start < now) {
+          return res.status(400).json({ 
+            error: 'Cannot book appointments in the past'
+          });
+        }
+      } catch (conflictError) {
+        console.error('Error checking booking conflicts:', conflictError);
+        return res.status(500).json({ error: 'Failed to validate booking time slot' });
       }
 
       // Create booking record BEFORE payment - ensures we have a record

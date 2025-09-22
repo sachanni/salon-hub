@@ -562,6 +562,13 @@ export const bulkUpdateBookingSchema = z.object({
   status: bookingStatusEnum,
 });
 
+// Reschedule booking schema - change date, time, and optionally staff
+export const rescheduleBookingInputSchema = z.object({
+  bookingDate: z.string().min(1, "Booking date is required"),
+  bookingTime: z.string().min(1, "Booking time is required"),
+  staffId: z.string().uuid().optional(),
+});
+
 // Status transition validation function
 export const validateStatusTransition = (currentStatus: string, newStatus: string): { isValid: boolean, error?: string } => {
   const validTransitions: Record<string, string[]> = {
@@ -590,6 +597,7 @@ export type VerifyPaymentInput = z.infer<typeof verifyPaymentSchema>;
 export type CreateSalonInput = z.infer<typeof createSalonSchema>;
 export type UpdateBookingInput = z.infer<typeof updateBookingSchema>;
 export type BulkUpdateBookingInput = z.infer<typeof bulkUpdateBookingSchema>;
+export type RescheduleBookingInput = z.infer<typeof rescheduleBookingInputSchema>;
 
 // Staff relations
 export const staffRelations = relations(staff, ({ one, many }) => ({

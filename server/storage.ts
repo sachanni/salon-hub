@@ -77,7 +77,7 @@ import {
   optimizationRecommendations, automatedActionLogs, campaignOptimizationInsights
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
@@ -147,6 +147,12 @@ export interface IStorage {
   getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]>;
   getCustomersBySalonId(salonId: string): Promise<any[]>;
   getSalonAnalytics(salonId: string, period: string): Promise<any>;
+  
+  // Conflict detection and rescheduling operations
+  computeBookingTimeRange(bookingDate: string, bookingTime: string, durationMinutes: number): { start: Date, end: Date };
+  findOverlappingBookings(salonId: string, staffId: string | null, start: Date, end: Date, excludeId?: string): Promise<Booking[]>;
+  isStaffAvailable(salonId: string, staffId: string, start: Date, end: Date): Promise<boolean>;
+  rescheduleBooking(id: string, fields: { bookingDate: string, bookingTime: string, staffId?: string }): Promise<Booking>;
   
   // Advanced Analytics Methods
   getAdvancedStaffAnalytics(salonId: string, period: string): Promise<any>;
@@ -1365,6 +1371,194 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching customers by salon ID:', error);
       throw error;
     }
+  }
+
+  // Conflict detection and rescheduling operations
+  computeBookingTimeRange(bookingDate: string, bookingTime: string, durationMinutes: number): { start: Date, end: Date } {
+    // Parse the booking date and time into a start Date object
+    const [hours, minutes] = bookingTime.split(':').map(Number);
+    const start = new Date(bookingDate);
+    start.setHours(hours, minutes, 0, 0);
+    
+    // Calculate end time by adding duration
+    const end = new Date(start);
+    end.setMinutes(end.getMinutes() + durationMinutes);
+    
+    return { start, end };
+  }
+
+  async findOverlappingBookings(salonId: string, staffId: string | null, start: Date, end: Date, excludeId?: string): Promise<Booking[]> {
+    try {
+      const startDateStr = start.toISOString().split('T')[0];
+      const endDateStr = end.toISOString().split('T')[0];
+      const startTimeStr = start.toTimeString().substring(0, 5); // HH:MM format
+      const endTimeStr = end.toTimeString().substring(0, 5);
+      
+      const conditions = [
+        eq(bookings.salonId, salonId),
+        // Only check for non-cancelled bookings
+        and(
+          sql`${bookings.status} != 'cancelled'`,
+          sql`${bookings.status} != 'completed'`
+        ),
+        // Check date range overlap
+        or(
+          and(
+            eq(bookings.bookingDate, startDateStr),
+            sql`${bookings.bookingTime} < ${endTimeStr}`,
+            sql`(${bookings.bookingTime}::time + interval '90 minutes') > ${startTimeStr}::time`
+          ),
+          and(
+            gte(bookings.bookingDate, startDateStr),
+            lte(bookings.bookingDate, endDateStr)
+          )
+        )
+      ];
+
+      // If staffId is provided, check for that specific staff member
+      if (staffId) {
+        conditions.push(eq(bookings.staffId, staffId));
+      }
+
+      // Exclude the current booking if rescheduling
+      if (excludeId) {
+        conditions.push(sql`${bookings.id} != ${excludeId}`);
+      }
+
+      const overlappingBookings = await db
+        .select()
+        .from(bookings)
+        .where(and(...conditions));
+
+      return overlappingBookings;
+    } catch (error) {
+      console.error('Error finding overlapping bookings:', error);
+      throw error;
+    }
+  }
+
+  async isStaffAvailable(salonId: string, staffId: string, start: Date, end: Date): Promise<boolean> {
+    try {
+      // Check if staff exists and is active
+      const staffMember = await db
+        .select()
+        .from(staff)
+        .where(and(
+          eq(staff.id, staffId),
+          eq(staff.salonId, salonId),
+          eq(staff.isActive, 1)
+        ));
+
+      if (staffMember.length === 0) {
+        return false; // Staff member doesn't exist or is inactive
+      }
+
+      // Check for conflicting bookings
+      const conflicts = await this.findOverlappingBookings(salonId, staffId, start, end);
+      return conflicts.length === 0;
+    } catch (error) {
+      console.error('Error checking staff availability:', error);
+      return false;
+    }
+  }
+
+  async rescheduleBooking(id: string, fields: { bookingDate: string, bookingTime: string, staffId?: string }): Promise<Booking> {
+    return await db.transaction(async (tx) => {
+      try {
+        // Get the current booking with row-level locking to prevent concurrent modifications
+        const [currentBooking] = await tx.select().from(bookings).where(eq(bookings.id, id)).for('update');
+        if (!currentBooking) {
+          throw new Error('Booking not found');
+        }
+
+        // Get service duration for conflict checking (with locking to ensure consistency)
+        const [service] = await tx.select().from(services).where(eq(services.id, currentBooking.serviceId)).for('update');
+        if (!service) {
+          throw new Error('Associated service not found');
+        }
+
+        // Calculate new time range
+        const { start, end } = this.computeBookingTimeRange(fields.bookingDate, fields.bookingTime, service.durationMinutes);
+
+        const targetStaffId = fields.staffId || currentBooking.staffId;
+        
+        // Check for conflicting bookings using locked queries to prevent race conditions
+        const conflictQuery = tx
+          .select()
+          .from(bookings)
+          .where(
+            and(
+              eq(bookings.salonId, currentBooking.salonId),
+              sql`${bookings.id} != ${id}`, // Exclude current booking
+              or(
+                eq(bookings.status, 'confirmed'),
+                eq(bookings.status, 'pending')
+              ),
+              // Date and time overlap conditions
+              sql`DATE(${bookings.bookingDate}) = DATE(${fields.bookingDate})`,
+              sql`(
+                (TIME(${bookings.bookingTime}) < TIME(${fields.bookingTime}) AND 
+                 TIME(ADDTIME(${bookings.bookingTime}, SEC_TO_TIME(COALESCE((
+                   SELECT ${services.durationMinutes} * 60 
+                   FROM ${services} 
+                   WHERE ${services.id} = ${bookings.serviceId}
+                 ), 3600)))) > TIME(${fields.bookingTime}))
+                OR
+                (TIME(${bookings.bookingTime}) < TIME(ADDTIME(${fields.bookingTime}, SEC_TO_TIME(${service.durationMinutes * 60}))) AND 
+                 TIME(${bookings.bookingTime}) >= TIME(${fields.bookingTime}))
+                OR
+                (TIME(${bookings.bookingTime}) = TIME(${fields.bookingTime}))
+              )`,
+              ...(targetStaffId ? [eq(bookings.staffId, targetStaffId)] : [])
+            )
+          )
+          .for('update'); // Lock conflicting bookings to prevent race conditions
+
+        const conflictingBookings = await conflictQuery;
+        
+        if (conflictingBookings.length > 0) {
+          throw new Error('Time slot conflicts with existing booking');
+        }
+
+        // If staff is being changed, verify the new staff exists and is active (with locking)
+        if (targetStaffId && targetStaffId !== currentBooking.staffId) {
+          const [staffMember] = await tx
+            .select()
+            .from(staff)
+            .where(and(
+              eq(staff.id, targetStaffId),
+              eq(staff.salonId, currentBooking.salonId),
+              eq(staff.isActive, 1)
+            ))
+            .for('update');
+
+          if (!staffMember) {
+            throw new Error('Staff member not found or inactive');
+          }
+        }
+
+        // Update the booking
+        const updateData: Partial<typeof bookings.$inferInsert> = {
+          bookingDate: fields.bookingDate,
+          bookingTime: fields.bookingTime,
+        };
+
+        if (fields.staffId !== undefined) {
+          updateData.staffId = fields.staffId;
+        }
+
+        const [updatedBooking] = await tx
+          .update(bookings)
+          .set(updateData)
+          .where(eq(bookings.id, id))
+          .returning();
+
+        return updatedBooking;
+      } catch (error) {
+        console.error('Error rescheduling booking:', error);
+        throw error;
+      }
+    });
   }
 
   async getSalonAnalytics(salonId: string, period: string): Promise<any> {
