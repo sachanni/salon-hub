@@ -36,6 +36,9 @@ function Router() {
         <Route path="/calendar">
           {() => <CalendarManagement />}
         </Route>
+        <Route path="/calendar-management">
+          {() => <CalendarManagement />}
+        </Route>
         <Route path="/calendar-management/:salonId">
           {(params) => <CalendarManagement salonId={params.salonId} />}
         </Route>
