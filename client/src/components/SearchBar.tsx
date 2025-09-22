@@ -911,12 +911,12 @@ export default function SearchBar() {
                 )}
                 
                 {!isSearching && autocompleteSuggestions.length > 0 && (
-                  <div className="py-1">
-                    {autocompleteSuggestions.map((suggestion, index) => {
-                      const IconComponent = suggestion.icon;
-                      return (
-                        <TooltipProvider key={`${suggestion.type}-${suggestion.id}-${index}`}>
-                          <Tooltip>
+                  <TooltipProvider>
+                    <div className="py-1">
+                      {autocompleteSuggestions.map((suggestion, index) => {
+                        const IconComponent = suggestion.icon;
+                        return (
+                          <Tooltip key={`${suggestion.type}-${suggestion.id}-${index}`}>
                             <TooltipTrigger asChild>
                               <div
                                 className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
@@ -942,10 +942,10 @@ export default function SearchBar() {
                               <p className="text-xs text-muted-foreground">{suggestion.subtitle}</p>
                             </TooltipContent>
                           </Tooltip>
-                        </TooltipProvider>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  </TooltipProvider>
                 )}
                 
                 {!isSearching && autocompleteSuggestions.length === 0 && (
@@ -989,12 +989,12 @@ export default function SearchBar() {
                 )}
                 
                 {!isLocationSearching && locationSuggestions.length > 0 && (
-                  <div className="py-1">
-                    {locationSuggestions.map((suggestion, index) => {
-                      const IconComponent = suggestion.icon || MapPin;
-                      return (
-                        <TooltipProvider key={`${suggestion.type}-${suggestion.id}-${index}`}>
-                          <Tooltip>
+                  <TooltipProvider>
+                    <div className="py-1">
+                      {locationSuggestions.map((suggestion, index) => {
+                        const IconComponent = suggestion.icon || MapPin;
+                        return (
+                          <Tooltip key={`${suggestion.type}-${suggestion.id}-${index}`}>
                             <TooltipTrigger asChild>
                               <div
                                 className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
@@ -1035,10 +1035,10 @@ export default function SearchBar() {
                               <p className="text-xs text-muted-foreground">{suggestion.subtitle}</p>
                             </TooltipContent>
                           </Tooltip>
-                        </TooltipProvider>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  </TooltipProvider>
                 )}
                 
                 {!isLocationSearching && locationSuggestions.length === 0 && (
