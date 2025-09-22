@@ -1149,8 +1149,8 @@ export default function SearchBar() {
               >
                 <div className="flex items-center gap-2">
                   <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                  <div className="flex flex-col items-start">
-                    <span className="text-sm font-medium">
+                  <div className="flex flex-col items-start min-w-0 flex-1">
+                    <span className="text-sm font-medium truncate">
                       {hasActiveFilters ? `${selectedCategories.length + 
                        (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
                        (minRating > 0 ? 1 : 0) + 
@@ -1163,8 +1163,8 @@ export default function SearchBar() {
                        (availableToday ? 1 : 0) + 
                        specificServices.length) !== 1 ? 's' : ''}` : 'All filters'}
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      {hasActiveFilters ? 'Click to modify' : 'Price, rating, availability'}
+                    <span className="text-xs text-muted-foreground truncate">
+                      {hasActiveFilters ? 'Click to modify' : 'Price, rating & more'}
                     </span>
                   </div>
                 </div>
