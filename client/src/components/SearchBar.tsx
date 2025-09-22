@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -755,22 +756,34 @@ export default function SearchBar() {
                     {autocompleteSuggestions.map((suggestion, index) => {
                       const IconComponent = suggestion.icon;
                       return (
-                        <div
-                          key={`${suggestion.type}-${suggestion.id}-${index}`}
-                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() => handleSuggestionSelect(suggestion)}
-                          data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
-                        >
-                          {IconComponent && (
-                            <div className={`p-1.5 rounded ${suggestion.color || 'bg-primary/10 text-primary'}`}>
-                              <IconComponent className="h-3 w-3" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm">{suggestion.title}</div>
-                            <div className="text-xs text-muted-foreground">{suggestion.subtitle}</div>
-                          </div>
-                        </div>
+                        <TooltipProvider key={`${suggestion.type}-${suggestion.id}-${index}`}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div
+                                className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                                onClick={() => handleSuggestionSelect(suggestion)}
+                                data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
+                              >
+                                {IconComponent && (
+                                  <div className={`p-1 rounded flex items-center justify-center w-6 h-6 ${suggestion.color || 'bg-primary/10 text-primary'}`}>
+                                    <IconComponent className="h-3 w-3" />
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-sm leading-tight">{suggestion.title}</div>
+                                  <div className="text-xs text-muted-foreground leading-tight">{suggestion.subtitle}</div>
+                                </div>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent 
+                              side="right"
+                              className="bg-popover border border-border shadow-md text-popover-foreground px-3 py-2 rounded-md text-sm font-medium"
+                            >
+                              <p>{suggestion.title}</p>
+                              <p className="text-xs text-muted-foreground">{suggestion.subtitle}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       );
                     })}
                   </div>
@@ -821,37 +834,49 @@ export default function SearchBar() {
                     {locationSuggestions.map((suggestion, index) => {
                       const IconComponent = suggestion.icon || MapPin;
                       return (
-                        <div
-                          key={`${suggestion.type}-${suggestion.id}-${index}`}
-                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() => handleLocationSuggestionSelect(suggestion)}
-                          data-testid={`location-suggestion-${suggestion.type}-${suggestion.id}`}
-                        >
-                          {suggestion.type === 'current' && (
-                            <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                              <Navigation className="h-3 w-3" />
-                            </div>
-                          )}
-                          {suggestion.type === 'saved' && (
-                            <div className="p-1.5 rounded bg-green-500/10 text-green-700 dark:text-green-300">
-                              <IconComponent className="h-3 w-3" />
-                            </div>
-                          )}
-                          {suggestion.type === 'add-saved' && (
-                            <div className="p-1.5 rounded bg-gray-500/10 text-gray-700 dark:text-gray-300">
-                              <IconComponent className="h-3 w-3" />
-                            </div>
-                          )}
-                          {suggestion.type === 'location' && (
-                            <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                              <MapPin className="h-3 w-3" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm">{suggestion.title}</div>
-                            <div className="text-xs text-muted-foreground">{suggestion.subtitle}</div>
-                          </div>
-                        </div>
+                        <TooltipProvider key={`${suggestion.type}-${suggestion.id}-${index}`}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div
+                                className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                                onClick={() => handleLocationSuggestionSelect(suggestion)}
+                                data-testid={`location-suggestion-${suggestion.type}-${suggestion.id}`}
+                              >
+                                {suggestion.type === 'current' && (
+                                  <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                                    <Navigation className="h-3 w-3" />
+                                  </div>
+                                )}
+                                {suggestion.type === 'saved' && (
+                                  <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-green-500/10 text-green-700 dark:text-green-300">
+                                    <IconComponent className="h-3 w-3" />
+                                  </div>
+                                )}
+                                {suggestion.type === 'add-saved' && (
+                                  <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-gray-500/10 text-gray-700 dark:text-gray-300">
+                                    <IconComponent className="h-3 w-3" />
+                                  </div>
+                                )}
+                                {suggestion.type === 'location' && (
+                                  <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                                    <MapPin className="h-3 w-3" />
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-sm leading-tight">{suggestion.title}</div>
+                                  <div className="text-xs text-muted-foreground leading-tight">{suggestion.subtitle}</div>
+                                </div>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent 
+                              side="right"
+                              className="bg-popover border border-border shadow-md text-popover-foreground px-3 py-2 rounded-md text-sm font-medium"
+                            >
+                              <p>{suggestion.title}</p>
+                              <p className="text-xs text-muted-foreground">{suggestion.subtitle}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       );
                     })}
                   </div>
