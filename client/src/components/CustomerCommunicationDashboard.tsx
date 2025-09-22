@@ -458,7 +458,12 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
 
   const createCampaignMutation = useMutation({
     mutationFn: async (data: z.infer<typeof campaignSchema>) => {
-      return await apiRequest('POST', `/api/salons/${salonId}/communication-campaigns`, data);
+      // Convert "all" back to empty string for API
+      const apiData = {
+        ...data,
+        targetSegmentId: data.targetSegmentId === "all" ? "" : data.targetSegmentId
+      };
+      return await apiRequest('POST', `/api/salons/${salonId}/communication-campaigns`, apiData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'communication-campaigns'] });
@@ -487,7 +492,12 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
   // A/B Testing Mutations
   const createAbTestCampaignMutation = useMutation({
     mutationFn: async (data: z.infer<typeof abTestCampaignSchema>) => {
-      return await apiRequest('POST', `/api/salons/${salonId}/ab-test-campaigns`, data);
+      // Convert "all" back to empty string for API
+      const apiData = {
+        ...data,
+        targetSegmentId: data.targetSegmentId === "all" ? "" : data.targetSegmentId
+      };
+      return await apiRequest('POST', `/api/salons/${salonId}/ab-test-campaigns`, apiData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'ab-test-campaigns'] });
@@ -1218,7 +1228,7 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
                                 </SelectTrigger>
                               </FormControl>
                               <SelectContent>
-                                <SelectItem value="">All Customers</SelectItem>
+                                <SelectItem value="all">All Customers</SelectItem>
                                 {segments?.map((segment) => (
                                   <SelectItem key={segment.id} value={segment.id}>
                                     {segment.name} ({segment.customerCount} customers)
@@ -2372,7 +2382,7 @@ export default function CustomerCommunicationDashboard({ salonId, selectedPeriod
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value="">All Customers</SelectItem>
+                              <SelectItem value="all">All Customers</SelectItem>
                               {segments?.map((segment) => (
                                 <SelectItem key={segment.id} value={segment.id}>
                                   {segment.name}

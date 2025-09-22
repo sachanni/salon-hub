@@ -508,10 +508,16 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
   };
 
   const handleCategorySubmit = (data: any) => {
+    // Convert "none" back to empty string for API
+    const apiData = {
+      ...data,
+      parentCategoryId: data.parentCategoryId === "none" ? "" : data.parentCategoryId
+    };
+    
     if (editingItem) {
       // Handle category update
     } else {
-      createCategoryMutation.mutate(data);
+      createCategoryMutation.mutate(apiData);
     }
   };
 
@@ -938,7 +944,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                                 </SelectTrigger>
                               </FormControl>
                               <SelectContent>
-                                <SelectItem value="">None</SelectItem>
+                                <SelectItem value="none">None</SelectItem>
                                 {categories?.map((category) => (
                                   <SelectItem key={category.id} value={category.id}>
                                     {category.name}

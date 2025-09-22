@@ -324,7 +324,7 @@ export default function CustomerProfilesView({ salonId }: CustomerProfilesViewPr
         customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.phone.toLowerCase().includes(searchTerm.toLowerCase());
 
-      const frequencyMatch = filterFrequency === "" ||
+      const frequencyMatch = filterFrequency === "" || filterFrequency === "all" ||
         getBookingFrequency(customer.totalBookings) === filterFrequency;
 
       return searchMatch && frequencyMatch;
@@ -435,7 +435,7 @@ export default function CustomerProfilesView({ salonId }: CustomerProfilesViewPr
                 <SelectValue placeholder="Filter by frequency" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Customers</SelectItem>
+                <SelectItem value="all">All Customers</SelectItem>
                 <SelectItem value="New Customer">New Customer</SelectItem>
                 <SelectItem value="Returning">Returning</SelectItem>
                 <SelectItem value="Regular">Regular</SelectItem>

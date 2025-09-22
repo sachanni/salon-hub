@@ -596,7 +596,7 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="" data-testid="select-option-no-staff">General Availability</SelectItem>
+                                  <SelectItem value="general" data-testid="select-option-no-staff">General Availability</SelectItem>
                                   {staff.map((member) => (
                                     <SelectItem key={member.id} value={member.id} data-testid={`select-option-staff-${member.id}`}>
                                       {member.name}
