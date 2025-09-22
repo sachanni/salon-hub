@@ -424,8 +424,9 @@ export default function SearchBar() {
               onChange={(e) => handleServiceInputChange(e.target.value)}
               onFocus={handleServiceInputFocus}
               onBlur={handleServiceInputBlur}
-              className="pl-10 h-12"
+              className="pl-10 h-12 text-foreground caret-foreground"
               autoComplete="off"
+              style={{ caretColor: 'currentColor' }}
             />
             
             {/* Autocomplete Dropdown */}
