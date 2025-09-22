@@ -204,7 +204,7 @@ export default function SearchBar() {
       const salonsResponse = await fetch(`/api/salons?service=${encodeURIComponent(query)}&limit=3`);
       if (salonsResponse.ok) {
         const salons = await salonsResponse.json();
-        const salonSuggestions = salons.results?.filter(salon => salon).slice(0, 3).map((salon: any) => ({
+        const salonSuggestions = salons.results?.filter((salon: any) => salon).slice(0, 3).map((salon: any) => ({
           type: 'salon',
           id: salon.id,
           title: salon.name,
@@ -1144,21 +1144,43 @@ export default function SearchBar() {
             <PopoverTrigger asChild>
               <Button 
                 variant="outline" 
-                className="w-full h-12 gap-2"
+                className="w-full h-12 gap-2 justify-between"
                 data-testid="button-filters"
               >
-                <SlidersHorizontal className="h-4 w-4" />
-                Filters
-                {hasActiveFilters && (
-                  <Badge variant="secondary" className="ml-1 h-5 w-5 rounded-full p-0 text-xs">
-                    {selectedCategories.length + 
-                     (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
-                     (minRating > 0 ? 1 : 0) + 
-                     (sortBy && sortBy !== "best-match" ? 1 : 0) + 
-                     (availableToday ? 1 : 0) + 
-                     specificServices.length}
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-medium">
+                      {hasActiveFilters ? `${selectedCategories.length + 
+                       (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
+                       (minRating > 0 ? 1 : 0) + 
+                       (sortBy && sortBy !== "best-match" ? 1 : 0) + 
+                       (availableToday ? 1 : 0) + 
+                       specificServices.length} active filter${(selectedCategories.length + 
+                       (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
+                       (minRating > 0 ? 1 : 0) + 
+                       (sortBy && sortBy !== "best-match" ? 1 : 0) + 
+                       (availableToday ? 1 : 0) + 
+                       specificServices.length) !== 1 ? 's' : ''}` : 'All filters'}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {hasActiveFilters ? 'Click to modify' : 'Price, rating, availability'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {hasActiveFilters && (
+                    <Badge variant="secondary" className="h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center">
+                      {selectedCategories.length + 
+                       (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
+                       (minRating > 0 ? 1 : 0) + 
+                       (sortBy && sortBy !== "best-match" ? 1 : 0) + 
+                       (availableToday ? 1 : 0) + 
+                       specificServices.length}
+                    </Badge>
+                  )}
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                </div>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-80" align="end">
