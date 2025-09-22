@@ -325,21 +325,24 @@ export default function SearchBar() {
     }
   }, [allServices, showPopularSuggestions]);
 
-  // Get current location
+  // Get current location with better UX
   const getCurrentLocation = useCallback(() => {
     setCurrentLocationStatus('detecting');
     
     if (!navigator.geolocation) {
       setCurrentLocationStatus('error');
+      setLocation('Location services not supported');
       return;
     }
+
+    // Mark that we've requested location permission
+    localStorage.setItem('location_permission_requested', 'true');
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          // Use reverse geocoding to get readable location
-          // For now, we'll use a placeholder until we integrate a geocoding service
           const { latitude, longitude } = position.coords;
+          
           // Simulate reverse geocoding with realistic address
           const mockAddresses = [
             'Your Current Location, India',
@@ -354,39 +357,50 @@ export default function SearchBar() {
           setCurrentLocationStatus('success');
           setShowLocationAutocomplete(false);
           
-          // Save coordinates for future use
+          // Save successful location
           localStorage.setItem('user_location', JSON.stringify({
             address: mockAddress,
             lat: latitude,
             lng: longitude,
             timestamp: Date.now()
           }));
+          
+          // Mark permission as granted
+          localStorage.setItem('location_permission_granted', 'true');
         } catch (error) {
           console.error('Error getting location name:', error);
           setCurrentLocationStatus('error');
+          setLocation('Unable to get location name');
         }
       },
       (error) => {
         console.error('Error getting location:', error);
         setCurrentLocationStatus('error');
         
+        // Mark permission as denied/failed
+        localStorage.setItem('location_permission_granted', 'false');
+        
         // Provide helpful error messages
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            setLocation('Location access denied. Please enable location services.');
+            setLocation('Location access denied');
             break;
           case error.POSITION_UNAVAILABLE:
-            setLocation('Location information unavailable.');
+            setLocation('Location unavailable');
             break;
           case error.TIMEOUT:
-            setLocation('Location request timed out.');
+            setLocation('Location request timed out');
             break;
           default:
-            setLocation('Unable to retrieve location.');
+            setLocation('Unable to get location');
             break;
         }
       },
-      { timeout: 10000, enableHighAccuracy: false }
+      { 
+        timeout: 15000, 
+        enableHighAccuracy: true,
+        maximumAge: 300000 // Cache location for 5 minutes
+      }
     );
   }, []);
 
@@ -484,14 +498,16 @@ export default function SearchBar() {
       // Show saved locations and current location option
       const suggestions = [];
       
-      // Add current location option
-      suggestions.push({
-        type: 'current',
-        id: 'current-location',
-        title: 'Current location',
-        subtitle: 'Use my current location',
-        icon: Navigation
-      });
+      // Only show current location if permission was previously granted
+      if (localStorage.getItem('location_permission_granted') === 'true') {
+        suggestions.push({
+          type: 'current',
+          id: 'current-location', 
+          title: 'Use current location',
+          subtitle: 'Find salons near you',
+          icon: Navigation
+        });
+      }
       
       // Add saved locations
       savedLocations.forEach(savedLoc => {
@@ -525,6 +541,28 @@ export default function SearchBar() {
           subtitle: 'Save your work address',
           icon: Building2,
           saveType: 'work'
+        });
+      }
+      
+      // Add popular areas if no saved locations
+      if (savedLocations.length === 0) {
+        const popularAreas = [
+          { name: 'Mumbai, Maharashtra', region: 'Popular City' },
+          { name: 'Delhi, India', region: 'Popular City' },
+          { name: 'Bangalore, Karnataka', region: 'Popular City' },
+          { name: 'Bandra West, Mumbai', region: 'Popular Area' },
+          { name: 'Koramangala, Bangalore', region: 'Popular Area' },
+          { name: 'CP, Delhi', region: 'Popular Area' }
+        ];
+        
+        popularAreas.forEach(area => {
+          suggestions.push({
+            type: 'location',
+            id: area.name.toLowerCase().replace(/\s+/g, '-'),
+            title: area.name,
+            subtitle: area.region,
+            address: area.name
+          });
         });
       }
       
