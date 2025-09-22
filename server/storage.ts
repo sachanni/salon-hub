@@ -1394,36 +1394,43 @@ export class DatabaseStorage implements IStorage {
       const startTimeStr = start.toTimeString().substring(0, 5); // HH:MM format
       const endTimeStr = end.toTimeString().substring(0, 5);
       
-      const conditions = [
-        eq(bookings.salonId, salonId),
-        // Only check for non-cancelled bookings - use proper Drizzle syntax
-        and(
-          ne(bookings.status, 'cancelled'),
-          ne(bookings.status, 'completed')
-        ),
-        // Check for bookings on the same date with time overlap
-        eq(bookings.bookingDate, startDateStr),
-        // Time overlap logic: booking starts before our end time AND booking end time is after our start time
-        sql`${bookings.bookingTime} < ${endTimeStr}`,
-        sql`(${bookings.bookingTime} + interval '90 minutes') > ${startTimeStr}`
-      ];
-
-      // If staffId is provided, check for that specific staff member
-      if (staffId) {
-        conditions.push(eq(bookings.staffId, staffId));
-      }
-
-      // Exclude the current booking if rescheduling
-      if (excludeId) {
-        conditions.push(ne(bookings.id, excludeId));
-      }
-
-      const overlappingBookings = await db
-        .select()
+      // First, we need to get all bookings for the date to check overlaps with their actual durations
+      const potentialConflicts = await db
+        .select({
+          id: bookings.id,
+          salonId: bookings.salonId,
+          staffId: bookings.staffId,
+          serviceId: bookings.serviceId,
+          bookingDate: bookings.bookingDate,
+          bookingTime: bookings.bookingTime,
+          status: bookings.status,
+          durationMinutes: services.durationMinutes
+        })
         .from(bookings)
-        .where(and(...conditions));
-
-      return overlappingBookings;
+        .innerJoin(services, eq(bookings.serviceId, services.id))
+        .where(and(
+          eq(bookings.salonId, salonId),
+          ne(bookings.status, 'cancelled'),
+          ne(bookings.status, 'completed'),
+          eq(bookings.bookingDate, startDateStr),
+          staffId ? eq(bookings.staffId, staffId) : sql`1=1`,
+          excludeId ? ne(bookings.id, excludeId) : sql`1=1`
+        ));
+      
+      // Filter the results by checking for time overlaps using JavaScript
+      const overlappingBookings = potentialConflicts.filter(booking => {
+        const [bookingHours, bookingMinutes] = booking.bookingTime.split(':').map(Number);
+        const bookingStart = new Date(booking.bookingDate);
+        bookingStart.setHours(bookingHours, bookingMinutes, 0, 0);
+        
+        const bookingEnd = new Date(bookingStart);
+        bookingEnd.setMinutes(bookingEnd.getMinutes() + booking.durationMinutes);
+        
+        // Check for overlap: booking overlaps if booking_start < search_end AND booking_end > search_start
+        return bookingStart < end && bookingEnd > start;
+      });
+      
+      return overlappingBookings as Booking[];
     } catch (error) {
       console.error('Error finding overlapping bookings:', error);
       throw error;
@@ -1475,30 +1482,13 @@ export class DatabaseStorage implements IStorage {
         const targetStaffId = fields.staffId || currentBooking.staffId;
         
         // Check for conflicting bookings using proper conflict detection
-        // We need to find bookings that overlap with our new time slot
-        const newEndTime = end.toTimeString().substring(0, 5); // HH:MM format
-        
-        const conflictingBookings = await tx
-          .select()
-          .from(bookings)
-          .where(
-            and(
-              eq(bookings.salonId, currentBooking.salonId),
-              ne(bookings.id, id), // Exclude current booking
-              or(
-                eq(bookings.status, 'confirmed'),
-                eq(bookings.status, 'pending')
-              ),
-              // Check for same date
-              eq(bookings.bookingDate, fields.bookingDate),
-              // Time overlap logic: new booking overlaps if:
-              // existing_start < new_end AND existing_end > new_start
-              sql`${bookings.bookingTime} < ${newEndTime}`,
-              sql`(${bookings.bookingTime} + interval '90 minutes') > ${fields.bookingTime}`,
-              ...(targetStaffId ? [eq(bookings.staffId, targetStaffId)] : [])
-            )
-          )
-          .for('update'); // Lock conflicting bookings to prevent race conditions
+        const conflictingBookings = await this.findOverlappingBookings(
+          currentBooking.salonId,
+          targetStaffId,
+          start,
+          end,
+          id // Exclude current booking
+        );
         
         if (conflictingBookings.length > 0) {
           throw new Error('Time slot conflicts with existing booking');
