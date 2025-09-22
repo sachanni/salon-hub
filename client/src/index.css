@@ -335,4 +335,37 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;  /* Safari and Chrome */
   }
+
+  /* Fix browser tooltip contrast - make them readable */
+  [title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 9999;
+    pointer-events: none;
+    margin-bottom: 4px;
+  }
+
+  /* Hide browser default tooltips and use our custom ones */
+  [title] {
+    position: relative;
+  }
+
+  /* Alternative approach: Style browser tooltips directly (browser-specific) */
+  ::webkit-tooltip {
+    background-color: rgba(0, 0, 0, 0.9) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 4px !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+  }
 }
