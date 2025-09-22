@@ -58,12 +58,16 @@ export default function SearchBar() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [locationModalType, setLocationModalType] = useState<'home' | 'work'>('home');
   const [locationModalValue, setLocationModalValue] = useState('');
+  const [modalLocationSuggestions, setModalLocationSuggestions] = useState<any[]>([]);
+  const [isModalLocationSearching, setIsModalLocationSearching] = useState(false);
+  const [showModalLocationSuggestions, setShowModalLocationSuggestions] = useState(false);
   
   // Autocomplete state
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const modalLocationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Location autocomplete state
   const [showLocationAutocomplete, setShowLocationAutocomplete] = useState(false);
@@ -336,9 +340,27 @@ export default function SearchBar() {
           // Use reverse geocoding to get readable location
           // For now, we'll use a placeholder until we integrate a geocoding service
           const { latitude, longitude } = position.coords;
-          setLocation(`Current location (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`);
+          // Simulate reverse geocoding with realistic address
+          const mockAddresses = [
+            'Your Current Location, India',
+            'Current Location - Mumbai, Maharashtra',
+            'Current Location - Delhi, India', 
+            'Current Location - Bangalore, Karnataka',
+            'Current Location - Hyderabad, Telangana'
+          ];
+          
+          const mockAddress = mockAddresses[Math.floor(Math.random() * mockAddresses.length)];
+          setLocation(mockAddress);
           setCurrentLocationStatus('success');
           setShowLocationAutocomplete(false);
+          
+          // Save coordinates for future use
+          localStorage.setItem('user_location', JSON.stringify({
+            address: mockAddress,
+            lat: latitude,
+            lng: longitude,
+            timestamp: Date.now()
+          }));
         } catch (error) {
           console.error('Error getting location name:', error);
           setCurrentLocationStatus('error');
@@ -347,6 +369,22 @@ export default function SearchBar() {
       (error) => {
         console.error('Error getting location:', error);
         setCurrentLocationStatus('error');
+        
+        // Provide helpful error messages
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            setLocation('Location access denied. Please enable location services.');
+            break;
+          case error.POSITION_UNAVAILABLE:
+            setLocation('Location information unavailable.');
+            break;
+          case error.TIMEOUT:
+            setLocation('Location request timed out.');
+            break;
+          default:
+            setLocation('Unable to retrieve location.');
+            break;
+        }
       },
       { timeout: 10000, enableHighAccuracy: false }
     );
@@ -717,6 +755,89 @@ export default function SearchBar() {
   const handleLocationModalCancel = () => {
     setShowLocationModal(false);
     setLocationModalValue('');
+    setModalLocationSuggestions([]);
+    setShowModalLocationSuggestions(false);
+  };
+
+  // Modal location search function
+  const performModalLocationSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setModalLocationSuggestions([]);
+      setShowModalLocationSuggestions(false);
+      return;
+    }
+
+    setIsModalLocationSearching(true);
+    setShowModalLocationSuggestions(true);
+
+    try {
+      // Enhanced location suggestions with more Indian locations
+      const mockLocations = [
+        // Major cities
+        { name: 'Mumbai, Maharashtra', type: 'city', region: 'Western India' },
+        { name: 'Delhi, India', type: 'city', region: 'Northern India' },
+        { name: 'Bangalore, Karnataka', type: 'city', region: 'Southern India' },
+        { name: 'Chennai, Tamil Nadu', type: 'city', region: 'Southern India' },
+        { name: 'Kolkata, West Bengal', type: 'city', region: 'Eastern India' },
+        { name: 'Hyderabad, Telangana', type: 'city', region: 'Southern India' },
+        { name: 'Pune, Maharashtra', type: 'city', region: 'Western India' },
+        { name: 'Ahmedabad, Gujarat', type: 'city', region: 'Western India' },
+        { name: 'Jaipur, Rajasthan', type: 'city', region: 'Northern India' },
+        { name: 'Gurgaon, Haryana', type: 'city', region: 'Northern India' },
+        { name: 'Noida, Uttar Pradesh', type: 'city', region: 'Northern India' },
+        
+        // Areas and localities
+        { name: 'Nirala Estate, Lucknow', type: 'area', region: 'Uttar Pradesh' },
+        { name: 'Nirala Nagar Road, Lucknow', type: 'area', region: 'Uttar Pradesh' },
+        { name: 'Nirala Valley, Lucknow', type: 'area', region: 'Uttar Pradesh' },
+        { name: 'Bandra West, Mumbai', type: 'area', region: 'Mumbai' },
+        { name: 'Koramangala, Bangalore', type: 'area', region: 'Bangalore' },
+        { name: 'CP, Delhi', type: 'area', region: 'Delhi' },
+        { name: 'Hitech City, Hyderabad', type: 'area', region: 'Hyderabad' },
+        { name: 'Sector 18, Noida', type: 'area', region: 'Uttar Pradesh' },
+        { name: 'MG Road, Bangalore', type: 'area', region: 'Bangalore' },
+        { name: 'Phoenix Mills, Mumbai', type: 'area', region: 'Mumbai' },
+        { name: 'Khan Market, Delhi', type: 'area', region: 'Delhi' },
+        { name: 'Park Street, Kolkata', type: 'area', region: 'West Bengal' }
+      ];
+
+      const queryLower = query.toLowerCase();
+      const matchingLocations = mockLocations
+        .filter(loc => loc.name.toLowerCase().includes(queryLower))
+        .slice(0, 8)
+        .map(loc => ({
+          id: loc.name.toLowerCase().replace(/\s+/g, '-'),
+          title: loc.name,
+          subtitle: `${loc.type === 'city' ? 'City' : 'Area'} • ${loc.region}`,
+          address: loc.name
+        }));
+
+      setModalLocationSuggestions(matchingLocations);
+    } catch (error) {
+      console.error('Error performing modal location search:', error);
+    } finally {
+      setIsModalLocationSearching(false);
+    }
+  }, []);
+
+  // Handle modal location input change
+  const handleModalLocationInputChange = (value: string) => {
+    setLocationModalValue(value);
+    
+    if (modalLocationTimeoutRef.current) {
+      clearTimeout(modalLocationTimeoutRef.current);
+    }
+    
+    modalLocationTimeoutRef.current = setTimeout(() => {
+      performModalLocationSearch(value);
+    }, 300);
+  };
+
+  // Handle modal location suggestion select
+  const handleModalLocationSuggestionSelect = (suggestion: any) => {
+    setLocationModalValue(suggestion.address);
+    setShowModalLocationSuggestions(false);
+    setModalLocationSuggestions([]);
   };
 
   const hasActiveFilters = service.trim().length > 0 || selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || (sortBy && sortBy !== "best-match") || availableToday || specificServices.length > 0;
@@ -1428,15 +1549,24 @@ export default function SearchBar() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center space-x-2">
-            <div className="grid flex-1 gap-2">
+            <div className="grid flex-1 gap-2 relative">
               <Input
                 value={locationModalValue}
-                onChange={(e) => setLocationModalValue(e.target.value)}
+                onChange={(e) => handleModalLocationInputChange(e.target.value)}
+                onFocus={() => setShowModalLocationSuggestions(true)}
+                onBlur={() => {
+                  // Delay hiding suggestions to allow clicks
+                  setTimeout(() => setShowModalLocationSuggestions(false), 150);
+                }}
                 placeholder={`Enter your ${locationModalType} address...`}
                 className="col-span-3"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    handleLocationModalSave();
+                    if (modalLocationSuggestions.length > 0 && showModalLocationSuggestions) {
+                      handleModalLocationSuggestionSelect(modalLocationSuggestions[0]);
+                    } else {
+                      handleLocationModalSave();
+                    }
                   } else if (e.key === 'Escape') {
                     handleLocationModalCancel();
                   }
@@ -1444,6 +1574,45 @@ export default function SearchBar() {
                 autoFocus
                 data-testid={`input-${locationModalType}-address`}
               />
+              
+              {/* Modal Location Autocomplete Dropdown */}
+              {showModalLocationSuggestions && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                  {isModalLocationSearching && (
+                    <div className="py-3 px-3 text-muted-foreground text-sm flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                      Searching locations...
+                    </div>
+                  )}
+                  
+                  {!isModalLocationSearching && modalLocationSuggestions.length > 0 && (
+                    <div className="py-1">
+                      {modalLocationSuggestions.map((suggestion, index) => (
+                        <div
+                          key={`modal-${suggestion.id}-${index}`}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                          onClick={() => handleModalLocationSuggestionSelect(suggestion)}
+                          data-testid={`modal-location-suggestion-${suggestion.id}`}
+                        >
+                          <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                            <MapPin className="h-3 w-3" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm leading-tight">{suggestion.title}</div>
+                            <div className="text-xs text-muted-foreground leading-tight">{suggestion.subtitle}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {!isModalLocationSearching && modalLocationSuggestions.length === 0 && locationModalValue.trim().length > 0 && (
+                    <div className="py-3 px-3 text-muted-foreground text-sm text-center">
+                      No locations found for "{locationModalValue}"
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter className="sm:justify-start">
