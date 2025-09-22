@@ -1580,10 +1580,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           service.durationMinutes
         );
       } catch (timeError) {
-        console.error('Invalid booking time:', timeError.message);
+        const errorMessage = timeError instanceof Error ? timeError.message : 'Invalid time format';
+        console.error('Invalid booking time:', errorMessage);
         return res.status(400).json({ 
           error: 'Invalid booking time',
-          details: timeError.message
+          details: errorMessage
         });
       }
 
