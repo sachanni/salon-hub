@@ -1573,9 +1573,12 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           style={{
                             gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2,
                             gridRow: `${startRowIndex + 2} / span ${actualRowSpan}`,
-                            margin: '1px', // Reduced margin for better alignment
-                            minHeight: `${actualRowSpan * 64 - 2}px`, // Match reduced margin
-                            maxHeight: `${actualRowSpan * 64 - 2}px`, // Prevent height overflow
+                            margin: '0', // No margin for perfect grid alignment
+                            padding: '4px', // Internal spacing for content
+                            minHeight: `${actualRowSpan * 64}px`, // Full row height
+                            maxHeight: `${actualRowSpan * 64}px`, // Prevent height overflow
+                            width: '100%', // Fill full column width
+                            boxSizing: 'border-box', // Include padding in width calculation
                           }}
                           onClick={() => setSelectedBooking(booking)}
                           onKeyDown={(e) => {
