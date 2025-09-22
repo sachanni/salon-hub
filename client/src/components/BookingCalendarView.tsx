@@ -60,7 +60,7 @@ const statusIcons = {
 
 export default function BookingCalendarView({ salonId }: BookingCalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [draggedBooking, setDraggedBooking] = useState<Booking | null>(null);
@@ -72,7 +72,14 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
 
   // Calculate date range based on view mode
   const getDateRange = () => {
-    if (viewMode === 'month') {
+    if (viewMode === 'day') {
+      // For day view, get just the selected day
+      const dayStart = new Date(currentDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(currentDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      return { rangeStart: dayStart, rangeEnd: dayEnd };
+    } else if (viewMode === 'month') {
       // For month view, get the full month plus leading/trailing days to fill weeks
       const monthStart = startOfMonth(currentDate);
       const monthEnd = endOfMonth(currentDate);
@@ -176,7 +183,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
 
   // Navigation functions
   const goToPrevious = () => {
-    if (viewMode === 'month') {
+    if (viewMode === 'day') {
+      setCurrentDate(prev => addDays(prev, -1));
+    } else if (viewMode === 'month') {
       setCurrentDate(prev => addMonths(prev, -1));
     } else {
       setCurrentDate(prev => addDays(prev, -7));
@@ -184,7 +193,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
   };
 
   const goToNext = () => {
-    if (viewMode === 'month') {
+    if (viewMode === 'day') {
+      setCurrentDate(prev => addDays(prev, 1));
+    } else if (viewMode === 'month') {
       setCurrentDate(prev => addMonths(prev, 1));
     } else {
       setCurrentDate(prev => addDays(prev, 7));
@@ -403,8 +414,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
             </SelectContent>
           </Select>
 
-          <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'week' | 'month')}>
+          <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'day' | 'week' | 'month')}>
             <TabsList>
+              <TabsTrigger value="day" data-testid="tab-day">Day</TabsTrigger>
               <TabsTrigger value="week" data-testid="tab-week">Week</TabsTrigger>
               <TabsTrigger value="month" data-testid="tab-month">Month</TabsTrigger>
             </TabsList>
@@ -415,7 +427,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
       {/* Current Period Display */}
       <div className="text-center">
         <h3 className="text-lg font-medium" data-testid="text-current-period">
-          {viewMode === 'month' 
+          {viewMode === 'day'
+            ? format(currentDate, 'EEEE, MMMM d, yyyy')
+            : viewMode === 'month' 
             ? format(currentDate, 'MMMM yyyy')
             : `${format(rangeStart, 'MMM d')} - ${format(rangeEnd, 'MMM d, yyyy')}`
           }
@@ -423,57 +437,33 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
       </div>
 
       {/* Calendar Grid */}
-      <div className={`grid grid-cols-7 gap-4 ${viewMode === 'month' ? 'grid-rows-6' : ''}`}>
-        {/* Day Headers */}
-        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-          <div key={day} className="text-center font-medium text-muted-foreground p-2">
-            {day}
-          </div>
-        ))}
-
-        {/* Day Cells */}
-        {days.map((day) => {
-          const dayBookings = getBookingsForDate(day);
-          const isToday = isSameDay(day, new Date());
-          const isCurrentMonth = viewMode === 'month' ? day.getMonth() === currentDate.getMonth() : true;
-          const dayStr = format(day, 'yyyy-MM-dd');
-          const isDragOver = dragOverDate === dayStr;
-          const isPastDate = dayStr < format(new Date(), 'yyyy-MM-dd');
-
-          return (
-            <Card 
-              key={day.toISOString()} 
-              className={`min-h-32 transition-all duration-200 ${
-                isToday ? 'ring-2 ring-primary' : ''
-              } ${
-                !isCurrentMonth && viewMode === 'month' ? 'opacity-40 bg-muted/20' : ''
-              } ${
-                isDragOver && draggedBooking ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-950' : ''
-              } ${
-                draggedBooking && !isPastDate ? 'hover:ring-1 hover:ring-blue-300' : ''
-              }`}
-              onDragOver={(e) => handleDragOver(e, day)}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, day)}
-              data-testid={`day-cell-${dayStr}`}
-            >
-              <CardHeader className="p-2">
-                <div className="flex items-center justify-between">
-                  <span className={`text-sm font-medium ${
-                    isToday ? 'text-primary' : 
-                    (!isCurrentMonth && viewMode === 'month') ? 'text-muted-foreground' : ''
-                  }`}>
-                    {format(day, 'd')}
-                  </span>
-                  {dayBookings.length > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      {dayBookings.length}
-                    </Badge>
-                  )}
+      {viewMode === 'day' ? (
+        /* Day View - Single Column Layout */
+        <div className="space-y-4" data-testid="day-view-container">
+          <Card className="min-h-96">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-lg font-semibold" data-testid="text-day-title">
+                    {format(currentDate, 'EEEE, MMMM d')}
+                  </h4>
+                  <Badge variant="secondary" data-testid="badge-day-count">
+                    {getBookingsForDate(currentDate).length} appointments
+                  </Badge>
                 </div>
-              </CardHeader>
-              <CardContent className="p-2 space-y-1">
-                {dayBookings.slice(0, 3).map((booking) => {
+                <div className="text-sm text-muted-foreground">
+                  Hourly timeline view coming soon
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {getBookingsForDate(currentDate).length === 0 ? (
+                <div className="text-center text-muted-foreground py-8" data-testid="text-no-appointments">
+                  <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No appointments scheduled for this day</p>
+                </div>
+              ) : (
+                getBookingsForDate(currentDate).map((booking) => {
                   const StatusIcon = statusIcons[booking.status];
                   const isDraggable = ['pending', 'confirmed'].includes(booking.status);
                   const isBeingDragged = draggedBooking?.id === booking.id;
@@ -485,7 +475,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                       tabIndex={0}
                       role="button"
                       aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
-                      className={`p-2 rounded-sm cursor-pointer hover:opacity-80 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
+                      className={`p-4 rounded-lg border cursor-pointer hover:bg-muted/50 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
                         isBeingDragged ? 'opacity-50 scale-95 shadow-lg' : ''
                       } ${isDraggable ? 'cursor-move' : ''} transition-all duration-200`}
                       onClick={() => setSelectedBooking(booking)}
@@ -499,47 +489,178 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                       }}
                       onDragStart={(e) => handleDragStart(e, booking)}
                       onDragEnd={handleDragEnd}
-                      data-testid={`booking-item-${booking.id}`}
+                      data-testid={`day-booking-item-${booking.id}`}
                       title={isDraggable ? `Drag to reschedule ${booking.customerName}'s appointment` : `${booking.status} booking - cannot be moved`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1 text-xs">
-                          <StatusIcon className="h-3 w-3" />
-                          {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground" />}
-                          <Clock className="h-3 w-3" />
-                          <span className="font-medium">{booking.bookingTime}</span>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <StatusIcon className="h-4 w-4" />
+                          {isDraggable && <GripVertical className="h-4 w-4 text-muted-foreground" />}
+                          <Clock className="h-4 w-4" />
+                          <span className="font-semibold text-lg">{booking.bookingTime}</span>
                         </div>
-                        {isDraggable && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-5 w-5 p-0 hover:bg-background/50"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMoveBooking(booking);
-                            }}
-                            aria-label={`Move ${booking.customerName}'s appointment`}
-                            data-testid={`button-move-${booking.id}`}
-                          >
-                            <Move className="h-3 w-3" />
-                          </Button>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {formatCurrency(booking.totalAmountPaisa, booking.currency)}
+                          </span>
+                          {isDraggable && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0 hover:bg-background/50"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveBooking(booking);
+                              }}
+                              aria-label={`Move ${booking.customerName}'s appointment`}
+                              data-testid={`button-day-move-${booking.id}`}
+                            >
+                              <Move className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">{booking.customerName}</span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {booking.serviceName || 'Service'}
+                        </div>
+                        {booking.staffName && (
+                          <div className="text-sm text-muted-foreground">
+                            with {booking.staffName}
+                          </div>
                         )}
                       </div>
-                      <div className="text-xs truncate">{booking.customerName}</div>
-                      <div className="text-xs truncate">{booking.serviceName || 'Service'}</div>
                     </div>
                   );
-                })}
-                {dayBookings.length > 3 && (
-                  <div className="text-xs text-muted-foreground text-center">
-                    +{dayBookings.length - 3} more
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        /* Week/Month View - Grid Layout */
+        <div className={`grid grid-cols-7 gap-4 ${viewMode === 'month' ? 'grid-rows-6' : ''}`}>
+          {/* Day Headers */}
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+            <div key={day} className="text-center font-medium text-muted-foreground p-2">
+              {day}
+            </div>
+          ))}
+
+          {/* Day Cells */}
+          {days.map((day) => {
+            const dayBookings = getBookingsForDate(day);
+            const isToday = isSameDay(day, new Date());
+            const isCurrentMonth = viewMode === 'month' ? day.getMonth() === currentDate.getMonth() : true;
+            const dayStr = format(day, 'yyyy-MM-dd');
+            const isDragOver = dragOverDate === dayStr;
+            const isPastDate = dayStr < format(new Date(), 'yyyy-MM-dd');
+
+            return (
+              <Card 
+                key={day.toISOString()} 
+                className={`min-h-32 transition-all duration-200 ${
+                  isToday ? 'ring-2 ring-primary' : ''
+                } ${
+                  !isCurrentMonth && viewMode === 'month' ? 'opacity-40 bg-muted/20' : ''
+                } ${
+                  isDragOver && draggedBooking ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-950' : ''
+                } ${
+                  draggedBooking && !isPastDate ? 'hover:ring-1 hover:ring-blue-300' : ''
+                }`}
+                onDragOver={(e) => handleDragOver(e, day)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, day)}
+                data-testid={`day-cell-${dayStr}`}
+              >
+                <CardHeader className="p-2">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm font-medium ${
+                      isToday ? 'text-primary' : 
+                      (!isCurrentMonth && viewMode === 'month') ? 'text-muted-foreground' : ''
+                    }`}>
+                      {format(day, 'd')}
+                    </span>
+                    {dayBookings.length > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        {dayBookings.length}
+                      </Badge>
+                    )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                </CardHeader>
+                <CardContent className="p-2 space-y-1">
+                  {dayBookings.slice(0, 3).map((booking) => {
+                    const StatusIcon = statusIcons[booking.status];
+                    const isDraggable = ['pending', 'confirmed'].includes(booking.status);
+                    const isBeingDragged = draggedBooking?.id === booking.id;
+                    
+                    return (
+                      <div
+                        key={booking.id}
+                        draggable={isDraggable}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
+                        className={`p-2 rounded-sm cursor-pointer hover:opacity-80 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
+                          isBeingDragged ? 'opacity-50 scale-95 shadow-lg' : ''
+                        } ${isDraggable ? 'cursor-move' : ''} transition-all duration-200`}
+                        onClick={() => setSelectedBooking(booking)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setSelectedBooking(booking);
+                          } else if (e.key === ' ' && isDraggable) {
+                            e.preventDefault();
+                            handleMoveBooking(booking);
+                          }
+                        }}
+                        onDragStart={(e) => handleDragStart(e, booking)}
+                        onDragEnd={handleDragEnd}
+                        data-testid={`booking-item-${booking.id}`}
+                        title={isDraggable ? `Drag to reschedule ${booking.customerName}'s appointment` : `${booking.status} booking - cannot be moved`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1 text-xs">
+                            <StatusIcon className="h-3 w-3" />
+                            {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground" />}
+                            <Clock className="h-3 w-3" />
+                            <span className="font-medium">{booking.bookingTime}</span>
+                          </div>
+                          {isDraggable && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-5 w-5 p-0 hover:bg-background/50"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveBooking(booking);
+                              }}
+                              aria-label={`Move ${booking.customerName}'s appointment`}
+                              data-testid={`button-move-${booking.id}`}
+                            >
+                              <Move className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="text-xs truncate">{booking.customerName}</div>
+                        <div className="text-xs truncate">{booking.serviceName || 'Service'}</div>
+                      </div>
+                    );
+                  })}
+                  {dayBookings.length > 3 && (
+                    <div className="text-xs text-muted-foreground text-center">
+                      +{dayBookings.length - 3} more
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       {/* Booking Details Modal */}
       <Dialog open={!!selectedBooking} onOpenChange={() => setSelectedBooking(null)}>
