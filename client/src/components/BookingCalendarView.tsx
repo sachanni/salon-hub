@@ -1571,15 +1571,13 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                             hasConflicts ? 'border-l-red-500 ring-2 ring-red-200 dark:ring-red-800 conflict-indicator' : 'border-l-primary'
                           } transition-all duration-200`}
                           style={{
-                            gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2,
+                            gridColumn: extendedStaff.findIndex(s => s.id === (booking.staffId || 'unassigned')) + 2,
                             gridRow: `${startRowIndex + 2} / span ${actualRowSpan}`,
-                            margin: '1px', // Minimal margin for grid separation
-                            padding: '8px', // Internal spacing for content
-                            minHeight: `${actualRowSpan * 64 - 2}px`, // Full row height minus small margin
-                            maxHeight: `${actualRowSpan * 64 - 2}px`, // Prevent height overflow
-                            width: 'calc(100% - 2px)', // Fill column width minus margin
+                            margin: '2px', // Small margin for clean visual separation
+                            padding: '6px', // Internal spacing for content  
+                            minHeight: `${actualRowSpan * 64 - 4}px`, // Full row height minus margin
+                            maxHeight: `${actualRowSpan * 64 - 4}px`, // Prevent height overflow
                             boxSizing: 'border-box', // Include padding in width calculation
-                            justifySelf: 'stretch', // Stretch to fill grid cell
                           }}
                           onClick={() => setSelectedBooking(booking)}
                           onKeyDown={(e) => {
