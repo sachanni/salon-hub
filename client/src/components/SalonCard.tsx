@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
+import { useState } from "react";
 
 interface SalonCardProps {
   id: string;
@@ -29,12 +30,30 @@ export default function SalonCard({
   openTime,
   onBookingClick
 }: SalonCardProps) {
+  const [imageError, setImageError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
   const handleBookNow = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     console.log('Book now clicked for salon:', id);
     onBookingClick?.(name, id);
   };
+
+  const handleImageError = () => {
+    setImageError(true);
+    setIsLoading(false);
+  };
+
+  const handleImageLoad = () => {
+    setIsLoading(false);
+  };
+
+  // Determine if we should show fallback image
+  const showFallback = !image || imageError || image === 'none' || image.trim() === '';
+  
+  // Default salon image URL
+  const defaultSalonImage = 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=500&h=300&fit=crop&crop=center';
 
   return (
     <Link href={`/salon/${id}`}>
@@ -43,11 +62,26 @@ export default function SalonCard({
         className="overflow-hidden hover-elevate transition-all duration-200 cursor-pointer"
       >
       <div className="relative h-48 overflow-hidden">
+        {/* Loading skeleton */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-muted animate-pulse" />
+        )}
+        
+        {/* Image */}
         <img 
-          src={image} 
+          src={showFallback ? defaultSalonImage : image}
           alt={name}
           className="w-full h-full object-cover"
+          onError={handleImageError}
+          onLoad={handleImageLoad}
+          style={{ display: isLoading ? 'none' : 'block' }}
         />
+        
+        {/* Image overlay for fallback indication */}
+        {showFallback && !isLoading && (
+          <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+        )}
+        
         <div className="absolute top-4 right-4">
           <Badge variant="secondary" className="bg-white/90 text-black">
             {priceRange}
