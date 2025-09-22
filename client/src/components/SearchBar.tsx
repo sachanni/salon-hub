@@ -697,7 +697,7 @@ export default function SearchBar() {
     setSpecificServices([]);
   };
 
-  const hasActiveFilters = selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || (sortBy && sortBy !== "best-match") || availableToday || specificServices.length > 0;
+  const hasActiveFilters = service.trim().length > 0 || selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || (sortBy && sortBy !== "best-match") || availableToday || specificServices.length > 0;
 
   return (
     <div className="bg-white dark:bg-card p-6 rounded-xl shadow-lg max-w-6xl mx-auto">
@@ -986,7 +986,11 @@ export default function SearchBar() {
                   <span className="text-sm text-muted-foreground/70">Filters</span>
                   {hasActiveFilters && (
                     <Badge variant="secondary" className="ml-2 h-4 w-4 rounded-full p-0 text-xs flex items-center justify-center bg-primary text-primary-foreground">
-                      {selectedCategories.length + 
+                      {(service.trim().length > 0 && specificServices.length === 0 && !selectedCategories.some(id => {
+                         const category = serviceCategories.find(c => c.id === id);
+                         return category && service.toLowerCase() === category.label.toLowerCase();
+                       }) ? 1 : 0) +
+                       selectedCategories.length + 
                        (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
                        (minRating > 0 ? 1 : 0) + 
                        (sortBy && sortBy !== "best-match" ? 1 : 0) + 
@@ -1224,6 +1228,39 @@ export default function SearchBar() {
       {/* Active Filters Display */}
       {hasActiveFilters && (
         <div className="flex flex-wrap gap-2 pt-4 mt-4 border-t border-border">
+          {/* Service Search Term */}
+          {service.trim().length > 0 && 
+           specificServices.length === 0 && 
+           !selectedCategories.some(id => {
+             const category = serviceCategories.find(c => c.id === id);
+             return category && service.toLowerCase() === category.label.toLowerCase();
+           }) && (
+            <Badge
+              variant="secondary"
+              className="gap-1"
+              data-testid="badge-active-query"
+            >
+              <Search className="h-3 w-3" />
+              Search: {service}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-4 w-4 p-0 hover:bg-transparent"
+                onClick={() => {
+                  setService("");
+                  // Focus the service input after clearing
+                  setTimeout(() => {
+                    const serviceInput = document.querySelector('[data-testid="input-service"]') as HTMLInputElement;
+                    serviceInput?.focus();
+                  }, 100);
+                }}
+                data-testid="button-remove-query"
+                aria-label="Remove search term"
+              >
+                ×
+              </Button>
+            </Badge>
+          )}
           {selectedCategories.map((categoryId) => {
             const category = serviceCategories.find(c => c.id === categoryId);
             return (
