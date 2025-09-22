@@ -192,7 +192,16 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
   };
 
   const goToToday = () => {
-    setCurrentDate(new Date());
+    const today = new Date();
+    setCurrentDate(today);
+    
+    // Provide user feedback that we've navigated to today
+    const todayStr = format(today, 'MMMM d, yyyy');
+    toast({
+      title: "Navigated to Today",
+      description: `Showing calendar for ${todayStr}`,
+      duration: 2000,
+    });
   };
 
   // Get bookings for a specific date
