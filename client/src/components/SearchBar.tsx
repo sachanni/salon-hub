@@ -825,7 +825,7 @@ export default function SearchBar() {
       {/* Main Search Bar */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
         {/* Service Search */}
-        <div className="md:col-span-4 space-y-2">
+        <div className="md:col-span-3 space-y-2">
           <label className="text-sm font-medium text-muted-foreground">What are you looking for?</label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
@@ -919,7 +919,7 @@ export default function SearchBar() {
         </div>
 
         {/* Location */}
-        <div className="md:col-span-3 space-y-2">
+        <div className="md:col-span-2 space-y-2">
           <label className="text-sm font-medium text-muted-foreground">Where?</label>
           <div className="relative">
             {currentLocationStatus === 'detecting' ? (
@@ -1138,7 +1138,7 @@ export default function SearchBar() {
         </div>
 
         {/* Filters */}
-        <div className="md:col-span-2 space-y-2">
+        <div className="md:col-span-4 space-y-2">
           <label className="text-sm font-medium text-muted-foreground">Filters</label>
           <Popover open={showFilters} onOpenChange={setShowFilters}>
             <PopoverTrigger asChild>
