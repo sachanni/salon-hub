@@ -700,207 +700,54 @@ export default function SearchBar() {
   const hasActiveFilters = selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || (sortBy && sortBy !== "best-match") || availableToday || specificServices.length > 0;
 
   return (
-    <div className="bg-white dark:bg-card p-6 rounded-xl shadow-lg max-w-6xl mx-auto space-y-6">
-      {/* Service Categories */}
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-muted-foreground">Popular categories</p>
-        <div className="flex items-start gap-2">
-          {/* Horizontal scrollable popular categories */}
-          <div className="flex-1 min-w-0">
-            <ScrollArea className="w-full">
-              <div className="flex gap-2 pb-2">
-                {popularCategories.map((category) => {
-                  const Icon = category.icon;
-                  const isSelected = selectedCategories.includes(category.id);
-                  return (
-                    <Button
-                      key={category.id}
-                      variant={isSelected ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => handleCategoryToggle(category.id)}
-                      data-testid={`button-category-${category.id}`}
-                      className={`gap-2 whitespace-nowrap ${!isSelected ? category.color : ''}`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span className="hidden sm:inline">{category.label}</span>
-                      <span className="sm:hidden">{category.label.split(' ')[0]}</span>
-                    </Button>
-                  );
-                })}
-                
-                {/* More Categories Button */}
-                {hiddenCategoriesCount > 0 && (
-                  <Popover open={showMoreCategories} onOpenChange={setShowMoreCategories}>
-                    <PopoverTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="gap-1 whitespace-nowrap shrink-0 min-w-fit text-purple-600 border-purple-200 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-800 dark:hover:bg-purple-950"
-                        data-testid="button-category-more"
-                        aria-label={`Show ${hiddenCategoriesCount} more categories`}
-                        aria-expanded={showMoreCategories}
-                        aria-controls="more-categories-popover"
-                      >
-                        <LayoutGrid className="h-4 w-4" />
-                        <span className="hidden sm:inline">All categories</span>
-                        <span className="sm:hidden">More</span>
-                        <Badge variant="outline" className="h-4 min-w-4 rounded-full px-1 text-xs">
-                          {hiddenCategoriesCount}
-                        </Badge>
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-96 p-0" align="end" id="more-categories-popover">
-                      <Command>
-                        <CommandInput 
-                          placeholder="Search categories..." 
-                          data-testid="input-category-search"
-                        />
-                        <CommandList>
-                          <CommandEmpty>No categories found.</CommandEmpty>
-                          <ScrollArea className="max-h-80">
-                            {categoryGroups.map((group) => {
-                              const groupCategories = serviceCategories.filter(cat => cat.group === group && !cat.popular);
-                              if (groupCategories.length === 0) return null;
-                              
-                              return (
-                                <CommandGroup key={group} heading={group}>
-                                  {groupCategories.map((category) => {
-                                    const Icon = category.icon;
-                                    const isSelected = selectedCategories.includes(category.id);
-                                    return (
-                                      <CommandItem
-                                        key={category.id}
-                                        onSelect={() => handleCategoryToggle(category.id)}
-                                        data-testid={`command-item-category-${category.id}`}
-                                        className="flex items-center gap-2"
-                                      >
-                                        <div className={`flex items-center justify-center w-5 h-5 rounded border-2 ${
-                                          isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/30'
-                                        }`}>
-                                          {isSelected && <span className="text-primary-foreground text-xs">✓</span>}
-                                        </div>
-                                        <Icon className="h-4 w-4" />
-                                        <span>{category.label}</span>
-                                      </CommandItem>
-                                    );
-                                  })}
-                                </CommandGroup>
-                              );
-                            })}
-                          </ScrollArea>
-                        </CommandList>
-                        <div className="p-3 border-t">
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setSelectedCategories([])}
-                              className="flex-1"
-                              data-testid="button-clear-categories"
-                            >
-                              Clear all
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => setShowMoreCategories(false)}
-                              className="flex-1"
-                              data-testid="button-apply-categories"
-                            >
-                              Done
-                            </Button>
-                          </div>
-                        </div>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                )}
-              </div>
-              <ScrollBar orientation="horizontal" />
-            </ScrollArea>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Search Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-        {/* Service Search */}
-        <div className="md:col-span-3 space-y-2">
-          <label className="text-sm font-medium text-muted-foreground">What are you looking for?</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-            <Input
-              data-testid="input-service"
-              placeholder="Search treatments, salons..."
-              value={service}
-              onChange={(e) => handleServiceInputChange(e.target.value)}
-              onFocus={handleServiceInputFocus}
-              onBlur={handleServiceInputBlur}
-              className="pl-10 h-12 text-foreground caret-foreground"
-              autoComplete="off"
-              style={{ caretColor: 'currentColor' }}
-            />
+    <div className="bg-white dark:bg-card p-6 rounded-xl shadow-lg max-w-6xl mx-auto">
+      {/* Fresha-style Single Line Search Bar */}
+      <div className="relative">
+        <div className="flex items-center bg-gray-50 dark:bg-gray-800/50 rounded-full h-11 p-1 gap-1">
+          {/* Service Input Segment */}
+          <div className="relative flex-1 min-w-0">
+            <div className="flex items-center h-9 px-4 rounded-full bg-transparent hover:bg-white/60 dark:hover:bg-gray-700/60 transition-colors group focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:shadow-sm">
+              <Search className="h-4 w-4 text-muted-foreground mr-2 group-focus-within:text-primary transition-colors" />
+              <Input
+                value={service}
+                onChange={(e) => handleServiceInputChange(e.target.value)}
+                onFocus={handleServiceInputFocus}
+                onBlur={handleServiceInputBlur}
+                placeholder="Search treatments, salons..."
+                className="border-0 bg-transparent p-0 h-auto focus-visible:ring-0 placeholder:text-muted-foreground/70 text-sm"
+                data-testid="input-service"
+              />
+            </div>
             
-            {/* Autocomplete Dropdown */}
-            {showAutocomplete && (autocompleteSuggestions.length > 0 || isSearching) && (
+            {/* Service Autocomplete Dropdown */}
+            {showAutocomplete && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto">
                 {isSearching && (
-                  <div className="flex items-center justify-center py-3 text-muted-foreground">
-                    <Search className="h-4 w-4 animate-spin mr-2" />
+                  <div className="py-3 px-3 text-muted-foreground text-sm flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
                     Searching...
                   </div>
                 )}
                 
                 {!isSearching && autocompleteSuggestions.length > 0 && (
                   <div className="py-1">
-                    {/* Add section headers for better organization */}
-                    {service.length === 0 && autocompleteSuggestions.some(s => s.type === 'all') && (
-                      <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border">
-                        Quick access
-                      </div>
-                    )}
                     {autocompleteSuggestions.map((suggestion, index) => {
-                      const IconComponent = suggestion.icon || Search;
-                      const showSectionHeader = service.length === 0 && index > 0 && 
-                        autocompleteSuggestions[index-1].type !== suggestion.type;
-                      
+                      const IconComponent = suggestion.icon;
                       return (
-                        <div key={`${suggestion.type}-${suggestion.id}-${index}`}>
-                          {showSectionHeader && (
-                            <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border mt-2">
-                              {suggestion.type === 'category' ? 'Top categories' :
-                               suggestion.type === 'service' ? 'Popular services' : 'Suggestions'}
+                        <div
+                          key={`${suggestion.type}-${suggestion.id}-${index}`}
+                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                          onClick={() => handleSuggestionSelect(suggestion)}
+                          data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
+                        >
+                          {IconComponent && (
+                            <div className={`p-1.5 rounded ${suggestion.color || 'bg-primary/10 text-primary'}`}>
+                              <IconComponent className="h-3 w-3" />
                             </div>
                           )}
-                          <div
-                            className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                            onClick={() => handleSuggestionSelect(suggestion)}
-                            data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
-                          >
-                            {suggestion.type === 'all' && (
-                              <div className="p-1.5 rounded bg-gray-500/10 text-gray-700 dark:text-gray-300">
-                                <LayoutGrid className="h-3 w-3" />
-                              </div>
-                            )}
-                            {suggestion.type === 'category' && (
-                              <div className={`p-1.5 rounded ${suggestion.color}`}>
-                                <IconComponent className="h-3 w-3" />
-                              </div>
-                            )}
-                            {suggestion.type === 'service' && (
-                              <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                                <Sparkles className="h-3 w-3" />
-                              </div>
-                            )}
-                            {suggestion.type === 'salon' && (
-                              <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                                <MapPin className="h-3 w-3" />
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm truncate">{suggestion.title}</div>
-                              <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
-                            </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{suggestion.title}</div>
+                            <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
                           </div>
                         </div>
                       );
@@ -916,60 +763,40 @@ export default function SearchBar() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Location */}
-        <div className="md:col-span-2 space-y-2">
-          <label className="text-sm font-medium text-muted-foreground">Where?</label>
-          <div className="relative">
-            {currentLocationStatus === 'detecting' ? (
-              <Navigation className="absolute left-3 top-1/2 transform -translate-y-1/2 text-primary h-4 w-4 animate-pulse" />
-            ) : (
-              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-            )}
-            <Input
-              data-testid="input-location"
-              placeholder="Current location"
-              value={location}
-              onChange={(e) => handleLocationInputChange(e.target.value)}
-              onFocus={handleLocationInputFocus}
-              onBlur={handleLocationInputBlur}
-              className="pl-10 h-12 text-foreground caret-foreground"
-              autoComplete="off"
-              style={{ caretColor: 'currentColor' }}
-            />
+          {/* Separator */}
+          <div className="w-px h-6 bg-border"></div>
+
+          {/* Location Input Segment */}
+          <div className="relative flex-1 min-w-0">
+            <div className="flex items-center h-9 px-4 rounded-full bg-transparent hover:bg-white/60 dark:hover:bg-gray-700/60 transition-colors group focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:shadow-sm">
+              <MapPin className="h-4 w-4 text-muted-foreground mr-2 group-focus-within:text-primary transition-colors" />
+              <Input
+                value={location}
+                onChange={(e) => handleLocationInputChange(e.target.value)}
+                onFocus={handleLocationInputFocus}
+                onBlur={handleLocationInputBlur}
+                placeholder="Current location"
+                className="border-0 bg-transparent p-0 h-auto focus-visible:ring-0 placeholder:text-muted-foreground/70 text-sm"
+                data-testid="input-location"
+              />
+              {currentLocationStatus === 'detecting' && (
+                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin ml-2"></div>
+              )}
+            </div>
             
             {/* Location Autocomplete Dropdown */}
-            {showLocationAutocomplete && (locationSuggestions.length > 0 || isLocationSearching) && (
+            {showLocationAutocomplete && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto">
                 {isLocationSearching && (
-                  <div className="flex items-center justify-center py-3 text-muted-foreground">
-                    <MapPin className="h-4 w-4 animate-spin mr-2" />
-                    Finding locations...
+                  <div className="py-3 px-3 text-muted-foreground text-sm flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    Searching locations...
                   </div>
                 )}
                 
                 {!isLocationSearching && locationSuggestions.length > 0 && (
                   <div className="py-1">
-                    {/* Current location and saved locations */}
-                    {location.length === 0 && (
-                      <>
-                        {locationSuggestions.filter(s => s.type === 'current').length > 0 && (
-                          <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border">
-                            Quick access
-                          </div>
-                        )}
-                        {locationSuggestions.filter(s => s.type === 'saved').length > 0 && (
-                          <div className="px-3 py-1 text-xs font-medium text-muted-foreground border-b border-border mt-2">
-                            Saved locations
-                            <button className="float-right text-primary hover:text-primary/80 text-xs">
-                              Manage
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    
                     {locationSuggestions.map((suggestion, index) => {
                       const IconComponent = suggestion.icon || MapPin;
                       return (
@@ -1017,22 +844,24 @@ export default function SearchBar() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Date */}
-        <div className="md:col-span-2 space-y-2">
-          <label className="text-sm font-medium text-muted-foreground">When?</label>
+          {/* Separator */}
+          <div className="w-px h-6 bg-border"></div>
+
+          {/* Date Input Segment */}
           <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-            <Button
-              variant="outline"
-              data-testid="button-date-picker"
-              onClick={() => setShowDatePicker(!showDatePicker)}
-              onBlur={handleDatePickerBlur}
-              className="w-full h-12 justify-start pl-10 font-normal text-foreground hover:bg-muted/50"
-            >
-              {getDateDisplayText()}
-            </Button>
+            <div className="flex items-center h-9 px-4 rounded-full bg-transparent hover:bg-white/60 dark:hover:bg-gray-700/60 transition-colors group focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:shadow-sm">
+              <Calendar className="h-4 w-4 text-muted-foreground mr-2 group-focus-within:text-primary transition-colors" />
+              <Button
+                variant="ghost"
+                data-testid="button-date-picker"
+                onClick={() => setShowDatePicker(!showDatePicker)}
+                onBlur={handleDatePickerBlur}
+                className="p-0 h-auto font-normal text-sm hover:bg-transparent focus-visible:ring-0 border-0"
+              >
+                {getDateDisplayText()}
+              </Button>
+            </div>
             
             {/* Date Picker Dropdown */}
             {showDatePicker && (
@@ -1135,42 +964,28 @@ export default function SearchBar() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Filters */}
-        <div className="md:col-span-4 space-y-2">
-          <label className="text-sm font-medium text-muted-foreground">Filters</label>
-          <Popover open={showFilters} onOpenChange={setShowFilters}>
-            <PopoverTrigger asChild>
-              <Button 
-                variant="outline" 
-                className="w-full h-12 gap-2 justify-between"
-                data-testid="button-filters"
-              >
-                <div className="flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                  <div className="flex flex-col items-start min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate">
-                      {hasActiveFilters ? `${selectedCategories.length + 
-                       (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
-                       (minRating > 0 ? 1 : 0) + 
-                       (sortBy && sortBy !== "best-match" ? 1 : 0) + 
-                       (availableToday ? 1 : 0) + 
-                       specificServices.length} active filter${(selectedCategories.length + 
-                       (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
-                       (minRating > 0 ? 1 : 0) + 
-                       (sortBy && sortBy !== "best-match" ? 1 : 0) + 
-                       (availableToday ? 1 : 0) + 
-                       specificServices.length) !== 1 ? 's' : ''}` : 'All filters'}
-                    </span>
-                    <span className="text-xs text-muted-foreground truncate">
-                      {hasActiveFilters ? 'Click to modify' : 'Price, rating & more'}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
+          {/* Separator */}
+          <div className="w-px h-6 bg-border"></div>
+
+          {/* Time Segment - Placeholder for now */}
+          <div className="flex items-center h-9 px-4 rounded-full bg-transparent hover:bg-white/60 dark:hover:bg-gray-700/60 transition-colors group">
+            <Clock className="h-4 w-4 text-muted-foreground mr-2 group-hover:text-primary transition-colors" />
+            <span className="text-sm text-muted-foreground/70">Any time</span>
+          </div>
+
+          {/* Separator */}
+          <div className="w-px h-6 bg-border"></div>
+
+          {/* Filters Segment */}
+          <div className="relative">
+            <Popover open={showFilters} onOpenChange={setShowFilters}>
+              <PopoverTrigger asChild>
+                <div className="flex items-center h-9 px-4 rounded-full bg-transparent hover:bg-white/60 dark:hover:bg-gray-700/60 transition-colors group cursor-pointer">
+                  <SlidersHorizontal className="h-4 w-4 text-muted-foreground mr-2 group-hover:text-primary transition-colors" />
+                  <span className="text-sm text-muted-foreground/70">Filters</span>
                   {hasActiveFilters && (
-                    <Badge variant="secondary" className="h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center">
+                    <Badge variant="secondary" className="ml-2 h-4 w-4 rounded-full p-0 text-xs flex items-center justify-center bg-primary text-primary-foreground">
                       {selectedCategories.length + 
                        (priceRange[0] > 0 || priceRange[1] < 5000 ? 1 : 0) + 
                        (minRating > 0 ? 1 : 0) + 
@@ -1179,204 +994,227 @@ export default function SearchBar() {
                        specificServices.length}
                     </Badge>
                   )}
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </div>
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80" align="end">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-medium">Filters</h4>
-                  {hasActiveFilters && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearFilters}
-                      data-testid="button-clear-filters"
-                    >
-                      Clear all
-                    </Button>
-                  )}
-                </div>
-
-                {/* Price Range */}
-                <div className="space-y-3">
-                  <label className="text-sm font-medium">Price range</label>
-                  <div className="px-2">
-                    <Slider
-                      value={priceRange}
-                      onValueChange={setPriceRange}
-                      max={5000}
-                      step={50}
-                      className="w-full"
-                      data-testid="slider-price-range"
-                    />
-                  </div>
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>₹{priceRange[0]}</span>
-                    <span>₹{priceRange[1]}{priceRange[1] === 5000 ? '+' : ''}</span>
-                  </div>
-                </div>
-
-                {/* Enhanced Rating Filter */}
-                <div className="space-y-3">
-                  <label className="text-sm font-medium">Minimum rating</label>
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((rating) => (
+              </PopoverTrigger>
+              <PopoverContent className="w-96" align="end">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium">Filters</h4>
+                    {hasActiveFilters && (
                       <Button
-                        key={rating}
-                        variant={minRating >= rating ? "default" : "outline"}
+                        variant="ghost"
                         size="sm"
-                        onClick={() => setMinRating(rating === minRating ? 0 : rating)}
-                        className="flex-1 gap-1"
-                        data-testid={`button-rating-${rating}`}
+                        onClick={clearFilters}
+                        data-testid="button-clear-filters"
                       >
-                        <Star className={`h-3 w-3 ${minRating >= rating ? 'fill-current' : ''}`} />
-                        {rating}
+                        Clear all
                       </Button>
-                    ))}
+                    )}
                   </div>
-                  {minRating > 0 && (
-                    <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
-                      <div className="flex">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <Star 
-                            key={star} 
-                            className={`h-3 w-3 ${star <= minRating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`} 
-                          />
-                        ))}
-                      </div>
-                      <span>and above</span>
+
+                  {/* Categories Filter - Moved from popular categories */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium">Categories</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {serviceCategories.map((category) => {
+                        const Icon = category.icon;
+                        const isSelected = selectedCategories.includes(category.id);
+                        return (
+                          <Button
+                            key={category.id}
+                            variant={isSelected ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => handleCategoryToggle(category.id)}
+                            data-testid={`button-category-${category.id}`}
+                            className="h-auto p-2 justify-start gap-2"
+                          >
+                            <Icon className="h-3 w-3" />
+                            <span className="text-xs truncate">{category.label}</span>
+                          </Button>
+                        );
+                      })}
                     </div>
-                  )}
-                </div>
+                  </div>
 
-                {/* Sorting Options */}
-                <div className="space-y-3">
-                  <label className="text-sm font-medium">Sort by</label>
-                  <Select value={sortBy} onValueChange={setSortBy}>
-                    <SelectTrigger data-testid="select-sort-by">
-                      <SelectValue placeholder="Choose sorting..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="best-match">Best match</SelectItem>
-                      <SelectItem value="price-low">Price: Low to High</SelectItem>
-                      <SelectItem value="price-high">Price: High to Low</SelectItem>
-                      <SelectItem value="rating">Highest Rated</SelectItem>
-                      <SelectItem value="newest">Newest First</SelectItem>
-                      <SelectItem value="distance">Nearest First</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  {/* Price Range */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium">Price range</label>
+                    <div className="px-2">
+                      <Slider
+                        value={priceRange}
+                        onValueChange={setPriceRange}
+                        max={5000}
+                        step={50}
+                        className="w-full"
+                        data-testid="slider-price-range"
+                      />
+                    </div>
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>₹{priceRange[0]}</span>
+                      <span>₹{priceRange[1]}{priceRange[1] === 5000 ? '+' : ''}</span>
+                    </div>
+                  </div>
 
-                {/* Availability Filter */}
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="available-today" 
-                      checked={availableToday}
-                      onCheckedChange={(checked) => setAvailableToday(!!checked)}
-                      data-testid="checkbox-available-today"
-                    />
-                    <label htmlFor="available-today" className="text-sm font-medium flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      Available today
-                    </label>
+                  {/* Enhanced Rating Filter */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium">Minimum rating</label>
+                    <div className="flex gap-1">
+                      {[1, 2, 3, 4, 5].map((rating) => (
+                        <Button
+                          key={rating}
+                          variant={minRating >= rating ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setMinRating(rating === minRating ? 0 : rating)}
+                          className="flex-1 gap-1"
+                          data-testid={`button-rating-${rating}`}
+                        >
+                          <Star className={`h-3 w-3 ${minRating >= rating ? 'fill-current' : ''}`} />
+                          {rating}
+                        </Button>
+                      ))}
+                    </div>
+                    {minRating > 0 && (
+                      <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
+                        <div className="flex">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Star 
+                              key={star} 
+                              className={`h-3 w-3 ${star <= minRating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`} 
+                            />
+                          ))}
+                        </div>
+                        <span>and above</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sorting Options */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium">Sort by</label>
+                    <Select value={sortBy} onValueChange={setSortBy}>
+                      <SelectTrigger data-testid="select-sort-by">
+                        <SelectValue placeholder="Choose sorting..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="best-match">Best match</SelectItem>
+                        <SelectItem value="price-low">Price: Low to High</SelectItem>
+                        <SelectItem value="price-high">Price: High to Low</SelectItem>
+                        <SelectItem value="rating">Highest Rated</SelectItem>
+                        <SelectItem value="newest">Newest First</SelectItem>
+                        <SelectItem value="distance">Nearest First</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Availability Filter */}
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox 
+                        id="available-today" 
+                        checked={availableToday}
+                        onCheckedChange={(checked) => setAvailableToday(!!checked)}
+                        data-testid="checkbox-available-today"
+                      />
+                      <label htmlFor="available-today" className="text-sm font-medium flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Available today
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Specific Services Filter */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium">Specific services</label>
+                    <Popover open={showServicesFilter} onOpenChange={setShowServicesFilter}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between" data-testid="button-specific-services">
+                          <span>
+                            {specificServices.length > 0 
+                              ? `${specificServices.length} service${specificServices.length > 1 ? 's' : ''} selected`
+                              : 'Select services...'
+                            }
+                          </span>
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search services..." data-testid="input-service-search" />
+                          <CommandList>
+                            <CommandEmpty>No services found.</CommandEmpty>
+                            <ScrollArea className="max-h-60">
+                              <CommandGroup>
+                                {allServices.map((service) => {
+                                  const isSelected = specificServices.includes(service.id);
+                                  return (
+                                    <CommandItem
+                                      key={service.id}
+                                      onSelect={() => {
+                                        setSpecificServices(prev => 
+                                          isSelected 
+                                            ? prev.filter(id => id !== service.id)
+                                            : [...prev, service.id]
+                                        );
+                                      }}
+                                      data-testid={`command-item-service-${service.id}`}
+                                      className="flex items-center gap-2"
+                                    >
+                                      <div className={`flex items-center justify-center w-4 h-4 rounded border ${
+                                        isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/30'
+                                      }`}>
+                                        {isSelected && <CheckCircle className="h-3 w-3 text-primary-foreground" />}
+                                      </div>
+                                      <div className="flex-1">
+                                        <div className="font-medium">{service.name}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                          ₹{Math.round(service.priceInPaisa / 100)} • {service.durationMinutes}min
+                                          {service.category && ` • ${service.category}`}
+                                        </div>
+                                      </div>
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            </ScrollArea>
+                          </CommandList>
+                          <div className="p-3 border-t">
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setSpecificServices([])}
+                                className="flex-1"
+                                data-testid="button-clear-services"
+                              >
+                                Clear all
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => setShowServicesFilter(false)}
+                                className="flex-1"
+                                data-testid="button-apply-services"
+                              >
+                                Done ({specificServices.length})
+                              </Button>
+                            </div>
+                          </div>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
+              </PopoverContent>
+            </Popover>
+          </div>
 
-                {/* Specific Services Filter */}
-                <div className="space-y-3">
-                  <label className="text-sm font-medium">Specific services</label>
-                  <Popover open={showServicesFilter} onOpenChange={setShowServicesFilter}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between" data-testid="button-specific-services">
-                        <span>
-                          {specificServices.length > 0 
-                            ? `${specificServices.length} service${specificServices.length > 1 ? 's' : ''} selected`
-                            : 'Select services...'
-                          }
-                        </span>
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80 p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="Search services..." data-testid="input-service-search" />
-                        <CommandList>
-                          <CommandEmpty>No services found.</CommandEmpty>
-                          <ScrollArea className="max-h-60">
-                            <CommandGroup>
-                              {allServices.map((service) => {
-                                const isSelected = specificServices.includes(service.id);
-                                return (
-                                  <CommandItem
-                                    key={service.id}
-                                    onSelect={() => {
-                                      setSpecificServices(prev => 
-                                        isSelected 
-                                          ? prev.filter(id => id !== service.id)
-                                          : [...prev, service.id]
-                                      );
-                                    }}
-                                    data-testid={`command-item-service-${service.id}`}
-                                    className="flex items-center gap-2"
-                                  >
-                                    <div className={`flex items-center justify-center w-4 h-4 rounded border ${
-                                      isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/30'
-                                    }`}>
-                                      {isSelected && <CheckCircle className="h-3 w-3 text-primary-foreground" />}
-                                    </div>
-                                    <div className="flex-1">
-                                      <div className="font-medium">{service.name}</div>
-                                      <div className="text-xs text-muted-foreground">
-                                        ₹{Math.round(service.priceInPaisa / 100)} • {service.durationMinutes}min
-                                        {service.category && ` • ${service.category}`}
-                                      </div>
-                                    </div>
-                                  </CommandItem>
-                                );
-                              })}
-                            </CommandGroup>
-                          </ScrollArea>
-                        </CommandList>
-                        <div className="p-3 border-t">
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setSpecificServices([])}
-                              className="flex-1"
-                              data-testid="button-clear-services"
-                            >
-                              Clear all
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => setShowServicesFilter(false)}
-                              className="flex-1"
-                              data-testid="button-apply-services"
-                            >
-                              Done ({specificServices.length})
-                            </Button>
-                          </div>
-                        </div>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
+          {/* Separator */}
+          <div className="w-px h-6 bg-border"></div>
 
-        {/* Search Button */}
-        <div className="md:col-span-1">
+          {/* Search Button */}
           <Button 
             data-testid="button-search"
             onClick={handleSearch}
-            className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground"
-            size="lg"
+            className="h-9 px-6 bg-gray-900 hover:bg-gray-800 text-white rounded-full transition-colors"
           >
             Search
           </Button>
@@ -1385,7 +1223,7 @@ export default function SearchBar() {
 
       {/* Active Filters Display */}
       {hasActiveFilters && (
-        <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+        <div className="flex flex-wrap gap-2 pt-4 mt-4 border-t border-border">
           {selectedCategories.map((categoryId) => {
             const category = serviceCategories.find(c => c.id === categoryId);
             return (
