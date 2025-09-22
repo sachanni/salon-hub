@@ -1599,7 +1599,7 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           title={`${booking.customerName} - ${booking.serviceName || 'Service'} (${bookingDuration}min)${hasConflicts ? ' - CONFLICT!' : ''}${isDraggable ? ' - Drag to reschedule' : ' - Cannot be moved'}`}
                         >
                           {/* Enhanced Booking Header */}
-                          <div className="flex items-center gap-1 mb-2">
+                          <div className="flex items-center gap-1 mb-1">
                             {hasConflicts && (
                               <div title="Scheduling conflict detected" className="conflict-indicator">
                                 <AlertCircle className="h-3 w-3 text-red-500 flex-shrink-0 animate-pulse" />
@@ -1618,30 +1618,51 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                             </div>
                           )}
                           
-                          {/* Customer Name */}
-                          <div className="flex items-center gap-1 mb-1">
-                            {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
-                            <span className="text-xs font-semibold truncate flex-1">
-                              {booking.customerName}
-                            </span>
-                          </div>
-                          
-                          {/* Booking Details */}
-                          <div className="space-y-1">
-                            <div className="text-xs truncate font-medium">
-                              {booking.serviceName || 'Service'}
+                          {/* Main Booking Content */}
+                          <div className="space-y-1 text-xs">
+                            {/* Customer Name */}
+                            <div className="font-bold text-foreground truncate" title={booking.customerName}>
+                              👤 {booking.customerName}
                             </div>
-                            <div className="text-xs text-muted-foreground">
-                              {booking.bookingTime} ({bookingDuration}min)
+                            
+                            {/* Service Name */}
+                            <div className="font-semibold text-primary truncate" title={booking.serviceName || 'Service'}>
+                              ✂️ {booking.serviceName || 'Service'}
                             </div>
-                            <div className="text-xs font-medium">
-                              {formatCurrency(booking.totalAmountPaisa, booking.currency)}
+                            
+                            {/* Time and Duration */}
+                            <div className="text-muted-foreground font-medium">
+                              🕐 {booking.bookingTime} ({bookingDuration}min)
                             </div>
+                            
+                            {/* Price */}
+                            <div className="font-bold text-green-600 dark:text-green-400">
+                              💰 {formatCurrency(booking.totalAmountPaisa, booking.currency)}
+                            </div>
+                            
+                            {/* Customer Phone (useful for salon staff to call) */}
+                            {booking.customerPhone && (
+                              <div className="text-muted-foreground truncate" title={`Call: ${booking.customerPhone}`}>
+                                📞 {booking.customerPhone}
+                              </div>
+                            )}
+                            
+                            {/* Notes */}
                             {booking.notes && (
-                              <div className="text-xs text-muted-foreground truncate" title={booking.notes}>
+                              <div className="text-muted-foreground italic truncate" title={booking.notes}>
                                 📝 {booking.notes}
                               </div>
                             )}
+                            
+                            {/* Status Badge */}
+                            <div className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                              booking.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
+                              booking.status === 'confirmed' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' :
+                              booking.status === 'completed' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' :
+                              'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+                            }`}>
+                              {booking.status.toUpperCase()}
+                            </div>
                           </div>
                           
                           {/* Action Buttons */}
