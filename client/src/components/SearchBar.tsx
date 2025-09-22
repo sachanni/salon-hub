@@ -65,6 +65,12 @@ export default function SearchBar() {
   const [savedLocations, setSavedLocations] = useState<any[]>([]);
   const [currentLocationStatus, setCurrentLocationStatus] = useState<'idle' | 'detecting' | 'success' | 'error'>('idle');
   const locationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Date picker state
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDateType, setSelectedDateType] = useState<'any' | 'today' | 'tomorrow' | 'specific'>('any');
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const popularCategories = serviceCategories.filter(cat => cat.popular);
   const hiddenCategoriesCount = serviceCategories.filter(cat => !cat.popular).length;
@@ -509,6 +515,91 @@ export default function SearchBar() {
     }, 200);
   };
 
+  // Date picker functions
+  const getDateDisplayText = () => {
+    if (selectedDateType === 'any') return 'Any date';
+    if (selectedDateType === 'today') return 'Today';
+    if (selectedDateType === 'tomorrow') return 'Tomorrow';
+    if (selectedDateType === 'specific' && selectedDate) {
+      return selectedDate.toLocaleDateString('en-GB', { 
+        day: 'numeric', 
+        month: 'short' 
+      });
+    }
+    return 'Any date';
+  };
+
+  const handleDateTypeSelect = (type: 'any' | 'today' | 'tomorrow') => {
+    setSelectedDateType(type);
+    if (type === 'today') {
+      setSelectedDate(new Date());
+      setDate(new Date().toISOString().split('T')[0]);
+    } else if (type === 'tomorrow') {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      setSelectedDate(tomorrow);
+      setDate(tomorrow.toISOString().split('T')[0]);
+    } else {
+      setSelectedDate(null);
+      setDate('');
+    }
+    setShowDatePicker(false);
+  };
+
+  const handleSpecificDateSelect = (date: Date) => {
+    setSelectedDateType('specific');
+    setSelectedDate(date);
+    setDate(date.toISOString().split('T')[0]);
+    setShowDatePicker(false);
+  };
+
+  const navigateMonth = (direction: 'prev' | 'next') => {
+    const newMonth = new Date(currentMonth);
+    if (direction === 'prev') {
+      newMonth.setMonth(newMonth.getMonth() - 1);
+    } else {
+      newMonth.setMonth(newMonth.getMonth() + 1);
+    }
+    setCurrentMonth(newMonth);
+  };
+
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDate = new Date(firstDay);
+    startDate.setDate(startDate.getDate() - firstDay.getDay());
+    
+    const days = [];
+    for (let i = 0; i < 42; i++) {
+      const currentDate = new Date(startDate);
+      currentDate.setDate(startDate.getDate() + i);
+      days.push(currentDate);
+    }
+    return days;
+  };
+
+  const isDateSelected = (date: Date) => {
+    if (!selectedDate) return false;
+    return date.toDateString() === selectedDate.toDateString();
+  };
+
+  const isDateInCurrentMonth = (date: Date) => {
+    return date.getMonth() === currentMonth.getMonth() && date.getFullYear() === currentMonth.getFullYear();
+  };
+
+  const isDateToday = (date: Date) => {
+    const today = new Date();
+    return date.toDateString() === today.toDateString();
+  };
+
+  const handleDatePickerBlur = () => {
+    setTimeout(() => {
+      setShowDatePicker(false);
+    }, 200);
+  };
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
@@ -933,13 +1024,116 @@ export default function SearchBar() {
           <label className="text-sm font-medium text-muted-foreground">When?</label>
           <div className="relative">
             <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-            <Input
-              data-testid="input-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="pl-10 h-12"
-            />
+            <Button
+              variant="outline"
+              data-testid="button-date-picker"
+              onClick={() => setShowDatePicker(!showDatePicker)}
+              onBlur={handleDatePickerBlur}
+              className="w-full h-12 justify-start pl-10 font-normal text-foreground hover:bg-muted/50"
+            >
+              {getDateDisplayText()}
+            </Button>
+            
+            {/* Date Picker Dropdown */}
+            {showDatePicker && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 p-4 min-w-[320px]">
+                {/* Quick Date Options */}
+                <div className="flex gap-2 mb-4">
+                  <Button
+                    size="sm"
+                    variant={selectedDateType === 'any' ? 'default' : 'outline'}
+                    onClick={() => handleDateTypeSelect('any')}
+                    data-testid="button-any-date"
+                    className="flex-1"
+                  >
+                    Any date
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={selectedDateType === 'today' ? 'default' : 'outline'}
+                    onClick={() => handleDateTypeSelect('today')}
+                    data-testid="button-today"
+                    className="flex-1"
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={selectedDateType === 'tomorrow' ? 'default' : 'outline'}
+                    onClick={() => handleDateTypeSelect('tomorrow')}
+                    data-testid="button-tomorrow"
+                    className="flex-1"
+                  >
+                    Tomorrow
+                  </Button>
+                </div>
+                
+                {/* Calendar Widget */}
+                <div className="space-y-3">
+                  {/* Month Navigation */}
+                  <div className="flex items-center justify-between">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigateMonth('prev')}
+                      data-testid="button-prev-month"
+                    >
+                      <ChevronDown className="h-4 w-4 rotate-90" />
+                    </Button>
+                    <h3 className="font-medium">
+                      {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigateMonth('next')}
+                      data-testid="button-next-month"
+                    >
+                      <ChevronDown className="h-4 w-4 -rotate-90" />
+                    </Button>
+                  </div>
+                  
+                  {/* Days Grid */}
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {/* Day Headers */}
+                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+                      <div key={day} className="text-xs font-medium text-muted-foreground p-2">
+                        {day}
+                      </div>
+                    ))}
+                    
+                    {/* Calendar Days */}
+                    {getDaysInMonth(currentMonth).map((date, index) => {
+                      const isToday = isDateToday(date);
+                      const isSelected = isDateSelected(date);
+                      const isCurrentMonth = isDateInCurrentMonth(date);
+                      const isPast = date < new Date() && !isToday;
+                      
+                      return (
+                        <Button
+                          key={index}
+                          variant="ghost"
+                          size="sm"
+                          disabled={isPast}
+                          onClick={() => !isPast && handleSpecificDateSelect(date)}
+                          data-testid={`button-date-${date.getDate()}`}
+                          className={`
+                            h-8 w-8 p-0 text-sm transition-colors
+                            ${!isCurrentMonth ? 'text-muted-foreground/50' : ''}
+                            ${isToday ? 'bg-primary/10 text-primary font-semibold' : ''}
+                            ${isSelected ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}
+                            ${isPast ? 'text-muted-foreground/30 cursor-not-allowed' : ''}
+                            ${!isPast && !isSelected ? 'hover:bg-muted' : ''}
+                          `}
+                        >
+                          {date.getDate()}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
