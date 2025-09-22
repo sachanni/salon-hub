@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,6 +52,11 @@ export default function SearchBar() {
   const [specificServices, setSpecificServices] = useState<string[]>([]);
   const [allServices, setAllServices] = useState<any[]>([]);
   const [showServicesFilter, setShowServicesFilter] = useState(false);
+  
+  // Location input modal state
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [locationModalType, setLocationModalType] = useState<'home' | 'work'>('home');
+  const [locationModalValue, setLocationModalValue] = useState('');
   
   // Autocomplete state
   const [showAutocomplete, setShowAutocomplete] = useState(false);
@@ -497,11 +503,11 @@ export default function SearchBar() {
       setLocation(suggestion.address);
       setShowLocationAutocomplete(false);
     } else if (suggestion.type === 'add-saved') {
-      // For demo, we'll prompt for address (in production, use a proper modal)
-      const address = prompt(`Enter your ${suggestion.saveType} address:`);
-      if (address) {
-        saveLocation(suggestion.saveType, address);
-      }
+      // Open professional modal instead of browser prompt
+      setLocationModalType(suggestion.saveType as 'home' | 'work');
+      setLocationModalValue('');
+      setShowLocationModal(true);
+      setShowLocationAutocomplete(false);
     } else if (suggestion.type === 'location') {
       setLocation(suggestion.address);
       setShowLocationAutocomplete(false);
@@ -695,6 +701,21 @@ export default function SearchBar() {
     setSortBy("best-match");
     setAvailableToday(false);
     setSpecificServices([]);
+  };
+
+  // Handle location modal save
+  const handleLocationModalSave = () => {
+    if (locationModalValue.trim()) {
+      saveLocation(locationModalType, locationModalValue.trim());
+      setShowLocationModal(false);
+      setLocationModalValue('');
+    }
+  };
+
+  // Handle location modal cancel
+  const handleLocationModalCancel = () => {
+    setShowLocationModal(false);
+    setLocationModalValue('');
   };
 
   const hasActiveFilters = service.trim().length > 0 || selectedCategories.length > 0 || priceRange[0] > 0 || priceRange[1] < 5000 || minRating > 0 || (sortBy && sortBy !== "best-match") || availableToday || specificServices.length > 0;
@@ -1369,6 +1390,57 @@ export default function SearchBar() {
           )}
         </div>
       )}
+
+      {/* Professional Location Input Modal */}
+      <Dialog open={showLocationModal} onOpenChange={setShowLocationModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Add {locationModalType === 'home' ? 'Home' : 'Work'} Address
+            </DialogTitle>
+            <DialogDescription>
+              Enter your {locationModalType} address to save it for quick access.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center space-x-2">
+            <div className="grid flex-1 gap-2">
+              <Input
+                value={locationModalValue}
+                onChange={(e) => setLocationModalValue(e.target.value)}
+                placeholder={`Enter your ${locationModalType} address...`}
+                className="col-span-3"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleLocationModalSave();
+                  } else if (e.key === 'Escape') {
+                    handleLocationModalCancel();
+                  }
+                }}
+                autoFocus
+                data-testid={`input-${locationModalType}-address`}
+              />
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-start">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleLocationModalCancel}
+              data-testid="button-cancel-location"
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="button" 
+              onClick={handleLocationModalSave}
+              disabled={!locationModalValue.trim()}
+              data-testid="button-save-location"
+            >
+              Save Address
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
