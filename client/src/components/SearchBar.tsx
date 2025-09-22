@@ -721,7 +721,7 @@ export default function SearchBar() {
             
             {/* Service Autocomplete Dropdown */}
             {showAutocomplete && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto min-w-[400px]">
                 {isSearching && (
                   <div className="py-3 px-3 text-muted-foreground text-sm flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
@@ -746,8 +746,8 @@ export default function SearchBar() {
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{suggestion.title}</div>
-                            <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
+                            <div className="font-medium text-sm">{suggestion.title}</div>
+                            <div className="text-xs text-muted-foreground">{suggestion.subtitle}</div>
                           </div>
                         </div>
                       );
@@ -787,7 +787,7 @@ export default function SearchBar() {
             
             {/* Location Autocomplete Dropdown */}
             {showLocationAutocomplete && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto min-w-[350px]">
                 {isLocationSearching && (
                   <div className="py-3 px-3 text-muted-foreground text-sm flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
@@ -827,8 +827,8 @@ export default function SearchBar() {
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{suggestion.title}</div>
-                            <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
+                            <div className="font-medium text-sm">{suggestion.title}</div>
+                            <div className="text-xs text-muted-foreground">{suggestion.subtitle}</div>
                           </div>
                         </div>
                       );
