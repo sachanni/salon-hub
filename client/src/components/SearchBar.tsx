@@ -8,7 +8,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const serviceCategories = [
   // Popular categories (shown in top row)
@@ -51,6 +51,12 @@ export default function SearchBar() {
   const [specificServices, setSpecificServices] = useState<string[]>([]);
   const [allServices, setAllServices] = useState<any[]>([]);
   const [showServicesFilter, setShowServicesFilter] = useState(false);
+  
+  // Autocomplete state
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const popularCategories = serviceCategories.filter(cat => cat.popular);
   const hiddenCategoriesCount = serviceCategories.filter(cat => !cat.popular).length;
@@ -69,6 +75,129 @@ export default function SearchBar() {
       }
     };
     fetchServices();
+  }, []);
+
+  // Debounced search function for autocomplete
+  const performSearch = useCallback(async (query: string) => {
+    if (!query || query.length < 2) {
+      setAutocompleteSuggestions([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    const suggestions = [];
+
+    try {
+      // Search in categories
+      const matchingCategories = serviceCategories.filter(category => 
+        category.label.toLowerCase().includes(query.toLowerCase())
+      ).map(category => ({
+        type: 'category',
+        id: category.id,
+        title: category.label,
+        subtitle: `Category • ${category.group}`,
+        icon: category.icon,
+        color: category.color
+      }));
+      suggestions.push(...matchingCategories.slice(0, 3));
+
+      // Search in services
+      const matchingServices = allServices.filter(service => 
+        service.name?.toLowerCase().includes(query.toLowerCase()) ||
+        service.category?.toLowerCase().includes(query.toLowerCase())
+      ).map(service => ({
+        type: 'service',
+        id: service.id,
+        title: service.name,
+        subtitle: `Service • ₹${Math.round(service.priceInPaisa / 100)} • ${service.durationMinutes}min`,
+        category: service.category
+      }));
+      suggestions.push(...matchingServices.slice(0, 4));
+
+      // Search in salons
+      const salonsResponse = await fetch(`/api/salons?service=${encodeURIComponent(query)}&limit=3`);
+      if (salonsResponse.ok) {
+        const salons = await salonsResponse.json();
+        const salonSuggestions = salons.results?.slice(0, 3).map((salon: any) => ({
+          type: 'salon',
+          id: salon.id,
+          title: salon.name,
+          subtitle: `Salon • ${salon.address?.split(',')[0] || 'Location'} • ${salon.rating ? `${salon.rating}★` : 'New'}`,
+          image: salon.image
+        })) || [];
+        suggestions.push(...salonSuggestions);
+      }
+
+      setAutocompleteSuggestions(suggestions.slice(0, 8)); // Limit to 8 total suggestions
+    } catch (error) {
+      console.error('Error performing search:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [allServices]);
+
+  // Debounced search with cleanup
+  const handleServiceInputChange = useCallback((value: string) => {
+    setService(value);
+    
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    // Show autocomplete if there's input
+    setShowAutocomplete(value.length > 0);
+    
+    // Set new timeout for search
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch(value);
+    }, 300); // 300ms delay
+  }, [performSearch]);
+
+  // Handle suggestion selection
+  const handleSuggestionSelect = (suggestion: any) => {
+    if (suggestion.type === 'category') {
+      // Select the category
+      setService(suggestion.title);
+      setSelectedCategories([suggestion.id]);
+    } else if (suggestion.type === 'service') {
+      // Set the service name
+      setService(suggestion.title);
+      setSpecificServices([suggestion.id]);
+    } else if (suggestion.type === 'salon') {
+      // Set salon name and potentially perform search
+      setService(suggestion.title);
+    }
+    
+    setShowAutocomplete(false);
+    setAutocompleteSuggestions([]);
+  };
+
+  // Handle input focus
+  const handleServiceInputFocus = () => {
+    if (service.length > 0) {
+      setShowAutocomplete(true);
+      if (autocompleteSuggestions.length === 0) {
+        performSearch(service);
+      }
+    }
+  };
+
+  // Handle input blur (with slight delay to allow clicking suggestions)
+  const handleServiceInputBlur = () => {
+    setTimeout(() => {
+      setShowAutocomplete(false);
+    }, 200);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
   }, []);
 
   const handleCategoryToggle = (categoryId: string) => {
@@ -292,9 +421,66 @@ export default function SearchBar() {
               data-testid="input-service"
               placeholder="Search treatments, salons..."
               value={service}
-              onChange={(e) => setService(e.target.value)}
+              onChange={(e) => handleServiceInputChange(e.target.value)}
+              onFocus={handleServiceInputFocus}
+              onBlur={handleServiceInputBlur}
               className="pl-10 h-12"
+              autoComplete="off"
             />
+            
+            {/* Autocomplete Dropdown */}
+            {showAutocomplete && (autocompleteSuggestions.length > 0 || isSearching) && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto">
+                {isSearching && (
+                  <div className="flex items-center justify-center py-3 text-muted-foreground">
+                    <Search className="h-4 w-4 animate-spin mr-2" />
+                    Searching...
+                  </div>
+                )}
+                
+                {!isSearching && autocompleteSuggestions.length > 0 && (
+                  <div className="py-1">
+                    {autocompleteSuggestions.map((suggestion, index) => {
+                      const IconComponent = suggestion.icon || Search;
+                      return (
+                        <div
+                          key={`${suggestion.type}-${suggestion.id}-${index}`}
+                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                          onClick={() => handleSuggestionSelect(suggestion)}
+                          data-testid={`suggestion-${suggestion.type}-${suggestion.id}`}
+                        >
+                          {suggestion.type === 'category' && (
+                            <div className={`p-1.5 rounded ${suggestion.color}`}>
+                              <IconComponent className="h-3 w-3" />
+                            </div>
+                          )}
+                          {suggestion.type === 'service' && (
+                            <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                              <Sparkles className="h-3 w-3" />
+                            </div>
+                          )}
+                          {suggestion.type === 'salon' && (
+                            <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                              <MapPin className="h-3 w-3" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{suggestion.title}</div>
+                            <div className="text-xs text-muted-foreground truncate">{suggestion.subtitle}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                {!isSearching && autocompleteSuggestions.length === 0 && (
+                  <div className="py-3 px-3 text-muted-foreground text-sm text-center">
+                    No suggestions found
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -444,7 +630,7 @@ export default function SearchBar() {
                     <Checkbox 
                       id="available-today" 
                       checked={availableToday}
-                      onCheckedChange={setAvailableToday}
+                      onCheckedChange={(checked) => setAvailableToday(!!checked)}
                       data-testid="checkbox-available-today"
                     />
                     <label htmlFor="available-today" className="text-sm font-medium flex items-center gap-2">
