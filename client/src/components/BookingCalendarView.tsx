@@ -39,6 +39,7 @@ interface Booking {
   serviceName?: string;
   staffName?: string;
   staffId?: string;
+  serviceDuration?: number; // Duration in minutes from service data
 }
 
 interface Staff {
@@ -87,6 +88,70 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
   const [bookingToMove, setBookingToMove] = useState<Booking | null>(null);
   const [moveTargetDate, setMoveTargetDate] = useState<string>('');
   const { toast } = useToast();
+
+  // Helper functions for time-to-grid calculations
+  const parseTimeToMinutes = (timeStr: string): number => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const timeToGridRow = (timeStr: string, startHour = 9): number => {
+    const timeMinutes = parseTimeToMinutes(timeStr);
+    const startMinutes = startHour * 60;
+    const slotIndex = Math.floor((timeMinutes - startMinutes) / 30);
+    return Math.max(0, slotIndex); // Ensure non-negative
+  };
+
+  const durationToRowSpan = (durationMinutes: number): number => {
+    // Each time slot is 30 minutes, so calculate how many slots to span
+    return Math.ceil(durationMinutes / 30);
+  };
+
+  const getDefaultDuration = (serviceName?: string): number => {
+    // Default durations based on service type
+    if (!serviceName) return 60; // 1 hour default
+    
+    const serviceLower = serviceName.toLowerCase();
+    if (serviceLower.includes('cut') || serviceLower.includes('trim')) return 45;
+    if (serviceLower.includes('color') || serviceLower.includes('dye')) return 90;
+    if (serviceLower.includes('massage')) return 60;
+    if (serviceLower.includes('facial')) return 75;
+    if (serviceLower.includes('manicure')) return 45;
+    if (serviceLower.includes('pedicure')) return 60;
+    if (serviceLower.includes('highlights')) return 120;
+    
+    return 60; // Default 1 hour
+  };
+
+  const getBookingDuration = (booking: Booking): number => {
+    return booking.serviceDuration || getDefaultDuration(booking.serviceName);
+  };
+
+  const isTimeInBusinessHours = (timeStr: string, startHour = 9, endHour = 18): boolean => {
+    const timeMinutes = parseTimeToMinutes(timeStr);
+    return timeMinutes >= startHour * 60 && timeMinutes < endHour * 60;
+  };
+
+  // Helper function to detect overlapping bookings
+  const detectOverlaps = (bookings: Booking[], targetBooking: Booking): Booking[] => {
+    if (!targetBooking.staffId) return [];
+    
+    const targetStart = parseTimeToMinutes(targetBooking.bookingTime);
+    const targetDuration = getBookingDuration(targetBooking);
+    const targetEnd = targetStart + targetDuration;
+    
+    return bookings.filter(booking => {
+      if (booking.id === targetBooking.id || booking.staffId !== targetBooking.staffId) return false;
+      if (booking.bookingDate !== targetBooking.bookingDate) return false;
+      
+      const bookingStart = parseTimeToMinutes(booking.bookingTime);
+      const bookingDuration = getBookingDuration(booking);
+      const bookingEnd = bookingStart + bookingDuration;
+      
+      // Check if there's any overlap
+      return !(targetEnd <= bookingStart || targetStart >= bookingEnd);
+    });
+  };
 
   // Helper function to generate time slots
   const generateTimeSlots = (startHour = 9, endHour = 18, intervalMinutes = 30): TimeSlot[] => {
@@ -178,8 +243,19 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     enabled: !!salonId
   });
 
-  // Filter active staff members only
+  // Filter active staff members and add unassigned column
   const activeStaff = staff.filter(member => member.isActive === 1);
+  
+  // Check if there are any unassigned bookings
+  const hasUnassignedBookings = bookings.some(booking => 
+    booking.bookingDate >= startDate && booking.bookingDate <= endDate && !booking.staffId
+  );
+  
+  // Create extended staff list with unassigned column if needed
+  const extendedStaff = hasUnassignedBookings ? [
+    ...activeStaff,
+    { id: 'unassigned', name: 'Unassigned', specialties: [], isActive: 1 }
+  ] : activeStaff;
 
   // Update booking status
   const updateBookingStatus = async (bookingId: string, newStatus: string) => {
@@ -302,11 +378,63 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
     });
   };
 
+  // Get all bookings for a specific staff member on a date
+  const getStaffBookingsForDate = (date: Date, staffId: string) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return bookings.filter(booking => {
+      return booking.bookingDate === dateStr && 
+             (booking.staffId === staffId || (!booking.staffId && staffId === 'unassigned'));
+    }).sort((a, b) => a.bookingTime.localeCompare(b.bookingTime));
+  };
+
+  // Check if a time slot is occupied by a booking (considering duration)
+  const isTimeSlotOccupied = (timeSlot: TimeSlot, staffId: string, date: Date): Booking | null => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const slotMinutes = parseTimeToMinutes(timeSlot.time);
+    
+    for (const booking of bookings) {
+      if (booking.bookingDate !== dateStr) continue;
+      if (booking.staffId !== staffId && !(staffId === 'unassigned' && !booking.staffId)) continue;
+      
+      const bookingStart = parseTimeToMinutes(booking.bookingTime);
+      const bookingDuration = getBookingDuration(booking);
+      const bookingEnd = bookingStart + bookingDuration;
+      
+      // Check if this time slot falls within the booking duration
+      if (slotMinutes >= bookingStart && slotMinutes < bookingEnd) {
+        return booking;
+      }
+    }
+    return null;
+  };
+
+  // Get the primary booking that starts at this time slot
+  const getPrimaryBookingAtTimeSlot = (timeSlot: TimeSlot, staffId: string, date: Date): Booking | null => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return bookings.find(booking => {
+      return booking.bookingDate === dateStr && 
+             booking.bookingTime === timeSlot.time && 
+             (booking.staffId === staffId || (!booking.staffId && staffId === 'unassigned'));
+    }) || null;
+  };
+
   // Generate days for the current view
   const days = eachDayOfInterval({
     start: rangeStart,
     end: rangeEnd
   });
+
+  // Calculate statistics for the current view
+  const viewStats = {
+    totalBookings: bookings.length,
+    pendingBookings: bookings.filter(b => b.status === 'pending').length,
+    confirmedBookings: bookings.filter(b => b.status === 'confirmed').length,
+    conflicts: bookings.reduce((count, booking) => {
+      const overlaps = detectOverlaps(bookings, booking);
+      return overlaps.length > 0 ? count + 1 : count;
+    }, 0) / 2, // Divide by 2 since each conflict is counted twice
+    unassignedBookings: bookings.filter(b => !b.staffId).length
+  };
 
   const formatCurrency = (amountPaisa: number, currency: string) => {
     return `${currency === 'INR' ? '₹' : currency}${(amountPaisa / 100).toFixed(0)}`;
@@ -532,8 +660,22 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                     {getBookingsForDate(currentDate).length} appointments
                   </Badge>
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  {staffLoading ? 'Loading staff...' : `${activeStaff.length} staff members`}
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <span>{staffLoading ? 'Loading staff...' : `${extendedStaff.length} ${extendedStaff.length === 1 ? 'column' : 'columns'}`}</span>
+                  {viewStats.totalBookings > 0 && (
+                    <>
+                      <span className="text-blue-600 dark:text-blue-400">{viewStats.confirmedBookings} confirmed</span>
+                      {viewStats.pendingBookings > 0 && (
+                        <span className="text-yellow-600 dark:text-yellow-400">{viewStats.pendingBookings} pending</span>
+                      )}
+                      {viewStats.conflicts > 0 && (
+                        <span className="text-red-600 dark:text-red-400 font-medium">{viewStats.conflicts} conflicts!</span>
+                      )}
+                      {viewStats.unassignedBookings > 0 && (
+                        <span className="text-orange-600 dark:text-orange-400">{viewStats.unassignedBookings} unassigned</span>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -558,24 +700,34 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
             <Card className="overflow-hidden">
               <div className="overflow-x-auto" data-testid="timeline-grid-container">
                 <div 
-                  className="min-w-fit"
+                  className="min-w-fit relative"
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: `100px repeat(${activeStaff.length}, minmax(200px, 1fr))`,
-                    minWidth: `${100 + activeStaff.length * 200}px`
+                    gridTemplateColumns: `100px repeat(${extendedStaff.length}, minmax(200px, 1fr))`,
+                    gridTemplateRows: `auto repeat(${timeSlots.length}, 64px)`, // 64px per time slot
+                    minWidth: `${100 + extendedStaff.length * 200}px`
                   }}
                 >
                   {/* Header Row */}
                   <div className="sticky top-0 z-20 bg-background border-b border-border p-3 flex items-center justify-center font-medium text-sm">
                     Time
                   </div>
-                  {activeStaff.map((staffMember) => (
+                  {extendedStaff.map((staffMember) => (
                     <div 
                       key={staffMember.id}
-                      className="sticky top-0 z-20 bg-background border-b border-l border-border p-3 text-center"
+                      className={`sticky top-0 z-20 bg-background border-b border-l border-border p-3 text-center ${
+                        staffMember.id === 'unassigned' ? 'bg-orange-50 dark:bg-orange-950' : ''
+                      }`}
                       data-testid={`staff-header-${staffMember.id}`}
                     >
-                      <div className="font-medium">{staffMember.name}</div>
+                      <div className={`font-medium ${
+                        staffMember.id === 'unassigned' ? 'text-orange-700 dark:text-orange-300' : ''
+                      }`}>
+                        {staffMember.name}
+                        {staffMember.id === 'unassigned' && (
+                          <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">No staff assigned</div>
+                        )}
+                      </div>
                       {staffMember.specialties && staffMember.specialties.length > 0 && (
                         <div className="text-xs text-muted-foreground mt-1">
                           {staffMember.specialties.slice(0, 2).join(', ')}
@@ -585,102 +737,164 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                     </div>
                   ))}
 
-                  {/* Time Slots and Booking Cells */}
+                  {/* Time Slots - Left Column */}
                   {timeSlots.map((timeSlot, timeIndex) => {
                     const isEvenRow = timeIndex % 2 === 0;
                     
-                    return [
-                      // Time Label Cell
+                    return (
                       <div
                         key={`time-${timeSlot.id}`}
                         className={`border-b border-border p-3 flex items-center justify-center text-sm font-medium sticky left-0 z-10 ${
                           isEvenRow ? 'bg-muted/30' : 'bg-background'
                         }`}
+                        style={{ gridRow: timeIndex + 2 }} // +2 to account for header row
                         data-testid={`time-slot-${timeSlot.id}`}
                       >
                         {timeSlot.display}
-                      </div>,
+                      </div>
+                    );
+                  })}
 
-                      // Staff Booking Cells
-                      ...activeStaff.map((staffMember) => {
-                        const booking = getBookingForStaffTimeSlot(currentDate, timeSlot, staffMember.id);
-                        const StatusIcon = booking ? statusIcons[booking.status] : null;
-                        const isDraggable = booking ? ['pending', 'confirmed'].includes(booking.status) : false;
-                        const isBeingDragged = draggedBooking?.id === booking?.id;
+                  {/* Staff Column Background Cells */}
+                  {extendedStaff.map((staffMember) => (
+                    timeSlots.map((timeSlot, timeIndex) => {
+                      const isEvenRow = timeIndex % 2 === 0;
+                      
+                      return (
+                        <div
+                          key={`bg-cell-${timeSlot.id}-${staffMember.id}`}
+                          className={`border-b border-l border-border relative ${
+                            isEvenRow ? 'bg-muted/30' : 'bg-background'
+                          } ${staffMember.id === 'unassigned' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''} hover:bg-muted/50 transition-colors duration-200`}
+                          style={{ 
+                            gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2, // +2 for time column
+                            gridRow: timeIndex + 2 // +2 for header row
+                          }}
+                          data-testid={`bg-cell-${timeSlot.id}-${staffMember.id}`}
+                        >
+                          <div className="absolute inset-1 flex items-center justify-center text-xs text-muted-foreground/20">
+                            Available
+                          </div>
+                        </div>
+                      );
+                    })
+                  )).flat()}
 
-                        return (
-                          <div
-                            key={`cell-${timeSlot.id}-${staffMember.id}`}
-                            className={`border-b border-l border-border min-h-16 relative ${
-                              isEvenRow ? 'bg-muted/30' : 'bg-background'
-                            } hover:bg-muted/50 transition-colors duration-200`}
-                            data-testid={`timeline-cell-${timeSlot.id}-${staffMember.id}`}
-                          >
-                            {booking ? (
-                              <div
-                                draggable={isDraggable}
-                                tabIndex={0}
-                                role="button"
-                                aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
-                                className={`absolute inset-1 p-2 rounded cursor-pointer hover:opacity-80 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
-                                  isBeingDragged ? 'opacity-50 scale-95 shadow-lg' : ''
-                                } ${isDraggable ? 'cursor-move' : ''} transition-all duration-200`}
-                                onClick={() => setSelectedBooking(booking)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    setSelectedBooking(booking);
-                                  } else if (e.key === ' ' && isDraggable) {
-                                    e.preventDefault();
-                                    handleMoveBooking(booking);
-                                  }
-                                }}
-                                onDragStart={(e) => handleDragStart(e, booking)}
-                                onDragEnd={handleDragEnd}
-                                data-testid={`timeline-booking-${booking.id}`}
-                                title={isDraggable ? `Drag to reschedule ${booking.customerName}'s appointment` : `${booking.status} booking - cannot be moved`}
-                              >
-                                <div className="flex items-center gap-1 mb-1">
-                                  {StatusIcon && <StatusIcon className="h-3 w-3" />}
-                                  {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground" />}
-                                  <span className="text-xs font-medium truncate flex-1">
-                                    {booking.customerName}
-                                  </span>
-                                </div>
-                                <div className="text-xs truncate">
-                                  {booking.serviceName || 'Service'}
-                                </div>
-                                <div className="text-xs font-medium mt-1">
-                                  {formatCurrency(booking.totalAmountPaisa, booking.currency)}
-                                </div>
-                                {isDraggable && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="absolute top-1 right-1 h-5 w-5 p-0 hover:bg-background/50"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleMoveBooking(booking);
-                                    }}
-                                    aria-label={`Move ${booking.customerName}'s appointment`}
-                                    data-testid={`button-timeline-move-${booking.id}`}
-                                  >
-                                    <Move className="h-3 w-3" />
-                                  </Button>
-                                )}
+                  {/* Positioned Bookings */}
+                  {extendedStaff.map((staffMember) => {
+                    const staffBookings = getStaffBookingsForDate(currentDate, staffMember.id);
+                    const processedBookings = new Set<string>();
+                    
+                    return staffBookings.map((booking) => {
+                      if (processedBookings.has(booking.id)) return null;
+                      processedBookings.add(booking.id);
+                      
+                      const bookingDuration = getBookingDuration(booking);
+                      const startRowIndex = timeToGridRow(booking.bookingTime);
+                      const rowSpan = durationToRowSpan(bookingDuration);
+                      const overlaps = detectOverlaps(bookings, booking);
+                      const hasConflicts = overlaps.length > 0;
+                      
+                      const StatusIcon = statusIcons[booking.status];
+                      const isDraggable = ['pending', 'confirmed'].includes(booking.status);
+                      const isBeingDragged = draggedBooking?.id === booking.id;
+                      
+                      // Skip if booking is outside business hours
+                      if (startRowIndex < 0 || startRowIndex >= timeSlots.length) {
+                        return null;
+                      }
+                      
+                      const actualRowSpan = Math.min(rowSpan, timeSlots.length - startRowIndex);
+                      
+                      return (
+                        <div
+                          key={`booking-${booking.id}`}
+                          draggable={isDraggable}
+                          tabIndex={0}
+                          role="button"
+                          aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name} for ${bookingDuration} minutes${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}${hasConflicts ? '. Warning: scheduling conflict detected' : ''}`}
+                          className={`absolute p-2 rounded-lg cursor-pointer hover:opacity-90 focus:ring-2 focus:ring-primary focus:ring-offset-1 shadow-sm border-l-4 ${
+                            statusColors[booking.status]
+                          } ${
+                            isBeingDragged ? 'opacity-50 scale-95 shadow-xl z-50' : 'z-30'
+                          } ${
+                            isDraggable ? 'cursor-move hover:shadow-md' : ''
+                          } ${
+                            hasConflicts ? 'border-l-red-500 ring-2 ring-red-200 dark:ring-red-800' : 'border-l-primary'
+                          } transition-all duration-200`}
+                          style={{
+                            gridColumn: extendedStaff.findIndex(s => s.id === staffMember.id) + 2,
+                            gridRow: `${startRowIndex + 2} / span ${actualRowSpan}`,
+                            margin: '2px',
+                            minHeight: `${actualRowSpan * 64 - 4}px`, // 64px per row minus margin
+                          }}
+                          onClick={() => setSelectedBooking(booking)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              setSelectedBooking(booking);
+                            } else if (e.key === ' ' && isDraggable) {
+                              e.preventDefault();
+                              handleMoveBooking(booking);
+                            }
+                          }}
+                          onDragStart={(e) => handleDragStart(e, booking)}
+                          onDragEnd={handleDragEnd}
+                          data-testid={`timeline-booking-${booking.id}`}
+                          title={`${booking.customerName} - ${booking.serviceName || 'Service'} (${bookingDuration}min)${hasConflicts ? ' - CONFLICT!' : ''}${isDraggable ? ' - Drag to reschedule' : ' - Cannot be moved'}`}
+                        >
+                          {/* Booking Header */}
+                          <div className="flex items-center gap-1 mb-2">
+                            {hasConflicts && (
+                              <div title="Scheduling conflict detected">
+                                <AlertCircle className="h-3 w-3 text-red-500 flex-shrink-0" />
                               </div>
-                            ) : (
-                              // Empty time slot
-                              <div 
-                                className="absolute inset-1 flex items-center justify-center text-xs text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors"
-                                data-testid={`empty-slot-${timeSlot.id}-${staffMember.id}`}
-                              >
-                                Available
+                            )}
+                            {StatusIcon && <StatusIcon className="h-3 w-3 flex-shrink-0" />}
+                            {isDraggable && <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
+                            <span className="text-xs font-semibold truncate flex-1">
+                              {booking.customerName}
+                            </span>
+                          </div>
+                          
+                          {/* Booking Details */}
+                          <div className="space-y-1">
+                            <div className="text-xs truncate font-medium">
+                              {booking.serviceName || 'Service'}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {booking.bookingTime} ({bookingDuration}min)
+                            </div>
+                            <div className="text-xs font-medium">
+                              {formatCurrency(booking.totalAmountPaisa, booking.currency)}
+                            </div>
+                            {booking.notes && (
+                              <div className="text-xs text-muted-foreground truncate" title={booking.notes}>
+                                📝 {booking.notes}
                               </div>
                             )}
                           </div>
-                        );
-                      })
-                    ];
+                          
+                          {/* Action Buttons */}
+                          {isDraggable && (
+                            <div className="absolute top-1 right-1 flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 hover:bg-background/50 opacity-70 hover:opacity-100"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMoveBooking(booking);
+                                }}
+                                aria-label={`Move ${booking.customerName}'s appointment`}
+                                data-testid={`button-timeline-move-${booking.id}`}
+                              >
+                                <Move className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }).filter(Boolean);
                   }).flat()}
                 </div>
               </div>
@@ -691,26 +905,35 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
           <Card>
             <CardContent className="py-3">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 flex-wrap">
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300"></div>
+                    <div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300 dark:bg-yellow-900 dark:border-yellow-700"></div>
                     <span>Pending</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-green-100 border border-green-300"></div>
+                    <div className="w-3 h-3 rounded bg-green-100 border border-green-300 dark:bg-green-900 dark:border-green-700"></div>
                     <span>Confirmed</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-blue-100 border border-blue-300"></div>
+                    <div className="w-3 h-3 rounded bg-blue-100 border border-blue-300 dark:bg-blue-900 dark:border-blue-700"></div>
                     <span>Completed</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-red-100 border border-red-300"></div>
+                    <div className="w-3 h-3 rounded bg-red-100 border border-red-300 dark:bg-red-900 dark:border-red-700"></div>
                     <span>Cancelled</span>
                   </div>
+                  <div className="flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 text-red-500" />
+                    <span>Conflict</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-orange-100 border border-orange-300 dark:bg-orange-900 dark:border-orange-700"></div>
+                    <span>Unassigned</span>
+                  </div>
                 </div>
-                <div className="hidden md:block">
-                  💡 Click appointments for details • Drag confirmed/pending to reschedule
+                <div className="hidden lg:block text-right">
+                  💡 Timeline shows exact appointment durations<br/>
+                  <span className="text-xs">Click for details • Drag confirmed/pending to reschedule</span>
                 </div>
               </div>
             </CardContent>
