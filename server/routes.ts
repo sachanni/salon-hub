@@ -1572,13 +1572,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // CONFLICT VALIDATION: Check for overlapping bookings before creating
+      let timeRange;
       try {
-        const { start, end } = storage.computeBookingTimeRange(
+        timeRange = storage.computeBookingTimeRange(
           input.booking.date, 
           input.booking.time, 
           service.durationMinutes
         );
+      } catch (timeError) {
+        console.error('Invalid booking time:', timeError.message);
+        return res.status(400).json({ 
+          error: 'Invalid booking time',
+          details: timeError.message
+        });
+      }
 
+      const { start, end } = timeRange;
+
+      try {
         // Check for overlapping bookings (no staff ID specified yet, so check all)
         const overlappingBookings = await storage.findOverlappingBookings(
           input.salonId, 

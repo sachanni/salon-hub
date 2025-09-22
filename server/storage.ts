@@ -1395,9 +1395,48 @@ export class DatabaseStorage implements IStorage {
 
   // Conflict detection and rescheduling operations
   computeBookingTimeRange(bookingDate: string, bookingTime: string, durationMinutes: number): { start: Date, end: Date } {
+    if (!bookingTime || typeof bookingTime !== 'string') {
+      throw new Error('Invalid booking time: time is required');
+    }
+
+    // Normalize time to 24-hour format and parse
+    let hours: number, minutes: number;
+    
+    // Check if time is in 12-hour format (contains AM/PM)
+    const time12HourMatch = bookingTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (time12HourMatch) {
+      const [, hourStr, minuteStr, period] = time12HourMatch;
+      hours = parseInt(hourStr, 10);
+      minutes = parseInt(minuteStr, 10);
+      
+      // Convert to 24-hour format
+      if (period.toUpperCase() === 'PM' && hours !== 12) {
+        hours += 12;
+      } else if (period.toUpperCase() === 'AM' && hours === 12) {
+        hours = 0;
+      }
+    } else {
+      // Assume 24-hour format (HH:MM)
+      const timeParts = bookingTime.split(':');
+      if (timeParts.length !== 2) {
+        throw new Error(`Invalid booking time format: ${bookingTime}. Expected "HH:MM" or "H:MM AM/PM"`);
+      }
+      
+      hours = parseInt(timeParts[0], 10);
+      minutes = parseInt(timeParts[1], 10);
+    }
+    
+    // Validate parsed values
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      throw new Error(`Invalid booking time values: hours=${hours}, minutes=${minutes}`);
+    }
+    
     // Parse the booking date and time into a start Date object
-    const [hours, minutes] = bookingTime.split(':').map(Number);
     const start = new Date(bookingDate);
+    if (isNaN(start.getTime())) {
+      throw new Error(`Invalid booking date: ${bookingDate}`);
+    }
+    
     start.setHours(hours, minutes, 0, 0);
     
     // Calculate end time by adding duration
