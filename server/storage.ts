@@ -1337,14 +1337,15 @@ export class DatabaseStorage implements IStorage {
     try {
       // Get unique customers from bookings for this salon
       const customers = await db
-        .selectDistinct({
+        .select({
           name: bookings.customerName,
           email: bookings.customerEmail,
           phone: bookings.customerPhone,
           totalBookings: sql<number>`count(*)`,
           totalSpent: sql<number>`sum(${bookings.totalAmountPaisa})`,
           lastBookingDate: sql<string>`max(${bookings.bookingDate})`,
-          lastBookingStatus: sql<string>`max(${bookings.status})`
+          lastBookingStatus: sql<string>`max(${bookings.status})`,
+          lastCreated: sql<string>`max(${bookings.createdAt})`
         })
         .from(bookings)
         .where(eq(bookings.salonId, salonId))
