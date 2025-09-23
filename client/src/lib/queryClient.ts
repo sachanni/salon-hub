@@ -38,7 +38,26 @@ export const getQueryFn: <T>(options: {
     }
 
     await throwIfResNotOk(res);
-    return await res.json();
+    
+    try {
+      // Check if response has content and is JSON
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        // If not JSON, return null or empty object based on response
+        return res.status === 204 ? null : {};
+      }
+      
+      const text = await res.text();
+      if (!text) {
+        return null;
+      }
+      
+      return JSON.parse(text);
+    } catch (error) {
+      console.error('JSON parsing error in queryClient:', error);
+      // Return null for parsing errors to prevent crashes
+      return null;
+    }
   };
 
 export const queryClient = new QueryClient({

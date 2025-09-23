@@ -8,11 +8,28 @@ import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
 
+// Define SearchParams interface for communication between SearchBar and SalonGrid
+interface SearchParams {
+  coordinates?: { lat: number; lng: number };
+  radius?: number;
+  service?: string;
+  category?: string;
+  sortBy?: string;
+  filters?: {
+    priceRange?: [number, number];
+    minRating?: number;
+    availableToday?: boolean;
+    specificServices?: string[];
+  };
+}
+
 export default function Home() {
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [selectedSalon, setSelectedSalon] = useState("");
   const [selectedSalonId, setSelectedSalonId] = useState("");
   const [salonsData, setSalonsData] = useState<any[]>([]);
+  const [searchParams, setSearchParams] = useState<SearchParams>({});
+  const [isSearchActive, setIsSearchActive] = useState(false);
   
   const { addRecentlyViewed } = useRecentlyViewed();
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -53,7 +70,7 @@ export default function Home() {
         if (response.ok) {
           const salons = await response.json();
           setSalonsData(salons);
-          console.log('Fresh salon data loaded with images:', salons.find(s => s.name.includes('UNIBEAM'))?.image);
+          console.log('Fresh salon data loaded with images:', salons.length);
         }
       } catch (error) {
         console.error('Error fetching salons for recently viewed:', error);
@@ -97,23 +114,50 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <main>
-        <Hero />
+        <Hero onSearch={(params: SearchParams) => {
+          console.log('Home: Received search params from Hero:', params);
+          console.log('Home: Has coordinates:', !!params.coordinates);
+          console.log('Home: Full search params object:', JSON.stringify(params, null, 2));
+          if (params.coordinates) {
+            console.log('Home: Proximity search with coordinates:', params.coordinates, 'radius:', params.radius);
+          } else {
+            console.log('Home: Regular search without coordinates');
+          }
+          setSearchParams(params);
+          setIsSearchActive(true);
+        }} />
         <RecentlyViewed onBookingClick={handleBookingClick} />
-        <SalonGrid 
-          title="Recommended" 
-          subtitle="Discover the most popular salons and spas in your area" 
-          onBookingClick={handleBookingClick}
-        />
-        <SalonGrid 
-          title="New to SalonHub" 
-          subtitle="Recently joined salons offering exceptional services" 
-          onBookingClick={handleBookingClick}
-        />
-        <SalonGrid 
-          title="Trending" 
-          subtitle="The most booked services this week" 
-          onBookingClick={handleBookingClick}
-        />
+        {isSearchActive ? (
+          <SalonGrid 
+            title="Search Results" 
+            subtitle={searchParams.coordinates 
+              ? `Found salons within ${searchParams.radius || 10}km of your location`
+              : "Results for your search"
+            }
+            searchParams={searchParams}
+            onBookingClick={handleBookingClick}
+          />
+        ) : (
+          <SalonGrid 
+            title="Recommended" 
+            subtitle="Discover the most popular salons and spas in your area" 
+            onBookingClick={handleBookingClick}
+          />
+        )}
+        {!isSearchActive && (
+          <>
+            <SalonGrid 
+              title="New to SalonHub" 
+              subtitle="Recently joined salons offering exceptional services" 
+              onBookingClick={handleBookingClick}
+            />
+            <SalonGrid 
+              title="Trending" 
+              subtitle="The most booked services this week" 
+              onBookingClick={handleBookingClick}
+            />
+          </>
+        )}
       </main>
       <Footer />
       

@@ -2,7 +2,25 @@ import { Button } from "@/components/ui/button";
 import SearchBar from "./SearchBar";
 import heroImage from '@assets/generated_images/Modern_luxury_salon_interior_aa8eed5a.png';
 
-export default function Hero() {
+interface SearchParams {
+  coordinates?: { lat: number; lng: number };
+  radius?: number;
+  service?: string;
+  category?: string;
+  sortBy?: string;
+  filters?: {
+    priceRange?: [number, number];
+    minRating?: number;
+    availableToday?: boolean;
+    specificServices?: string[];
+  };
+}
+
+interface HeroProps {
+  onSearch?: (params: SearchParams) => void;
+}
+
+export default function Hero({ onSearch }: HeroProps) {
   const handleGetApp = () => {
     console.log('Get app clicked');
   };
@@ -39,7 +57,7 @@ export default function Hero() {
 
           {/* Search Bar */}
           <div className="mb-8">
-            <SearchBar />
+            <SearchBar onSearch={onSearch} />
           </div>
 
           {/* Stats */}

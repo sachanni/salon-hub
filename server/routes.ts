@@ -22,6 +22,10 @@ import {
   insertTaxRateSchema,
   insertPayoutAccountSchema,
   insertPublishStateSchema,
+  // Proximity search validation schemas
+  salonSearchSchema,
+  type SalonSearchParams,
+  type SalonSearchResult,
   // Booking validation schemas
   updateBookingSchema,
   bulkUpdateBookingSchema,
@@ -65,6 +69,18 @@ import {
   insertTestVariantSchema,
   insertTestMetricSchema,
   insertTestResultSchema,
+  // Places API validation schemas
+  placesAutocompleteSchema,
+  placesDetailsSchema,
+  placesGeocodeSchema,
+  type PlacesAutocompleteParams,
+  type PlacesDetailsParams,
+  type PlacesGeocodeParams,
+  type PlacesAutocompleteResponse,
+  type PlacesDetailsResponse,
+  type PlacesGeocodeResponse,
+  // User saved locations validation schema
+  insertUserSavedLocationSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
 import { communicationService, sendBookingConfirmation, sendBookingReminder } from "./communicationService";
@@ -677,6 +693,714 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===============================================
+  // USER SAVED LOCATIONS API (Protected)
+  // ===============================================
+
+  // Get all saved locations for the authenticated user
+  app.get('/api/user/saved-locations', isAuthenticated, async (req: express.Request, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'User not authenticated' });
+      }
+      const userId = req.user.id;
+      const savedLocations = await storage.getUserSavedLocationsByUserId(userId);
+      
+      res.json({
+        success: true,
+        savedLocations
+      });
+    } catch (error) {
+      console.error('Error fetching saved locations:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch saved locations',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Create a new saved location
+  app.post('/api/user/saved-locations', isAuthenticated, async (req: express.Request, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'User not authenticated' });
+      }
+      const userId = req.user.id;
+      const locationData = {
+        ...req.body,
+        userId
+      };
+
+      // Validate input using Zod schema
+      const validation = insertUserSavedLocationSchema.safeParse(locationData);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid location data',
+          details: validation.error.errors.map((err: any) => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      const validatedData = validation.data;
+
+      // Check if user already has this label (for home/office)
+      if (['home', 'office'].includes(validatedData.label)) {
+        const existing = await storage.getUserSavedLocationByUserIdAndLabel(userId, validatedData.label);
+        if (existing) {
+          return res.status(409).json({
+            error: `You already have a ${validatedData.label} location saved`,
+            message: `Please update your existing ${validatedData.label} location instead`
+          });
+        }
+      }
+
+      const newLocation = await storage.createUserSavedLocation(validatedData);
+      
+      res.status(201).json({
+        success: true,
+        savedLocation: newLocation,
+        message: 'Location saved successfully'
+      });
+    } catch (error) {
+      console.error('Error creating saved location:', error);
+      res.status(500).json({ 
+        error: 'Failed to save location',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Update a saved location
+  app.put('/api/user/saved-locations/:locationId', isAuthenticated, async (req: express.Request, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'User not authenticated' });
+      }
+      const userId = req.user.id;
+      const { locationId } = req.params;
+
+      // Check if location exists and belongs to user
+      const existingLocation = await storage.getUserSavedLocation(locationId);
+      if (!existingLocation) {
+        return res.status(404).json({
+          error: 'Saved location not found'
+        });
+      }
+
+      if (existingLocation.userId !== userId) {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'You can only update your own saved locations'
+        });
+      }
+
+      // Validate partial update data
+      const partialSchema = insertUserSavedLocationSchema.omit({ userId: true }).partial();
+      const validation = partialSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid location data',
+          details: validation.error.errors.map((err: any) => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      await storage.updateUserSavedLocation(locationId, validation.data);
+      
+      // Return updated location
+      const updatedLocation = await storage.getUserSavedLocation(locationId);
+      
+      res.json({
+        success: true,
+        savedLocation: updatedLocation,
+        message: 'Location updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating saved location:', error);
+      res.status(500).json({ 
+        error: 'Failed to update location',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Delete a saved location
+  app.delete('/api/user/saved-locations/:locationId', isAuthenticated, async (req: express.Request, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'User not authenticated' });
+      }
+      const userId = req.user.id;
+      const { locationId } = req.params;
+
+      // Check if location exists and belongs to user
+      const existingLocation = await storage.getUserSavedLocation(locationId);
+      if (!existingLocation) {
+        return res.status(404).json({
+          error: 'Saved location not found'
+        });
+      }
+
+      if (existingLocation.userId !== userId) {
+        return res.status(403).json({
+          error: 'Access denied',
+          message: 'You can only delete your own saved locations'
+        });
+      }
+
+      await storage.deleteUserSavedLocation(locationId);
+      
+      res.json({
+        success: true,
+        message: 'Location deleted successfully'
+      });
+    } catch (error) {
+      console.error('Error deleting saved location:', error);
+      res.status(500).json({ 
+        error: 'Failed to delete location',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // ===============================================
+  // PLACES API ENDPOINTS (Public)
+  // ===============================================
+  
+  // Geoapify API helper functions
+  const GEOAPIFY_API_KEY = process.env.GEOAPIFY_API_KEY;
+  
+  if (!GEOAPIFY_API_KEY) {
+    console.warn('Geoapify API key not configured - Using Nominatim fallback for Places functionality');
+  }
+
+  const makeGeoapifyRequest = async (url: string, params: Record<string, string>): Promise<any> => {
+    if (!GEOAPIFY_API_KEY) {
+      throw new Error('Geoapify API key not configured');
+    }
+
+    const urlParams = new URLSearchParams({
+      ...params,
+      apiKey: GEOAPIFY_API_KEY
+    });
+
+    const response = await fetch(`${url}?${urlParams.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'SalonHub/1.0'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Geoapify API error (${response.status}):`, errorText);
+      throw new Error(`Geoapify API error: ${response.status}`);
+    }
+
+    return response.json();
+  };
+
+  // Nominatim API fallback helper functions (free, no API key required)
+  const makeNominatimRequest = async (url: string, params: Record<string, string>): Promise<any> => {
+    const urlParams = new URLSearchParams({
+      ...params,
+      format: 'json',
+      addressdetails: '1',
+      limit: params.limit || '10'
+    });
+
+    const response = await fetch(`${url}?${urlParams.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'SalonHub/1.0 (proximity search)'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Nominatim API error (${response.status}):`, errorText);
+      throw new Error(`Nominatim API error: ${response.status}`);
+    }
+
+    return response.json();
+  };
+
+  // Autocomplete endpoint - GET /api/places/autocomplete?q=&lat=&lng=
+  app.get('/api/places/autocomplete', communicationRateLimits.analytics, async (req, res) => {
+    try {
+
+      // Parse and validate query parameters
+      const queryParams = {
+        q: req.query.q as string,
+        lat: req.query.lat ? parseFloat(req.query.lat as string) : undefined,
+        lng: req.query.lng ? parseFloat(req.query.lng as string) : undefined,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 10,
+        countrycode: req.query.countrycode as string
+      };
+
+      // Remove undefined values
+      Object.keys(queryParams).forEach(key => {
+        const value = (queryParams as any)[key];
+        if (value === undefined) {
+          delete (queryParams as any)[key];
+        }
+      });
+
+      const validation = placesAutocompleteSchema.safeParse(queryParams);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid parameters',
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      const validatedParams = validation.data;
+
+      let suggestions: any[] = [];
+
+      if (GEOAPIFY_API_KEY) {
+        try {
+          // Build Geoapify parameters
+          const geoapifyParams: Record<string, string> = {
+            text: validatedParams.q,
+            limit: validatedParams.limit?.toString() || '10'
+          };
+
+          if (validatedParams.lat && validatedParams.lng) {
+            geoapifyParams.bias = `proximity:${validatedParams.lng},${validatedParams.lat}`;
+          }
+
+          if (validatedParams.countrycode) {
+            geoapifyParams.filter = `countrycode:${validatedParams.countrycode}`;
+          }
+
+          // Make request to Geoapify
+          const geoapifyResponse = await makeGeoapifyRequest(
+            'https://api.geoapify.com/v1/geocode/autocomplete',
+            geoapifyParams
+          );
+
+          // Transform response to our format
+          suggestions = geoapifyResponse.features?.map((feature: any) => ({
+            id: feature.properties.place_id || `${feature.geometry.coordinates[1]}_${feature.geometry.coordinates[0]}`,
+            title: feature.properties.formatted || feature.properties.name || '',
+            subtitle: [
+              feature.properties.city,
+              feature.properties.state,
+              feature.properties.country
+            ].filter(Boolean).join(', '),
+            lat: feature.geometry.coordinates[1],
+            lng: feature.geometry.coordinates[0]
+          })) || [];
+        } catch (error) {
+          console.warn('Geoapify autocomplete failed, falling back to Nominatim:', error);
+        }
+      }
+
+      // Fallback to Nominatim if no Geoapify key or Geoapify failed
+      if (suggestions.length === 0) {
+        try {
+          console.log('Using Nominatim fallback for autocomplete search:', validatedParams.q);
+          
+          const nominatimParams: Record<string, string> = {
+            q: validatedParams.q,
+            limit: validatedParams.limit?.toString() || '10'
+          };
+
+          if (validatedParams.countrycode) {
+            nominatimParams.countrycodes = validatedParams.countrycode;
+          }
+
+          // Use viewbox for proximity bias if coordinates provided
+          if (validatedParams.lat && validatedParams.lng) {
+            const lat = validatedParams.lat;
+            const lng = validatedParams.lng;
+            const delta = 0.5; // ~55km radius
+            nominatimParams.viewbox = `${lng - delta},${lat + delta},${lng + delta},${lat - delta}`;
+            nominatimParams.bounded = '1';
+          }
+
+          const nominatimResponse = await makeNominatimRequest(
+            'https://nominatim.openstreetmap.org/search',
+            nominatimParams
+          );
+
+          // Transform Nominatim response to our format
+          suggestions = (nominatimResponse || []).map((place: any) => ({
+            id: place.place_id?.toString() || `${place.lat}_${place.lon}`,
+            title: place.display_name?.split(',')[0] || place.name || '',
+            subtitle: place.display_name?.split(',').slice(1, 3).join(',').trim() || '',
+            lat: parseFloat(place.lat),
+            lng: parseFloat(place.lon)
+          }));
+
+          console.log(`Nominatim returned ${suggestions.length} suggestions for "${validatedParams.q}"`);
+        } catch (nominatimError) {
+          console.error('Nominatim autocomplete also failed:', nominatimError);
+          // Continue with empty suggestions array
+        }
+      }
+
+      res.json({
+        suggestions,
+        query: validatedParams.q,
+        source: GEOAPIFY_API_KEY && suggestions.length > 0 ? 'geoapify' : 'nominatim'
+      });
+
+    } catch (error) {
+      console.error('Places autocomplete error:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch address suggestions',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Details endpoint - GET /api/places/details?placeId=
+  app.get('/api/places/details', communicationRateLimits.analytics, async (req, res) => {
+    try {
+      if (!GEOAPIFY_API_KEY) {
+        return res.status(503).json({ 
+          error: 'Places service not available', 
+          message: 'Geocoding service is not configured' 
+        });
+      }
+
+      const validation = placesDetailsSchema.safeParse({
+        placeId: req.query.placeId as string
+      });
+
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid parameters',
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      const { placeId } = validation.data;
+
+      // For Geoapify, we need to parse the place ID if it contains coordinates
+      let geoapifyParams: Record<string, string>;
+      
+      if (placeId.includes('_')) {
+        // This might be our custom coordinate-based ID
+        const [lat, lng] = placeId.split('_');
+        geoapifyParams = {
+          lat,
+          lon: lng
+        };
+      } else {
+        // Use the place ID directly
+        geoapifyParams = {
+          place_id: placeId
+        };
+      }
+
+      // Make request to Geoapify
+      const geoapifyResponse = await makeGeoapifyRequest(
+        'https://api.geoapify.com/v1/geocode/reverse',
+        geoapifyParams
+      );
+
+      if (!geoapifyResponse.features || geoapifyResponse.features.length === 0) {
+        return res.status(404).json({ 
+          error: 'Place not found',
+          message: 'The specified place could not be found'
+        });
+      }
+
+      const feature = geoapifyResponse.features[0];
+      const props = feature.properties;
+
+      // Transform response to our format
+      const result = {
+        address: props.formatted || '',
+        lat: feature.geometry.coordinates[1],
+        lng: feature.geometry.coordinates[0],
+        placeId: props.place_id || placeId,
+        components: {
+          city: props.city || '',
+          state: props.state || '',
+          country: props.country || '',
+          postcode: props.postcode || '',
+          street: props.street || '',
+          housenumber: props.housenumber || ''
+        }
+      };
+
+      res.json(result);
+
+    } catch (error) {
+      console.error('Places details error:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch place details',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Geocode endpoint - GET /api/places/geocode?address= OR /api/places/geocode?lat=&lng=
+  app.get('/api/places/geocode', communicationRateLimits.analytics, async (req, res) => {
+    try {
+
+      // Parse query parameters for both forward and reverse geocoding
+      const queryParams: any = {};
+      
+      if (req.query.address) {
+        queryParams.address = req.query.address as string;
+      }
+      if (req.query.lat && req.query.lng) {
+        queryParams.lat = parseFloat(req.query.lat as string);
+        queryParams.lng = parseFloat(req.query.lng as string);
+      }
+      if (req.query.countrycode) {
+        queryParams.countrycode = req.query.countrycode as string;
+      }
+
+      const validation = placesGeocodeSchema.safeParse(queryParams);
+
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid parameters',
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      const validatedData = validation.data;
+      let result: any = null;
+
+      // Check if it's forward geocoding (address to coordinates) or reverse geocoding (coordinates to address)
+      const isReverseGeocoding = 'lat' in validatedData && 'lng' in validatedData;
+      const isForwardGeocoding = 'address' in validatedData;
+
+      if (isReverseGeocoding) {
+        // Reverse geocoding: coordinates -> address
+        const { lat, lng, countrycode } = validatedData as { lat: number; lng: number; countrycode?: string };
+        
+        console.log(`Reverse geocoding coordinates: ${lat}, ${lng}`);
+
+        // Try Geoapify reverse geocoding first if API key is available
+        if (GEOAPIFY_API_KEY) {
+          try {
+            const geoapifyParams: Record<string, string> = {
+              lat: lat.toString(),
+              lon: lng.toString(),
+              limit: '1'
+            };
+
+            if (countrycode) {
+              geoapifyParams.filter = `countrycode:${countrycode}`;
+            }
+
+            const geoapifyResponse = await makeGeoapifyRequest(
+              'https://api.geoapify.com/v1/geocode/reverse',
+              geoapifyParams
+            );
+
+            if (geoapifyResponse.features && geoapifyResponse.features.length > 0) {
+              const feature = geoapifyResponse.features[0];
+              const props = feature.properties;
+
+              result = {
+                address: props.formatted || `${lat}, ${lng}`,
+                lat: lat,
+                lng: lng,
+                confidence: props.confidence || 0.8,
+                components: {
+                  city: props.city || '',
+                  state: props.state || '',
+                  country: props.country || '',
+                  postcode: props.postcode || '',
+                  street: props.street || '',
+                  housenumber: props.housenumber || ''
+                },
+                source: 'geoapify'
+              };
+            }
+          } catch (error) {
+            console.warn('Geoapify reverse geocoding failed, falling back to Nominatim:', error);
+          }
+        }
+
+        // Fallback to Nominatim reverse geocoding
+        if (!result) {
+          try {
+            console.log('Using Nominatim fallback for reverse geocoding:', lat, lng);
+            
+            const nominatimParams: Record<string, string> = {
+              lat: lat.toString(),
+              lon: lng.toString(),
+              zoom: '18', // High zoom for detailed address
+              addressdetails: '1'
+            };
+
+            if (countrycode) {
+              nominatimParams.countrycodes = countrycode;
+            }
+
+            const nominatimResponse = await makeNominatimRequest(
+              'https://nominatim.openstreetmap.org/reverse',
+              nominatimParams
+            );
+
+            if (nominatimResponse) {
+              const address = nominatimResponse.display_name || `${lat}, ${lng}`;
+              result = {
+                address: address,
+                lat: lat,
+                lng: lng,
+                confidence: 0.7,
+                components: {
+                  city: nominatimResponse.address?.city || nominatimResponse.address?.town || nominatimResponse.address?.village || '',
+                  state: nominatimResponse.address?.state || '',
+                  country: nominatimResponse.address?.country || '',
+                  postcode: nominatimResponse.address?.postcode || '',
+                  street: nominatimResponse.address?.road || '',
+                  housenumber: nominatimResponse.address?.house_number || ''
+                },
+                source: 'nominatim'
+              };
+              console.log(`Nominatim reverse geocoded ${lat}, ${lng} to:`, address);
+            }
+          } catch (nominatimError) {
+            console.error('Nominatim reverse geocoding also failed:', nominatimError);
+          }
+        }
+
+        if (!result) {
+          return res.status(404).json({ 
+            error: 'Location not found',
+            message: 'The specified coordinates could not be reverse geocoded'
+          });
+        }
+
+      } else if (isForwardGeocoding) {
+        // Forward geocoding: address -> coordinates  
+        const { address, countrycode } = validatedData as { address: string; countrycode?: string };
+
+        console.log(`Forward geocoding address: ${address}`);
+
+        // Try Geoapify first if API key is available
+        if (GEOAPIFY_API_KEY) {
+          try {
+            // Build Geoapify parameters
+            const geoapifyParams: Record<string, string> = {
+              text: address,
+              limit: '1' // We only need the best match
+            };
+
+            if (countrycode) {
+              geoapifyParams.filter = `countrycode:${countrycode}`;
+            }
+
+            // Make request to Geoapify
+            const geoapifyResponse = await makeGeoapifyRequest(
+              'https://api.geoapify.com/v1/geocode/search',
+              geoapifyParams
+            );
+
+            if (geoapifyResponse.features && geoapifyResponse.features.length > 0) {
+              const feature = geoapifyResponse.features[0];
+              const props = feature.properties;
+
+              result = {
+                address: props.formatted || address,
+                lat: feature.geometry.coordinates[1],
+                lng: feature.geometry.coordinates[0],
+                confidence: props.confidence || 0.5,
+                components: {
+                  city: props.city || '',
+                  state: props.state || '',
+                  country: props.country || '',
+                  postcode: props.postcode || '',
+                  street: props.street || '',
+                  housenumber: props.housenumber || ''
+                },
+                source: 'geoapify'
+              };
+            }
+          } catch (error) {
+            console.warn('Geoapify geocoding failed, falling back to Nominatim:', error);
+          }
+        }
+
+        // Fallback to Nominatim if no result yet
+        if (!result) {
+          try {
+            console.log('Using Nominatim fallback for geocoding:', address);
+            
+            const nominatimParams: Record<string, string> = {
+              q: address,
+              limit: '1'
+            };
+
+            if (countrycode) {
+              nominatimParams.countrycodes = countrycode;
+            }
+
+            const nominatimResponse = await makeNominatimRequest(
+              'https://nominatim.openstreetmap.org/search',
+              nominatimParams
+            );
+
+            if (nominatimResponse && nominatimResponse.length > 0) {
+              const place = nominatimResponse[0];
+              result = {
+                address: place.display_name || address,
+                lat: parseFloat(place.lat),
+                lng: parseFloat(place.lon),
+                confidence: place.importance || 0.5,
+                components: {
+                  city: place.address?.city || place.address?.town || place.address?.village || '',
+                  state: place.address?.state || '',
+                  country: place.address?.country || '',
+                  postcode: place.address?.postcode || '',
+                  street: place.address?.road || '',
+                  housenumber: place.address?.house_number || ''
+                },
+                source: 'nominatim'
+              };
+              console.log(`Nominatim geocoded "${address}" to:`, result.lat, result.lng);
+            }
+          } catch (nominatimError) {
+            console.error('Nominatim geocoding also failed:', nominatimError);
+          }
+        }
+
+        if (!result) {
+          return res.status(404).json({ 
+            error: 'Address not found',
+            message: 'The specified address could not be geocoded'
+          });
+        }
+      }
+
+      res.json(result);
+
+    } catch (error) {
+      console.error('Places geocode error:', error);
+      res.status(500).json({ 
+        error: 'Failed to process geocode request',
+        message: 'Please try again later'
+      });
+    }
+  });
+
   // Get Razorpay public key for frontend
   app.get('/api/razorpay-key', (req, res) => {
     if (!razorpay) {
@@ -856,6 +1580,152 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error processing order.paid:', error);
     }
   }
+
+  // Proximity search endpoint for salons
+  app.get('/api/search/salons', spikeProtection, async (req, res) => {
+    try {
+      console.log('🔍 PROXIMITY SEARCH CALLED:', {
+        url: req.url,
+        query: req.query,
+        userAgent: req.get('User-Agent')?.substring(0, 50),
+        timestamp: new Date().toISOString()
+      });
+      
+      // Parse and validate query parameters
+      const rawParams = {
+        lat: parseFloat(req.query.lat as string),
+        lng: parseFloat(req.query.lng as string),
+        radiusKm: parseFloat(req.query.radiusKm as string) || 10,
+        category: req.query.category as string,
+        q: req.query.q as string,
+        sort: req.query.sort as string || 'distance',
+        page: parseInt(req.query.page as string) || 1,
+        pageSize: parseInt(req.query.pageSize as string) || 20,
+      };
+
+      console.log('📍 PROXIMITY SEARCH PARAMS:', rawParams);
+
+      // Validate parameters using Zod schema
+      const validationResult = salonSearchSchema.safeParse(rawParams);
+      if (!validationResult.success) {
+        return res.status(400).json({
+          error: 'Invalid search parameters',
+          details: validationResult.error.format(),
+        });
+      }
+
+      const params = validationResult.data;
+
+      // Get all matching salons using proximity search
+      console.log(`🌍 Searching salons near (${params.lat}, ${params.lng}) within ${params.radiusKm}km`);
+      const allResults = await storage.findSalonsNearLocation(
+        params.lat, 
+        params.lng, 
+        params.radiusKm, 
+        500 // Get up to 500 results for filtering/sorting
+      );
+      console.log(`📊 Found ${allResults.length} salons within radius`);
+
+      // Apply additional filters
+      let filteredResults = allResults;
+
+      // Filter by category if specified
+      if (params.category) {
+        filteredResults = filteredResults.filter(salon => 
+          salon.category.toLowerCase().includes(params.category!.toLowerCase())
+        );
+      }
+
+      // Filter by text search if specified
+      if (params.q) {
+        const query = params.q.toLowerCase();
+        filteredResults = filteredResults.filter(salon => 
+          salon.name.toLowerCase().includes(query) ||
+          (salon.description && salon.description.toLowerCase().includes(query)) ||
+          salon.address.toLowerCase().includes(query) ||
+          salon.city.toLowerCase().includes(query)
+        );
+      }
+
+      // Apply sorting
+      switch (params.sort) {
+        case 'rating':
+          filteredResults.sort((a, b) => parseFloat(b.rating || '0') - parseFloat(a.rating || '0'));
+          break;
+        case 'name':
+          filteredResults.sort((a, b) => a.name.localeCompare(b.name));
+          break;
+        case 'distance':
+        default:
+          filteredResults.sort((a, b) => a.distance - b.distance);
+          break;
+      }
+
+      // Apply pagination
+      const totalResults = filteredResults.length;
+      console.log(`✅ PROXIMITY SEARCH COMPLETE: ${totalResults} filtered results, returning page ${params.page}`);
+      const totalPages = Math.ceil(totalResults / params.pageSize);
+      const startIndex = (params.page - 1) * params.pageSize;
+      const endIndex = startIndex + params.pageSize;
+      const paginatedResults = filteredResults.slice(startIndex, endIndex);
+
+      // Format response
+      const response: SalonSearchResult = {
+        salons: paginatedResults.map(salon => ({
+          id: salon.id,
+          name: salon.name,
+          description: salon.description,
+          address: salon.address,
+          city: salon.city,
+          state: salon.state,
+          zipCode: salon.zipCode,
+          latitude: salon.latitude,
+          longitude: salon.longitude,
+          phone: salon.phone,
+          email: salon.email,
+          website: salon.website,
+          category: salon.category,
+          priceRange: salon.priceRange,
+          rating: salon.rating || '0.00',
+          reviewCount: salon.reviewCount,
+          imageUrl: salon.imageUrl,
+          openTime: salon.openTime,
+          closeTime: salon.closeTime,
+          distance_km: Number(salon.distance.toFixed(2)),
+          createdAt: salon.createdAt,
+        })),
+        pagination: {
+          page: params.page,
+          pageSize: params.pageSize,
+          total: totalResults,
+          totalPages,
+          hasMore: params.page < totalPages,
+        },
+        searchParams: {
+          lat: params.lat,
+          lng: params.lng,
+          radiusKm: params.radiusKm,
+          category: params.category,
+          q: params.q,
+          sort: params.sort,
+        },
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error('Error in proximity search:', error);
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Latitude must be') || 
+            error.message.includes('Longitude must be') ||
+            error.message.includes('Radius must be')) {
+          return res.status(400).json({ error: error.message });
+        }
+      }
+      
+      res.status(500).json({ error: 'Failed to search salons' });
+    }
+  });
 
   // Get available salons with search functionality
   app.get('/api/salons', async (req, res) => {
@@ -1698,6 +2568,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         };
 
+        if (!razorpay) {
+          return res.status(503).json({ error: 'Payment service not configured' });
+        }
+        
         const order = await razorpay.orders.create(razorpayOrderOptions);
         
         // Update payment with Razorpay order ID
@@ -5960,6 +6834,171 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         res.status(500).json({ error: 'Failed to update appointment' });
       }
+    }
+  });
+
+  // ===============================================
+  // DATA MIGRATION ENDPOINTS (Admin only)
+  // ===============================================
+  
+  // Geocoding migration endpoint - re-geocode all salon addresses to ensure coordinate accuracy
+  app.post('/api/admin/migrate/geocode-salons', isAuthenticated, async (req: any, res) => {
+    try {
+      // Check if user has admin role (basic authorization check)
+      const userRoles = req.user?.roles || [];
+      if (!userRoles.includes('admin') && !userRoles.includes('owner')) {
+        return res.status(403).json({ error: 'Unauthorized - Admin access required' });
+      }
+
+      console.log('Starting salon geocoding migration...');
+      
+      // Initialize migration results tracking
+      const migrationResults = {
+        startTime: new Date().toISOString(),
+        totalSalons: 0,
+        successfulGeocode: 0,
+        failedGeocode: 0,
+        alreadyAccurate: 0,
+        updated: 0,
+        errors: [] as string[],
+        details: [] as Array<{
+          id: string;
+          name: string;
+          originalAddress: string;
+          originalLat: number | null;
+          originalLng: number | null;
+          newLat: number | null;
+          newLng: number | null;
+          status: string;
+          error: string | null;
+        }>,
+        endTime: ''
+      };
+
+      // Get all active salons
+      const salons = await storage.getAllSalons();
+      const activeSalons = salons.filter(salon => salon.isActive);
+      migrationResults.totalSalons = activeSalons.length;
+
+      console.log(`Found ${activeSalons.length} active salons to process`);
+
+      // Process each salon
+      for (const salon of activeSalons) {
+        const salonDetail = {
+          id: salon.id,
+          name: salon.name,
+          originalAddress: `${salon.address}, ${salon.city}, ${salon.state}`,
+          originalLat: salon.latitude ? parseFloat(salon.latitude as string) : null,
+          originalLng: salon.longitude ? parseFloat(salon.longitude as string) : null,
+          newLat: null as number | null,
+          newLng: null as number | null,
+          status: 'pending' as string,
+          error: null as string | null
+        };
+
+        try {
+          // Build full address for geocoding
+          const fullAddress = `${salon.address}, ${salon.city}, ${salon.state}`;
+          
+          console.log(`Geocoding salon "${salon.name}" at address: ${fullAddress}`);
+
+          // Make internal request to geocoding endpoint
+          const geocodeUrl = `http://localhost:5000/api/places/geocode?address=${encodeURIComponent(fullAddress)}`;
+          const geocodeResponse = await fetch(geocodeUrl);
+
+          if (geocodeResponse.ok) {
+            const geocodeData = await geocodeResponse.json();
+            
+            if (geocodeData.lat && geocodeData.lng) {
+              const newLat = parseFloat(geocodeData.lat);
+              const newLng = parseFloat(geocodeData.lng);
+              
+              // Validate coordinate ranges
+              if (newLat >= -90 && newLat <= 90 && newLng >= -180 && newLng <= 180) {
+                salonDetail.newLat = newLat;
+                salonDetail.newLng = newLng;
+                
+                // Check if coordinates changed significantly (more than ~100 meters difference)
+                const coordsChanged = !salon.latitude || !salon.longitude ||
+                  Math.abs(newLat - parseFloat(salon.latitude as string)) > 0.001 ||
+                  Math.abs(newLng - parseFloat(salon.longitude as string)) > 0.001;
+
+                if (coordsChanged) {
+                  // Update salon coordinates using transaction for safety
+                  await storage.updateSalon(salon.id, {
+                    latitude: newLat.toString(),
+                    longitude: newLng.toString()
+                  });
+                  
+                  salonDetail.status = 'updated';
+                  migrationResults.updated++;
+                  console.log(`✅ Updated coordinates for "${salon.name}": ${newLat}, ${newLng}`);
+                } else {
+                  salonDetail.status = 'already_accurate';
+                  migrationResults.alreadyAccurate++;
+                  console.log(`✓ Coordinates already accurate for "${salon.name}"`);
+                }
+                
+                migrationResults.successfulGeocode++;
+              } else {
+                salonDetail.status = 'invalid_coordinates';
+                salonDetail.error = `Invalid coordinate ranges: lat=${newLat}, lng=${newLng}`;
+                migrationResults.failedGeocode++;
+                migrationResults.errors.push(`${salon.name}: Invalid coordinate ranges`);
+                console.warn(`⚠️ Invalid coordinates for "${salon.name}": ${newLat}, ${newLng}`);
+              }
+            } else {
+              salonDetail.status = 'geocode_no_result';
+              salonDetail.error = 'Geocoding returned no coordinates';
+              migrationResults.failedGeocode++;
+              migrationResults.errors.push(`${salon.name}: No coordinates returned`);
+              console.warn(`⚠️ No coordinates returned for "${salon.name}"`);
+            }
+          } else {
+            const errorData = await geocodeResponse.text();
+            salonDetail.status = 'geocode_failed';
+            salonDetail.error = `Geocoding API error: ${geocodeResponse.status}`;
+            migrationResults.failedGeocode++;
+            migrationResults.errors.push(`${salon.name}: Geocoding API error`);
+            console.error(`❌ Geocoding failed for "${salon.name}": ${errorData}`);
+          }
+        } catch (error) {
+          salonDetail.status = 'exception';
+          salonDetail.error = error instanceof Error ? error.message : 'Unknown error';
+          migrationResults.failedGeocode++;
+          migrationResults.errors.push(`${salon.name}: ${salonDetail.error}`);
+          console.error(`❌ Exception geocoding "${salon.name}":`, error);
+        }
+        
+        migrationResults.details.push(salonDetail);
+        
+        // Small delay to avoid overwhelming the geocoding service
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      migrationResults.endTime = new Date().toISOString();
+      
+      console.log('Salon geocoding migration completed:');
+      console.log(`- Total salons: ${migrationResults.totalSalons}`);
+      console.log(`- Successfully geocoded: ${migrationResults.successfulGeocode}`);
+      console.log(`- Updated coordinates: ${migrationResults.updated}`);
+      console.log(`- Already accurate: ${migrationResults.alreadyAccurate}`);
+      console.log(`- Failed geocoding: ${migrationResults.failedGeocode}`);
+
+      // Return comprehensive results
+      res.json({
+        success: true,
+        message: 'Salon geocoding migration completed',
+        results: migrationResults
+      });
+      
+    } catch (error: any) {
+      console.error('Migration error:', error);
+      res.status(500).json({ 
+        error: 'Migration failed', 
+        message: error.message,
+        details: 'Check server logs for more information'
+      });
     }
   });
 

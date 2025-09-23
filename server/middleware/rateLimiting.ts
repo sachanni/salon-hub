@@ -16,7 +16,7 @@ export const communicationRateLimits = {
     keyGenerator: (req: Request) => {
       // Rate limit by user ID if authenticated, otherwise by IPv6-safe IP
       const userId = (req as any).user?.id;
-      return userId || ipKeyGenerator(req.ip);
+      return userId || ipKeyGenerator(req.ip || 'unknown-ip');
     }
   }),
   
@@ -32,7 +32,7 @@ export const communicationRateLimits = {
     legacyHeaders: false,
     keyGenerator: (req: Request) => {
       const userId = (req as any).user?.id;
-      return `campaign:${userId || ipKeyGenerator(req.ip)}`;
+      return `campaign:${userId || ipKeyGenerator(req.ip || 'unknown-ip')}`;
     }
   }),
   
@@ -48,7 +48,7 @@ export const communicationRateLimits = {
     legacyHeaders: false,
     keyGenerator: (req: Request) => {
       const userId = (req as any).user?.id;
-      return `templates:${userId || ipKeyGenerator(req.ip)}`;
+      return `templates:${userId || ipKeyGenerator(req.ip || 'unknown-ip')}`;
     }
   }),
   
@@ -64,7 +64,23 @@ export const communicationRateLimits = {
     legacyHeaders: false,
     keyGenerator: (req: Request) => {
       const userId = (req as any).user?.id;
-      return `analytics:${userId || ipKeyGenerator(req.ip)}`;
+      return `analytics:${userId || ipKeyGenerator(req.ip || 'unknown-ip')}`;
+    }
+  }),
+
+  // Places API operations - moderate limit to prevent abuse
+  placesApi: rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 150, // 150 requests per 15 minutes (10 per minute average)
+    message: {
+      error: 'Too many places API requests. Please try again later.',
+      retryAfter: '15 minutes'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: Request) => {
+      const userId = (req as any).user?.id;
+      return `places:${userId || ipKeyGenerator(req.ip || 'unknown-ip')}`;
     }
   })
 };
@@ -79,7 +95,7 @@ export const slidingWindowLimiter = (config: {
   
   return (req: Request, res: Response, next: Function) => {
     const userId = (req as any).user?.id;
-    const key = `${config.keyPrefix || 'default'}:${userId || ipKeyGenerator(req.ip)}`;
+    const key = `${config.keyPrefix || 'default'}:${userId || ipKeyGenerator(req.ip || 'unknown-ip')}`;
     const now = Date.now();
     const windowStart = now - config.windowMs;
     
@@ -103,8 +119,8 @@ export const slidingWindowLimiter = (config: {
     
     // Clean up old entries periodically
     if (Math.random() < 0.01) { // 1% chance
-      for (const [k, timestamps] of requests.entries()) {
-        const filtered = timestamps.filter(t => t > windowStart);
+      for (const [k, timestamps] of Array.from(requests.entries())) {
+        const filtered = timestamps.filter((t: number) => t > windowStart);
         if (filtered.length === 0) {
           requests.delete(k);
         } else {
@@ -185,7 +201,7 @@ export const webhookRateLimit = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req: Request) => {
     // Rate limit by provider IP or user agent
-    return req.get('User-Agent') || ipKeyGenerator(req.ip);
+    return req.get('User-Agent') || ipKeyGenerator(req.ip || 'unknown-ip');
   }
 });
 

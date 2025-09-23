@@ -15,6 +15,7 @@ interface SalonCardProps {
   image: string;
   priceRange: string;
   openTime?: string;
+  distance?: number; // Distance in kilometers for proximity search results
   onBookingClick?: (salonName: string, salonId: string) => void;
 }
 
@@ -28,6 +29,7 @@ export default function SalonCard({
   image,
   priceRange,
   openTime,
+  distance,
   onBookingClick
 }: SalonCardProps) {
   const [imageError, setImageError] = useState(false);
@@ -61,7 +63,7 @@ export default function SalonCard({
         data-testid={`card-salon-${id}`}
         className="overflow-hidden hover-elevate transition-all duration-200 cursor-pointer"
       >
-      <div className="relative h-48 overflow-hidden">
+      <div className="relative h-48 sm:h-48 overflow-hidden">
         {/* Loading skeleton */}
         {isLoading && (
           <div className="absolute inset-0 bg-muted animate-pulse" />
@@ -71,7 +73,7 @@ export default function SalonCard({
         <img 
           src={showFallback ? defaultSalonImage : image}
           alt={name}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover aspect-[3/2]"
           onError={handleImageError}
           onLoad={handleImageLoad}
           style={{ display: isLoading ? 'none' : 'block' }}
@@ -88,10 +90,10 @@ export default function SalonCard({
           </Badge>
         </div>
       </div>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 p-4 sm:p-6">
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <h3 className="font-semibold text-lg mb-1" data-testid={`text-salon-name-${id}`}>
+            <h3 className="font-semibold text-base sm:text-lg mb-1 line-clamp-2" data-testid={`text-salon-name-${id}`}>
               {name}
             </h3>
             <div className="flex items-center gap-2 mb-2">
@@ -104,9 +106,14 @@ export default function SalonCard({
               </div>
             </div>
             <div className="flex items-center gap-1 mb-2">
-              <MapPin className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground" data-testid={`text-location-${id}`}>
+              <MapPin className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <span className="text-sm text-muted-foreground truncate" data-testid={`text-location-${id}`}>
                 {location}
+                {distance !== undefined && (
+                  <span className="ml-2 text-primary font-medium">
+                    • {distance < 1 ? `${(distance * 1000).toFixed(0)}m` : `${distance.toFixed(1)}km`} away
+                  </span>
+                )}
               </span>
             </div>
             <Badge variant="outline" className="mb-3">{category}</Badge>
@@ -119,12 +126,12 @@ export default function SalonCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <div className="flex gap-2">
+      <CardContent className="pt-0 p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row gap-2">
           <Button 
             variant="outline"
             size="sm"
-            className="flex-1"
+            className="flex-1 h-10 sm:h-9"
             data-testid={`button-view-${id}`}
           >
             <Eye className="h-4 w-4 mr-2" />
@@ -133,7 +140,7 @@ export default function SalonCard({
           <Button 
             data-testid={`button-book-${id}`}
             onClick={handleBookNow}
-            className="flex-1"
+            className="flex-1 h-10 sm:h-9"
           >
             Book Now
           </Button>

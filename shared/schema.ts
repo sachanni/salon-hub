@@ -74,6 +74,43 @@ export type User = typeof users.$inferSelect;
 // Replit Auth types
 export type UpsertUser = typeof users.$inferInsert;
 
+// User saved locations table - for storing user addresses (home, office, custom)
+export const userSavedLocations = pgTable("user_saved_locations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  label: varchar("label", { length: 20 }).notNull(), // 'home', 'office', 'custom'
+  name: text("name").notNull(), // User-friendly name for the location
+  address: text("address").notNull(), // Full address text
+  latitude: decimal("latitude", { precision: 9, scale: 6 }).notNull(), // Required for proximity search
+  longitude: decimal("longitude", { precision: 9, scale: 6 }).notNull(), // Required for proximity search
+  placeId: text("place_id"), // Optional Google Places ID for address validation
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // Unique constraint: each user can have only one home and one office location
+  uniqueIndex("user_saved_locations_user_label_unique").on(table.userId, table.label)
+    .where(sql`${table.label} IN ('home', 'office')`),
+  // Spatial index for geospatial queries
+  index("user_saved_locations_lat_lng_idx").on(table.latitude, table.longitude),
+  // Constraint to validate label values
+  check("user_saved_locations_label_check", sql`${table.label} IN ('home', 'office', 'custom')`),
+]);
+
+export const insertUserSavedLocationSchema = createInsertSchema(userSavedLocations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserSavedLocation = z.infer<typeof insertUserSavedLocationSchema>;
+export type UserSavedLocation = typeof userSavedLocations.$inferSelect;
+
+// User saved locations relations
+export const userSavedLocationsRelations = relations(userSavedLocations, ({ one }) => ({
+  user: one(users, {
+    fields: [userSavedLocations.userId],
+    references: [users.id],
+  }),
+}));
+
 // Roles table - define system roles (customer, owner, admin)
 export const roles = pgTable("roles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -153,6 +190,8 @@ export const salons = pgTable("salons", {
   city: text("city").notNull(),
   state: text("state").notNull(),
   zipCode: text("zip_code").notNull(),
+  latitude: decimal("latitude", { precision: 9, scale: 6 }), // For global proximity search
+  longitude: decimal("longitude", { precision: 9, scale: 6 }), // For global proximity search
   phone: text("phone").notNull(),
   email: text("email").notNull(),
   website: text("website"),
@@ -167,7 +206,10 @@ export const salons = pgTable("salons", {
   ownerId: varchar("owner_id").references(() => users.id), // Keep for backward compatibility
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "set null" }), // New organization link
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => [
+  // Spatial index for geospatial queries (lat/lng proximity search)
+  index("salons_lat_lng_idx").on(table.latitude, table.longitude),
+]);
 
 export const insertSalonSchema = createInsertSchema(salons).omit({
   id: true,
@@ -187,6 +229,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   ownedOrganizations: many(organizations),
   orgMemberships: many(orgUsers),
   staffProfiles: many(staff),
+  savedLocations: many(userSavedLocations),
 }));
 
 // Salon relations
@@ -213,7 +256,7 @@ export const services = pgTable("services", {
   description: text("description"),
   durationMinutes: integer("duration_minutes").notNull(),
   priceInPaisa: integer("price_in_paisa").notNull(), // Store price in smallest currency unit
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   isActive: integer("is_active").notNull().default(1),
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "restrict" }), // Prevent deleting salons with services
   category: varchar("category", { length: 50 }), // Hair, Nails, Facial, Massage, etc
@@ -348,7 +391,7 @@ export const bookings = pgTable("bookings", {
   bookingTime: text("booking_time").notNull(),
   status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, confirmed, cancelled, completed
   totalAmountPaisa: integer("total_amount_paisa").notNull(),
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   paymentMethod: varchar("payment_method", { length: 20 }).notNull().default('pay_now'), // pay_now, pay_at_salon
   notes: text("notes"), // Special requests or notes
   guestSessionId: text("guest_session_id"), // For tracking guest user sessions
@@ -414,7 +457,7 @@ export const payments = pgTable("payments", {
   razorpayPaymentId: text("razorpay_payment_id"),
   razorpaySignature: text("razorpay_signature"),
   amountPaisa: integer("amount_paisa").notNull(),
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, completed, failed
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
@@ -967,7 +1010,7 @@ export const expenses = pgTable("expenses", {
   title: varchar("title", { length: 200 }).notNull(),
   description: text("description"),
   amountPaisa: integer("amount_paisa").notNull(),
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   expenseDate: timestamp("expense_date").notNull(),
   receiptUrl: text("receipt_url"), // URL to uploaded receipt
   receiptNumber: varchar("receipt_number", { length: 100 }),
@@ -1065,7 +1108,7 @@ export const budgets = pgTable("budgets", {
   budgetType: varchar("budget_type", { length: 20 }).notNull(), // category, overall, department
   budgetAmountPaisa: integer("budget_amount_paisa").notNull(),
   spentAmountPaisa: integer("spent_amount_paisa").notNull().default(0),
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   budgetPeriod: varchar("budget_period", { length: 20 }).notNull(), // monthly, quarterly, yearly
   startDate: timestamp("start_date").notNull(),
   endDate: timestamp("end_date").notNull(),
@@ -2268,7 +2311,7 @@ export const campaignOptimizationInsights = pgTable("campaign_optimization_insig
   // Lifecycle
   status: varchar("status", { length: 20 }).notNull().default('active'), // active, implemented, expired, superseded
   validUntil: timestamp("valid_until"), // When this insight expires
-  supersededBy: varchar("superseded_by").references(() => campaignOptimizationInsights.id),
+  supersededBy: varchar("superseded_by"), // Self-reference will be added after table definition
   
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -2422,7 +2465,7 @@ export const productCategories = pgTable("product_categories", {
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 100 }).notNull(),
   description: text("description"),
-  parentCategoryId: varchar("parent_category_id").references(() => productCategories.id, { onDelete: "set null" }),
+  parentCategoryId: varchar("parent_category_id"), // Self-reference will be added after table definition
   isActive: integer("is_active").notNull().default(1),
   sortOrder: integer("sort_order").default(0),
   createdAt: timestamp("created_at").defaultNow(),
@@ -2454,7 +2497,7 @@ export const products = pgTable("products", {
   unit: varchar("unit", { length: 20 }).notNull().default('piece'), // piece, ml, g, kg, etc.
   costPriceInPaisa: integer("cost_price_in_paisa").notNull(), // Purchase cost
   sellingPriceInPaisa: integer("selling_price_in_paisa"), // Retail price for resale items
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   currentStock: decimal("current_stock", { precision: 10, scale: 3 }).notNull().default('0'),
   minimumStock: decimal("minimum_stock", { precision: 10, scale: 3 }).notNull().default('0'),
   maximumStock: decimal("maximum_stock", { precision: 10, scale: 3 }),
@@ -2546,7 +2589,7 @@ export const purchaseOrders = pgTable("purchase_orders", {
   shippingInPaisa: integer("shipping_in_paisa").notNull().default(0),
   discountInPaisa: integer("discount_in_paisa").notNull().default(0),
   totalInPaisa: integer("total_in_paisa").notNull().default(0),
-  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   paymentTerms: varchar("payment_terms", { length: 100 }),
   paymentStatus: varchar("payment_status", { length: 20 }).default('pending'), // pending, partial, paid
   createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: "restrict" }),
@@ -2872,3 +2915,129 @@ export const inventoryAdjustmentItemsRelations = relations(inventoryAdjustmentIt
     references: [products.id],
   }),
 }));
+
+// Proximity search validation schemas
+export const salonSearchSchema = z.object({
+  lat: z.number().min(-90).max(90, "Latitude must be between -90 and 90 degrees"),
+  lng: z.number().min(-180).max(180, "Longitude must be between -180 and 180 degrees"),
+  radiusKm: z.number().min(0.2).max(2, "Radius must be between 0.2 and 2 kilometers").default(0.5),
+  category: z.string().optional(),
+  q: z.string().optional(),
+  sort: z.enum(['distance', 'rating', 'name']).default('distance'),
+  page: z.number().min(1).default(1),
+  pageSize: z.number().min(1).max(50).default(20),
+});
+
+export type SalonSearchParams = z.infer<typeof salonSearchSchema>;
+
+export const salonSearchResultSchema = z.object({
+  salons: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    address: z.string(),
+    city: z.string(),
+    state: z.string(),
+    zipCode: z.string(),
+    latitude: z.string().nullable(),
+    longitude: z.string().nullable(),
+    phone: z.string(),
+    email: z.string(),
+    website: z.string().nullable(),
+    category: z.string(),
+    priceRange: z.string(),
+    rating: z.string(),
+    reviewCount: z.number(),
+    imageUrl: z.string().nullable(),
+    openTime: z.string().nullable(),
+    closeTime: z.string().nullable(),
+    distance_km: z.number(),
+    createdAt: z.date().nullable(),
+  })),
+  pagination: z.object({
+    page: z.number(),
+    pageSize: z.number(),
+    total: z.number(),
+    totalPages: z.number(),
+    hasMore: z.boolean(),
+  }),
+  searchParams: z.object({
+    lat: z.number(),
+    lng: z.number(),
+    radiusKm: z.number(),
+    category: z.string().optional(),
+    q: z.string().optional(),
+    sort: z.string(),
+  }),
+});
+
+export type SalonSearchResult = z.infer<typeof salonSearchResultSchema>;
+
+// Places API validation schemas
+export const placesAutocompleteSchema = z.object({
+  q: z.string().min(1, "Query must not be empty").max(200, "Query too long"),
+  lat: z.number().min(-90).max(90, "Latitude must be between -90 and 90 degrees").optional(),
+  lng: z.number().min(-180).max(180, "Longitude must be between -180 and 180 degrees").optional(),
+  limit: z.number().min(1).max(20, "Limit must be between 1 and 20").default(10).optional(),
+  countrycode: z.string().length(2, "Country code must be 2 characters").optional(),
+});
+
+export const placesDetailsSchema = z.object({
+  placeId: z.string().min(1, "Place ID is required").max(500, "Place ID too long"),
+});
+
+export const placesGeocodeSchema = z.union([
+  // Forward geocoding: address -> coordinates
+  z.object({
+    address: z.string().min(1, "Address is required").max(500, "Address too long"),
+    countrycode: z.string().length(2, "Country code must be 2 characters").optional(),
+  }),
+  // Reverse geocoding: coordinates -> address  
+  z.object({
+    lat: z.number().min(-90, "Latitude must be between -90 and 90 degrees").max(90, "Latitude must be between -90 and 90 degrees"),
+    lng: z.number().min(-180, "Longitude must be between -180 and 180 degrees").max(180, "Longitude must be between -180 and 180 degrees"),
+    countrycode: z.string().length(2, "Country code must be 2 characters").optional(),
+  })
+]);
+
+export type PlacesAutocompleteParams = z.infer<typeof placesAutocompleteSchema>;
+export type PlacesDetailsParams = z.infer<typeof placesDetailsSchema>;
+export type PlacesGeocodeParams = z.infer<typeof placesGeocodeSchema>;
+
+// Places API response schemas
+export const placesAutocompleteResponseSchema = z.object({
+  suggestions: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    subtitle: z.string(),
+    lat: z.number().optional(),
+    lng: z.number().optional(),
+  })),
+  query: z.string(),
+});
+
+export const placesDetailsResponseSchema = z.object({
+  address: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  placeId: z.string().optional(),
+  components: z.object({
+    city: z.string().optional(),
+    state: z.string().optional(),
+    country: z.string().optional(),
+    postcode: z.string().optional(),
+    street: z.string().optional(),
+    housenumber: z.string().optional(),
+  }),
+});
+
+export const placesGeocodeResponseSchema = z.object({
+  address: z.string(),
+  lat: z.number(),
+  lng: z.number(),
+  confidence: z.number(),
+});
+
+export type PlacesAutocompleteResponse = z.infer<typeof placesAutocompleteResponseSchema>;
+export type PlacesDetailsResponse = z.infer<typeof placesDetailsResponseSchema>;
+export type PlacesGeocodeResponse = z.infer<typeof placesGeocodeResponseSchema>;
