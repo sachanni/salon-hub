@@ -1,138 +1,234 @@
-import { useParams } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
-import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
-import BookingModal from "@/components/BookingModal";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import React, { useState, useEffect } from 'react';
+import { useLocation } from 'wouter';
+import { useQuery } from '@tanstack/react-query';
 import { 
-  Calendar, 
-  Clock, 
+  ArrowLeft, 
+  Star, 
   MapPin, 
   Phone, 
-  Star, 
-  Users, 
-  ArrowLeft, 
-  Share2,
+  Mail, 
+  Globe, 
+  Clock, 
   Heart,
-  Camera,
-  ChevronLeft,
+  Share2,
+  Calendar,
   ChevronRight,
+  CheckCircle,
   Award,
-  Wifi,
-  CreditCard,
-  Car,
-  Coffee,
-  Shield
-} from "lucide-react";
-import { Link } from "wouter";
+  Users,
+  Camera,
+  Video,
+  Image as ImageIcon
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import BookingModal from '@/components/BookingModal';
 
-export default function SalonProfile() {
-  const { salonId } = useParams();
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isFavorited, setIsFavorited] = useState(false);
+interface Salon {
+  id: string;
+  name: string;
+  description: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  latitude: string;
+  longitude: string;
+  phone: string;
+  email: string;
+  website: string;
+  category: string;
+  priceRange: string;
+  rating: string;
+  reviewCount: number;
+  imageUrl?: string;
+  image?: string;
+  openTime?: string;
+  closeTime?: string;
+  distance_km?: number;
+  createdAt: string;
+  isActive?: number;
+  ownerId?: string;
+  orgId?: string;
+}
+
+interface Service {
+  id: string;
+  name: string;
+  description: string;
+  duration: number;
+  price: number;
+  category: string;
+}
+
+interface Staff {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  specialties?: string[];
+  isActive: number;
+  salonId: string;
+}
+
+interface SalonProfileProps {
+  salonId?: string;
+}
+
+const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => {
+  const [, setLocation] = useLocation();
+  const [salonId, setSalonId] = useState<string>(propSalonId || '');
+  const [isFavorite, setIsFavorite] = useState(false);
+  
+  // Booking modal state
   const [isBookingOpen, setIsBookingOpen] = useState(false);
-  const [selectedSalon, setSelectedSalon] = useState("");
-  const [selectedSalonId, setSelectedSalonId] = useState("");
-  const [selectedStaffId, setSelectedStaffId] = useState("");
-  const { addRecentlyViewed } = useRecentlyViewed();
+  const [selectedStaffId, setSelectedStaffId] = useState<string | undefined>(undefined);
+
+  // Get salon ID from URL params or props
+  useEffect(() => {
+    if (propSalonId) {
+      setSalonId(propSalonId);
+    } else {
+      // Check for query parameter (salon-profile?id=...)
+      const urlParams = new URLSearchParams(window.location.search);
+      const id = urlParams.get('id');
+      if (id) {
+        setSalonId(id);
+      } else {
+        // Check for path parameter (/salon/:salonId)
+        const pathParts = window.location.pathname.split('/');
+        const salonIdFromPath = pathParts[pathParts.length - 1];
+        if (salonIdFromPath && salonIdFromPath !== 'salon-profile') {
+          setSalonId(salonIdFromPath);
+        }
+      }
+    }
+  }, [propSalonId]);
+
+  // Handle booking modal events
+  useEffect(() => {
+    const handleOpenBookingModal = (event: CustomEvent) => {
+      const { salonId: eventSalonId, salonName, staffId } = event.detail;
+      if (eventSalonId === salonId) {
+        setSelectedStaffId(staffId);
+        setIsBookingOpen(true);
+      }
+    };
+
+    window.addEventListener('openBookingModal', handleOpenBookingModal as EventListener);
+    return () => {
+      window.removeEventListener('openBookingModal', handleOpenBookingModal as EventListener);
+    };
+  }, [salonId]);
+
+  // Booking handlers
+  const handleBookNow = () => {
+    setSelectedStaffId(undefined); // No specific staff selected
+    setIsBookingOpen(true);
+  };
+
+  const handleBookWithStaff = (staffId: string) => {
+    setSelectedStaffId(staffId);
+    setIsBookingOpen(true);
+  };
 
   // Fetch salon details
-  const { data: salon, isLoading: isSalonLoading } = useQuery({
-    queryKey: ['/api/salons', salonId],
+  const { data: salon, isLoading, error } = useQuery({
+    queryKey: ['salon', salonId],
+    queryFn: async (): Promise<Salon> => {
+      if (!salonId) throw new Error('No salon ID provided');
+      const response = await fetch(`/api/salons/${salonId}`);
+      if (!response.ok) throw new Error('Failed to fetch salon');
+      return response.json();
+    },
     enabled: !!salonId,
   });
 
   // Fetch salon services
-  const { data: services, isLoading: isServicesLoading } = useQuery({
-    queryKey: ['/api/salons', salonId, 'services'],
+  const { data: services } = useQuery({
+    queryKey: ['salon-services', salonId],
+    queryFn: async (): Promise<Service[]> => {
+      if (!salonId) return [];
+      const response = await fetch(`/api/salons/${salonId}/services`);
+      if (!response.ok) return [];
+      return response.json();
+    },
     enabled: !!salonId,
   });
 
   // Fetch salon staff
-  const { data: staff, isLoading: isStaffLoading } = useQuery({
-    queryKey: ['/api/salons', salonId, 'staff'],
+  const { data: staff } = useQuery({
+    queryKey: ['salon-staff', salonId],
+    queryFn: async (): Promise<Staff[]> => {
+      if (!salonId) return [];
+      const response = await fetch(`/api/salons/${salonId}/staff`);
+      if (!response.ok) return [];
+      return response.json();
+    },
     enabled: !!salonId,
   });
 
-  // Fetch media assets
+  // Fetch salon media assets
   const { data: mediaAssets } = useQuery({
-    queryKey: ['/api/salons', salonId, 'media-assets'],
+    queryKey: ['salon-media', salonId],
+    queryFn: async (): Promise<any[]> => {
+      if (!salonId) return [];
+      const response = await fetch(`/api/salons/${salonId}/media-assets`);
+      if (!response.ok) return [];
+      return response.json();
+    },
     enabled: !!salonId,
   });
 
-  // Your uploaded images only - no placeholder images
-  const allImages = (mediaAssets && Array.isArray(mediaAssets)) ? 
-    mediaAssets.map((asset: any) => asset.url).filter(Boolean) : [];
+  const handleBackToSearch = () => {
+    // Close the current tab and go back to search
+    window.close();
+  };
 
-  // Automatically track salon visit for recently viewed
-  useEffect(() => {
-    if (salon && !isSalonLoading) {
-      console.log('Tracking salon visit for recently viewed:', (salon as any)?.name);
-      addRecentlyViewed({
-        id: (salon as any)?.id,
-        name: (salon as any)?.name,
-        rating: (salon as any)?.rating || 4.5,
-        reviewCount: (salon as any)?.reviewCount || 0,
-        location: (salon as any)?.location || '',
-        category: (salon as any)?.category || 'Beauty & Wellness',
-        priceRange: (salon as any)?.priceRange || '$$',
-        image: (salon as any)?.image || ''
+
+  const handleFavorite = () => {
+    setIsFavorite(!isFavorite);
+    // TODO: Implement favorite functionality
+  };
+
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: salon?.name,
+        text: `Check out ${salon?.name} on Salon Hub`,
+        url: window.location.href,
       });
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      // TODO: Show toast notification
     }
-  }, [salon, isSalonLoading, addRecentlyViewed]);
-
-  // Service categories from actual data
-  const serviceCategories = (services && Array.isArray(services)) ? 
-    services.reduce((acc: Record<string, any[]>, service: any) => {
-      const category = service.category || 'General Services';
-      if (!acc[category]) acc[category] = [];
-      acc[category].push(service);
-      return acc;
-    }, {}) : {};
-
-  // No mock reviews - production ready
-  const reviews: any[] = []; // Will be populated when review API is implemented
-
-  // Amenities
-  const amenities = [
-    { icon: Wifi, label: "Free WiFi" },
-    { icon: CreditCard, label: "Card Payment" },
-    { icon: Car, label: "Parking Available" },
-    { icon: Coffee, label: "Complimentary Drinks" },
-    { icon: Shield, label: "Health & Safety Certified" }
-  ];
-
-  const nextImage = () => {
-    setCurrentImageIndex((prev) => (prev + 1) % allImages.length);
   };
 
-  const prevImage = () => {
-    setCurrentImageIndex((prev) => (prev - 1 + allImages.length) % allImages.length);
-  };
-
-  if (isSalonLoading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading salon profile...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading salon details...</p>
         </div>
       </div>
     );
   }
 
-  if (!salon) {
+  if (error || !salon) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Salon Not Found</h1>
-          <p className="text-muted-foreground mb-6">The salon you're looking for doesn't exist or isn't published yet.</p>
-          <Button asChild>
-            <Link href="/">← Back to Home</Link>
+          <div className="text-red-500 text-6xl mb-4">⚠️</div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Salon Not Found</h2>
+          <p className="text-gray-600 mb-6">The salon you're looking for doesn't exist or has been removed.</p>
+          <Button onClick={handleBackToSearch} variant="outline">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Search
           </Button>
         </div>
       </div>
@@ -140,470 +236,456 @@ export default function SalonProfile() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navigation Header */}
-      <div className="bg-white border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" asChild data-testid="button-back-home">
-              <Link href="/">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Home
-              </Link>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center space-x-4">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleBackToSearch}
+                className="text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Search
             </Button>
-            
-            <div className="flex items-center gap-2">
+              <Separator orientation="vertical" className="h-6" />
+              <h1 className="text-lg font-semibold text-gray-900 truncate">
+                {salon.name}
+              </h1>
+            </div>
+            <div className="flex items-center space-x-2">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setIsFavorited(!isFavorited)}
-                data-testid="button-favorite"
+                onClick={handleFavorite}
+                className={isFavorite ? "text-red-500" : "text-gray-600"}
               >
-                <Heart className={`h-4 w-4 ${isFavorited ? 'fill-red-500 text-red-500' : ''}`} />
+                <Heart className={`w-4 h-4 ${isFavorite ? "fill-current" : ""}`} />
               </Button>
-              <Button variant="ghost" size="sm" data-testid="button-share">
-                <Share2 className="h-4 w-4" />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleShare}
+                className="text-gray-600"
+              >
+                <Share2 className="w-4 h-4" />
               </Button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Image Gallery */}
-      <div className="relative h-96 lg:h-[500px] overflow-hidden bg-gray-100">
-        {allImages.length > 0 ? (
-          <img 
-            src={allImages[currentImageIndex]}
-            alt={`${(salon as any)?.name} - Image ${currentImageIndex + 1}`}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* First Row - Image Gallery Only */}
+        <div className="mb-6">
+          <div className="relative h-96 overflow-hidden rounded-lg">
+            {mediaAssets && mediaAssets.length > 0 ? (
+              <div className="flex h-full">
+                {/* Main large image - reduced width */}
+                <div className="w-2/3 relative">
+                  <img
+                    src={mediaAssets.find((asset: any) => asset.isPrimary === 1)?.url || mediaAssets[0]?.url}
+                    alt={salon.name}
             className="w-full h-full object-cover"
           />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-100">
-            <div className="text-center text-gray-500">
-              <Camera className="h-12 w-12 mx-auto mb-2" />
-              <p>No images uploaded yet</p>
+                  <div className="absolute top-4 right-4">
+                    <Badge variant="secondary" className="bg-white/90 text-gray-900">
+                      {salon.category.replace('_', ' ')}
+                    </Badge>
             </div>
           </div>
-        )}
-        
-        {/* Enhanced Gallery Navigation */}
-        {allImages.length > 1 && (
-          <>
-            {/* Large Navigation Arrows - Much More Visible */}
-            <Button
-              variant="secondary"
-              size="lg"
-              className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/95 hover:bg-white shadow-lg border-0 h-14 w-14 rounded-full p-0 z-10"
-              onClick={prevImage}
-              data-testid="button-prev-image"
-            >
-              <ChevronLeft className="h-8 w-8 text-gray-800" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="lg"
-              className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/95 hover:bg-white shadow-lg border-0 h-14 w-14 rounded-full p-0 z-10"
-              onClick={nextImage}
-              data-testid="button-next-image"
-            >
-              <ChevronRight className="h-8 w-8 text-gray-800" />
-            </Button>
-            
-            {/* Dot Indicators for Easy Navigation */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 flex space-x-2 z-10">
-              {allImages.map((_, index) => (
-                <button
-                  key={index}
-                  className={`w-3 h-3 rounded-full transition-all ${
-                    index === currentImageIndex 
-                      ? 'bg-white scale-125 shadow-lg' 
-                      : 'bg-white/60 hover:bg-white/80'
-                  }`}
-                  onClick={() => setCurrentImageIndex(index)}
-                  data-testid={`button-image-dot-${index}`}
-                />
+                
+                {/* Side thumbnails - increased width */}
+                {mediaAssets.length > 1 && (
+                  <div className="w-1/3 flex flex-col">
+                    {mediaAssets.slice(1, 4).map((asset: any, index: number) => (
+                      <div key={asset.id || index} className="flex-1 relative">
+                        <img
+                          src={asset.url}
+                          alt={asset.altText || `Salon image ${index + 2}`}
+                          className="w-full h-full object-cover"
+                        />
+                        {index === 2 && mediaAssets.length > 4 && (
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <span className="text-white font-semibold text-sm">
+                              +{mediaAssets.length - 4} more
+                            </span>
+                          </div>
+                        )}
+                      </div>
               ))}
             </div>
-            
-            {/* Image Counter - Moved to Top Right */}
-            <div className="absolute top-4 right-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm font-medium z-10">
-              <Camera className="h-3 w-3 inline mr-1" />
-              {currentImageIndex + 1} / {allImages.length}
-            </div>
-            
-            {/* Navigation Hint */}
-            <div className="absolute bottom-20 left-4 bg-black/70 text-white px-3 py-1 rounded-full text-xs z-10">
-              👆 Click dots or arrows to view all photos
-            </div>
-          </>
-        )}
-        
-        {/* Click Anywhere to Navigate */}
-        {allImages.length > 1 && (
-          <div 
-            className="absolute inset-0 cursor-pointer z-5"
-            onClick={nextImage}
-            title="Click to view next image"
-          />
-        )}
-        
-        {/* Salon Info Overlay */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-6 text-white">
-          <div className="container mx-auto">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="flex items-center gap-1 bg-white/20 backdrop-blur-sm rounded-full px-3 py-1">
-                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                <span className="font-semibold" data-testid="text-salon-rating">
-                  {(salon as any)?.rating || 'New'}
-                </span>
-                <span className="text-white/80">({(salon as any)?.reviewCount || 0} reviews)</span>
+                )}
               </div>
-              <Badge variant="secondary" className="bg-white/20 backdrop-blur-sm text-white border-white/30">
-                {(salon as any)?.category || 'Beauty & Wellness'}
-              </Badge>
+            ) : (salon.imageUrl || salon.image) ? (
+              <img
+                src={salon.imageUrl || salon.image}
+                alt={salon.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500 flex items-center justify-center">
+                <div className="text-center text-white">
+                  <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mb-3 mx-auto backdrop-blur-sm border border-white/30">
+                    <span className="text-3xl font-bold text-white">{salon.name.charAt(0)}</span>
+                  </div>
+                  <p className="text-lg font-semibold">{salon.name}</p>
             </div>
-            <h1 className="text-3xl lg:text-4xl font-bold mb-2" data-testid="text-salon-name">
-              {(salon as any)?.name}
-            </h1>
-            <div className="flex items-center gap-2 text-white/90">
-              <MapPin className="h-4 w-4" />
-              <span className="text-sm lg:text-base" data-testid="text-salon-location">
-                {(salon as any)?.address}, {(salon as any)?.city}, {(salon as any)?.state} {(salon as any)?.zipCode}
-              </span>
             </div>
-          </div>
+            )}
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Second Row - Salon Info and Quick Actions */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-6">
+            {/* Salon Info Card */}
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">{salon.name}</h1>
+                    <div className="flex items-center space-x-4 text-sm text-gray-600 mb-2">
+                      <div className="flex items-center">
+                        <Star className="w-4 h-4 text-yellow-400 fill-current mr-1" />
+                        <span className="font-medium">{salon.rating || '0.0'}</span>
+                        <span className="ml-1">({salon.reviewCount || 0} reviews)</span>
+                      </div>
+                      <div className="flex items-center">
+                        <MapPin className="w-4 h-4 mr-1" />
+                        <span>{salon.distance_km ? `${salon.distance_km.toFixed(1)} km away` : 'Location available'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center text-sm text-gray-600">
+                      <Clock className="w-4 h-4 mr-1" />
+                      <span>{salon.openTime && salon.closeTime ? `${salon.openTime} - ${salon.closeTime}` : 'Hours not specified'}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant="outline" className="text-sm mb-2">
+                      {salon.priceRange || 'Price not specified'}
+                    </Badge>
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleFavorite}
+                        className={isFavorite ? "text-red-500" : "text-gray-600"}
+                      >
+                        <Heart className={`w-4 h-4 ${isFavorite ? "fill-current" : ""}`} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleShare}
+                        className="text-gray-600"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-gray-700 mb-4">{salon.description}</p>
+
+                <Button 
+                  onClick={handleBookNow}
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+                  size="lg"
+                >
+                  <Calendar className="w-4 h-4 mr-2" />
+                  Book Now
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Tabs Section */}
             <Tabs defaultValue="services" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="services">Services</TabsTrigger>
-                <TabsTrigger value="team">Team</TabsTrigger>
-                <TabsTrigger value="reviews">Reviews</TabsTrigger>
+                <TabsTrigger value="gallery">Gallery</TabsTrigger>
+                <TabsTrigger value="staff">Staff</TabsTrigger>
                 <TabsTrigger value="about">About</TabsTrigger>
+                <TabsTrigger value="reviews">Reviews</TabsTrigger>
               </TabsList>
 
-              {/* Services Tab */}
               <TabsContent value="services" className="mt-6">
                 <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Award className="h-5 w-5" />
-                      Our Services
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {isServicesLoading ? (
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Services & Pricing</h3>
                       <div className="space-y-4">
-                        {[1, 2, 3].map((i) => (
-                          <div key={i} className="animate-pulse">
-                            <div className="h-4 bg-muted rounded w-1/3 mb-2"></div>
-                            <div className="h-3 bg-muted rounded w-2/3 mb-2"></div>
-                            <div className="h-3 bg-muted rounded w-1/4"></div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : Object.keys(serviceCategories).length > 0 ? (
-                      <div className="space-y-6">
-                        {Object.entries(serviceCategories).map(([category, categoryServices]) => (
-                          <div key={category}>
-                            <h3 className="text-lg font-semibold mb-4 text-primary">{category}</h3>
-                            <div className="space-y-4">
-                              {categoryServices.map((service: any) => (
-                                <div key={service.id} className="flex justify-between items-start p-4 rounded-lg border hover:shadow-sm transition-shadow" data-testid={`service-${service.id}`}>
+                      {services && services.length > 0 ? (
+                        services.map((service) => (
+                          <div key={service.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
                                   <div className="flex-1">
-                                    <h4 className="font-semibold text-lg mb-1" data-testid={`text-service-name-${service.id}`}>
-                                      {service.name}
-                                    </h4>
-                                    <p className="text-muted-foreground mb-2" data-testid={`text-service-description-${service.id}`}>
-                                      {service.description}
-                                    </p>
-                                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                      <div className="flex items-center gap-1">
-                                        <Clock className="h-4 w-4" />
-                                        <span data-testid={`text-service-duration-${service.id}`}>
-                                          {service.duration} min
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <Users className="h-4 w-4" />
-                                        <span>Professional team</span>
-                                      </div>
+                              <h4 className="font-medium text-gray-900">{service.name}</h4>
+                              <p className="text-sm text-gray-600 mt-1">{service.description}</p>
+                              <div className="flex items-center mt-2 text-sm text-gray-500">
+                                <Clock className="w-3 h-3 mr-1" />
+                                <span>{service.duration || 'Duration not specified'} min</span>
+                                <span className="mx-2">•</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {service.category || 'Service'}
+                                </Badge>
+                              </div>
                                     </div>
-                                  </div>
-                                  <div className="text-right ml-6">
-                                    <p className="font-bold text-xl mb-2" data-testid={`text-service-price-${service.id}`}>
-                                      ₹{service.price}
-                                    </p>
-                                    <Button 
-                                      size="sm" 
-                                      data-testid={`button-book-service-${service.id}`}
-                                      onClick={() => {
-                                        setSelectedSalon((salon as any)?.name || '');
-                                        setSelectedSalonId(salonId || '');
-                                        setIsBookingOpen(true);
-                                      }}
-                                    >
-                                      <Calendar className="h-3 w-3 mr-1" />
+                            <div className="text-right">
+                              <div className="text-lg font-semibold text-gray-900">
+                                ₹{service.price || 'Price not specified'}
+                              </div>
+                              <Button size="sm" variant="outline" className="mt-2">
                                       Book
                                     </Button>
                                   </div>
-                                </div>
-                              ))}
-                            </div>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <Award className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                        <p className="text-muted-foreground">Services will be available soon.</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Team Tab */}
-              <TabsContent value="team" className="mt-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      Meet Our Team
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {isStaffLoading ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {[1, 2, 3, 4].map((i) => (
-                          <div key={i} className="animate-pulse">
-                            <div className="h-32 bg-muted rounded-lg mb-3"></div>
-                            <div className="h-4 bg-muted rounded w-2/3 mb-2"></div>
-                            <div className="h-3 bg-muted rounded w-1/2"></div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : staff && Array.isArray(staff) && staff.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {staff.map((member: any, index: number) => {
-                          // Professional team member photos
-                          const profileImages = [
-                            'https://images.unsplash.com/photo-1594824720108-82cccd6946e6?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
-                            'https://images.unsplash.com/photo-1582750433449-648ed127bb54?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
-                            'https://images.unsplash.com/photo-1595475884552-c2b8a8b3d39a?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80',
-                            'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&q=80'
-                          ];
-                          
-                          return (
-                            <div key={(member as any)?.id} className="text-center" data-testid={`staff-${(member as any)?.id}`}>
-                              <div className="relative mx-auto mb-4">
-                                <img
-                                  src={profileImages[index % profileImages.length]}
-                                  alt={(member as any)?.name}
-                                  className="h-32 w-32 rounded-full object-cover border-4 border-white shadow-lg"
-                                />
-                                <div className="absolute -bottom-2 -right-2 bg-green-500 h-6 w-6 rounded-full border-2 border-white flex items-center justify-center">
-                                  <div className="w-2 h-2 bg-white rounded-full"></div>
-                                </div>
-                              </div>
-                              <h4 className="font-semibold text-lg mb-1" data-testid={`text-staff-name-${member.id}`}>
-                                {(member as any)?.name}
-                              </h4>
-                              <p className="text-muted-foreground mb-2" data-testid={`text-staff-role-${(member as any)?.id}`}>
-                                {(member as any)?.role || 'Senior Specialist'}
-                              </p>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="text-xs"
-                                data-testid={`button-book-staff-${(member as any)?.id}`}
-                                onClick={() => {
-                                  setSelectedSalon((salon as any)?.name || '');
-                                  setSelectedSalonId(salonId || '');
-                                  setSelectedStaffId((member as any)?.id);
-                                  setIsBookingOpen(true);
-                                }}
-                              >
-                                <Calendar className="h-3 w-3 mr-1" />
-                                Book with {(member as any)?.name?.split(' ')[0] || 'Specialist'}
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                        <p className="text-muted-foreground">Our team information will be available soon.</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Reviews Tab */}
-              <TabsContent value="reviews" className="mt-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Star className="h-5 w-5" />
-                      Customer Reviews
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-center py-12">
-                      <Star className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                      <h3 className="text-lg font-semibold mb-2">No reviews yet</h3>
-                      <p className="text-muted-foreground">
-                        Be the first to review this salon after booking an appointment.
-                      </p>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                          <p>No services available at the moment</p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
               </TabsContent>
 
-              {/* About Tab */}
-              <TabsContent value="about" className="mt-6">
-                <div className="space-y-6">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>About {(salon as any)?.name}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-muted-foreground mb-6" data-testid="text-salon-description">
-                        {(salon as any)?.description || `Welcome to ${(salon as any)?.name}, your premier destination for beauty and wellness services. Our experienced team is dedicated to providing exceptional service in a relaxing and professional environment.`}
-                      </p>
-                      
-                      <div className="mb-6">
-                        <h4 className="font-semibold mb-3">Amenities & Features</h4>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          {amenities.map((amenity) => (
-                            <div key={amenity.label} className="flex items-center gap-2 text-sm">
-                              <amenity.icon className="h-4 w-4 text-primary" />
-                              <span>{amenity.label}</span>
+              <TabsContent value="gallery" className="mt-6">
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Salon Gallery</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {mediaAssets && mediaAssets.length > 0 ? (
+                        mediaAssets
+                          .filter((asset: any) => asset.type === 'image')
+                          .map((asset: any, index: number) => (
+                            <div key={asset.id || index} className="relative group">
+                              <img
+                                src={asset.url}
+                                alt={asset.altText || `Salon image ${index + 1}`}
+                                className="w-full h-48 object-cover rounded-lg hover:scale-105 transition-transform duration-200 cursor-pointer"
+                                onClick={() => {
+                                  // Open image in full screen or modal
+                                  window.open(asset.url, '_blank');
+                                }}
+                              />
+                              {asset.isPrimary === 1 && (
+                                <div className="absolute top-2 right-2">
+                                  <Badge variant="secondary" className="bg-white/90 text-gray-900 text-xs">
+                                    <Star className="w-3 h-3 mr-1" />
+                                    Featured
+                                  </Badge>
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200 rounded-lg flex items-center justify-center">
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                  <Camera className="w-8 h-8 text-white" />
+                                </div>
+                              </div>
                             </div>
-                          ))}
+                          ))
+                      ) : (
+                        <div className="col-span-full text-center py-8 text-gray-500">
+                          <Camera className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                          <p>No images available</p>
+                          <p className="text-sm">Check back later for salon photos</p>
+                      </div>
+                    )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="staff" className="mt-6">
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Our Team</h3>
+                    <div className="space-y-4">
+                      {staff && staff.length > 0 ? (
+                        staff.filter(member => member.isActive === 1).map((member) => (
+                          <div key={member.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors group">
+                            <div className="flex items-center space-x-4">
+                              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                {member.name.charAt(0).toUpperCase()}
+                          </div>
+                              <div className="flex-1">
+                                <h4 className="font-medium text-gray-900">{member.name}</h4>
+                                {member.specialties && member.specialties.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {member.specialties.map((specialty, index) => (
+                                      <Badge key={index} variant="outline" className="text-xs">
+                                        {specialty}
+                                      </Badge>
+                        ))}
+                      </div>
+                                )}
+                                <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
+                                  {member.phone && (
+                                    <div className="flex items-center">
+                                      <Phone className="w-3 h-3 mr-1" />
+                                      <a 
+                                        href={`tel:${member.phone}`}
+                                        className="hover:text-purple-600 transition-colors"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        {member.phone}
+                                      </a>
+                                    </div>
+                                  )}
+                                  {member.email && (
+                                    <div className="flex items-center">
+                                      <Mail className="w-3 h-3 mr-1" />
+                                      <a 
+                                        href={`mailto:${member.email}`}
+                                        className="hover:text-purple-600 transition-colors truncate max-w-32"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        {member.email}
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end space-y-2">
+                              <div className="flex items-center text-xs text-green-600">
+                                <div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>
+                                Available
+                              </div>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                className="group-hover:bg-purple-50 group-hover:border-purple-200 group-hover:text-purple-700 transition-colors"
+                                onClick={() => handleBookWithStaff(member.id)}
+                              >
+                                Book with {member.name.split(' ')[0]}
+                              </Button>
+                            </div>
+                      </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                          <p>No staff information available</p>
+                      </div>
+                    )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="about" className="mt-6">
+                  <Card>
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">About {salon.name}</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium text-gray-900 mb-2">Description</h4>
+                        <p className="text-gray-700">{salon.description}</p>
+                      </div>
+                      
+                      <Separator />
+                      
+                      <div>
+                        <h4 className="font-medium text-gray-900 mb-2">Contact Information</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center text-sm">
+                            <MapPin className="w-4 h-4 mr-2 text-gray-400" />
+                            <span>{salon.address}, {salon.city}, {salon.state} {salon.zipCode}</span>
+                          </div>
+                          {salon.phone && (
+                            <div className="flex items-center text-sm">
+                              <Phone className="w-4 h-4 mr-2 text-gray-400" />
+                              <span>{salon.phone}</span>
+                            </div>
+                          )}
+                          {salon.email && (
+                            <div className="flex items-center text-sm">
+                              <Mail className="w-4 h-4 mr-2 text-gray-400" />
+                              <span>{salon.email}</span>
+                            </div>
+                          )}
+                          {salon.website && (
+                            <div className="flex items-center text-sm">
+                              <Globe className="w-4 h-4 mr-2 text-gray-400" />
+                              <a href={salon.website} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline">
+                                Visit Website
+                              </a>
+                            </div>
+                          )}
                         </div>
                       </div>
                       
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="outline">{(salon as any)?.category || 'Beauty & Wellness'}</Badge>
-                        <Badge variant="outline">{(salon as any)?.priceRange || 'Mid-range'}</Badge>
-                        <Badge variant="outline">Professional</Badge>
-                        <Badge variant="outline">Certified</Badge>
+                      <Separator />
+
+                      <div>
+                        <h4 className="font-medium text-gray-900 mb-2">Business Hours</h4>
+                        <div className="text-sm text-gray-700">
+                          <div className="flex items-center">
+                            <Clock className="w-4 h-4 mr-2 text-gray-400" />
+                            <span>{salon.openTime && salon.closeTime ? `${salon.openTime} - ${salon.closeTime}` : 'Hours not specified'}</span>
+                          </div>
+                        </div>
+                      </div>
                       </div>
                     </CardContent>
                   </Card>
+              </TabsContent>
+
+              <TabsContent value="reviews" className="mt-6">
+                <Card>
+                  <CardContent className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Customer Reviews</h3>
+                    <div className="text-center py-8 text-gray-500">
+                      <Star className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>No reviews yet</p>
+                      <p className="text-sm">Be the first to review this salon!</p>
                 </div>
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
           </div>
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Booking Card */}
-            <Card className="sticky top-4">
-              <CardHeader>
-                <CardTitle>Book an Appointment</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            {/* Quick Actions */}
+            <Card>
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-4">Quick Actions</h3>
+                <div className="space-y-3">
                 <Button 
-                  className="w-full" 
-                  size="lg" 
-                  data-testid="button-book-appointment"
-                  onClick={() => {
-                    setSelectedSalon((salon as any)?.name || '');
-                    setSelectedSalonId(salonId || '');
-                    setIsBookingOpen(true);
-                  }}
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  Book Now
+                    onClick={handleBookNow}
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+                  >
+                    <Calendar className="w-4 h-4 mr-2" />
+                    Book Appointment
+                  </Button>
+                  <Button variant="outline" className="w-full">
+                    <Phone className="w-4 h-4 mr-2" />
+                    Call Salon
+                  </Button>
+                  <Button variant="outline" className="w-full">
+                    <MapPin className="w-4 h-4 mr-2" />
+                    Get Directions
                 </Button>
-                <Separator />
-                
-                {/* Opening Hours */}
-                <div>
-                  <h4 className="font-semibold mb-2">Opening Hours</h4>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span>Monday - Friday</span>
-                      <span className="font-medium">{(salon as any)?.openTime || '9:00 AM'} - {(salon as any)?.closeTime || '9:00 PM'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Saturday</span>
-                      <span className="font-medium">9:00 AM - 7:00 PM</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Sunday</span>
-                      <span className="font-medium">10:00 AM - 6:00 PM</span>
-                    </div>
-                  </div>
-                </div>
-                
-                <Separator />
-                
-                {/* Quick Contact */}
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4 text-muted-foreground" />
-                    <span>{(salon as any)?.phone || '+91 XXXXX XXXXX'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">
-                      {(salon as any)?.city}, {(salon as any)?.state}
-                    </span>
-                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Location & Contact */}
+            {/* Location Map */}
             <Card>
-              <CardHeader>
-                <CardTitle>Location & Contact</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <h4 className="font-semibold mb-2">Address</h4>
-                  <p className="text-muted-foreground text-sm" data-testid="text-contact-address">
-                    {(salon as any)?.address}<br />
-                    {(salon as any)?.city}, {(salon as any)?.state} {(salon as any)?.zipCode}
-                  </p>
-                </div>
-                
-                {/* Interactive Map */}
-                <div className="space-y-3">
-                  <div className="h-48 rounded-lg overflow-hidden border">
-                    <iframe
-                      width="100%"
-                      height="100%"
-                      style={{ border: 0 }}
-                      loading="lazy"
-                      allowFullScreen
-                      referrerPolicy="no-referrer-when-downgrade"
-                      src={`https://maps.google.com/maps?q=${encodeURIComponent(
-                        `${(salon as any)?.address}, ${(salon as any)?.city}, ${(salon as any)?.state} ${(salon as any)?.zipCode}`
-                      )}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
-                      className="w-full h-full"
-                      title="Salon Location"
-                    />
-                  </div>
-                  
-                  <div className="flex gap-2">
-                    <Button variant="outline" className="flex-1" size="sm">
-                      <MapPin className="h-4 w-4 mr-2" />
-                      Get Directions
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <Phone className="h-4 w-4" />
-                    </Button>
+              <CardContent className="p-6">
+                <h3 className="font-semibold mb-4">Location</h3>
+                <div className="h-48 bg-gray-100 rounded-lg flex items-center justify-center">
+                  <div className="text-center text-gray-500">
+                    <MapPin className="w-8 h-8 mx-auto mb-2" />
+                    <p className="text-sm">Map View</p>
+                    <p className="text-xs">{salon.address}</p>
                   </div>
                 </div>
               </CardContent>
@@ -615,14 +697,13 @@ export default function SalonProfile() {
       {/* Booking Modal */}
       <BookingModal
         isOpen={isBookingOpen}
-        onClose={() => {
-          setIsBookingOpen(false);
-          setSelectedStaffId(""); // Clear selected staff when modal closes
-        }}
-        salonName={selectedSalon}
-        salonId={selectedSalonId}
+        onClose={() => setIsBookingOpen(false)}
+        salonName={salon?.name || ''}
+        salonId={salonId}
         staffId={selectedStaffId}
       />
     </div>
   );
-}
+};
+
+export default SalonProfile;

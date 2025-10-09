@@ -42,7 +42,10 @@ function Router() {
         <Route path="/calendar-management/:salonId">
           {(params) => <CalendarManagement salonId={params.salonId} />}
         </Route>
-        <Route path="/salon/:salonId" component={SalonProfile} />
+        <Route path="/salon/:salonId">
+          {(params) => <SalonProfile salonId={params.salonId} />}
+        </Route>
+        <Route path="/salon-profile" component={SalonProfile} />
         {/* Fallback to 404 */}
         <Route component={NotFound} />
       </Switch>

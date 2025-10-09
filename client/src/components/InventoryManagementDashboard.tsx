@@ -333,6 +333,11 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
     staleTime: 30000
   });
 
+  // Normalize possibly non-array responses to empty arrays
+  const safeVendors = Array.isArray(vendors) ? vendors : [];
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  const safeProducts = Array.isArray(products) ? products : [];
+
   // Low stock products query
   const { data: lowStockProducts } = useQuery<Product[]>({
     queryKey: ['/api/salons', salonId, 'products/low-stock'],
@@ -701,7 +706,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {metrics.topCategories.slice(0, 5).map((category, index) => (
+                  {(metrics.topCategories || []).slice(0, 5).map((category, index) => (
                     <div key={category.categoryId} className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <div 
@@ -729,7 +734,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {metrics.recentMovements.slice(0, 5).map((movement) => (
+                  {(metrics.recentMovements || []).slice(0, 5).map((movement) => (
                     <div key={movement.id} className="flex items-center justify-between">
                       <div>
                         <div className="text-sm font-medium">{movement.productName}</div>
@@ -758,7 +763,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={metrics.monthlyUsageTrends}>
+                  <AreaChart data={metrics.monthlyUsageTrends || []}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis />
@@ -861,7 +866,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
-                  {categories?.map((category) => (
+                  {safeCategories.map((category) => (
                     <SelectItem key={category.id} value={category.id}>
                       {category.name}
                     </SelectItem>
@@ -874,7 +879,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Vendors</SelectItem>
-                  {vendors?.map((vendor) => (
+                  {safeVendors.map((vendor) => (
                     <SelectItem key={vendor.id} value={vendor.id}>
                       {vendor.name}
                     </SelectItem>
@@ -1410,10 +1415,10 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
                         </TableCell>
                       </TableRow>
-                    ) : products && products.length > 0 ? (
-                      products.map((product) => {
-                        const category = categories?.find(c => c.id === product.categoryId);
-                        const vendor = vendors?.find(v => v.id === product.vendorId);
+                    ) : safeProducts.length > 0 ? (
+                      safeProducts.map((product) => {
+                        const category = safeCategories.find(c => c.id === product.categoryId);
+                        const vendor = safeVendors.find(v => v.id === product.vendorId);
                         
                         return (
                           <TableRow key={product.id} data-testid={`row-product-${product.id}`}>

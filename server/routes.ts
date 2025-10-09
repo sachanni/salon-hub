@@ -7,6 +7,7 @@ import { requireSalonAccess, requireStaffAccess, type AuthenticatedRequest } fro
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import express from "express";
+import { createClient } from 'redis';
 import { 
   createPaymentOrderSchema, 
   verifyPaymentSchema,
@@ -103,8 +104,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     tableName: "sessions",
   });
   
+  if (!process.env.SESSION_SECRET) {
+    throw new Error('SESSION_SECRET environment variable is required');
+  }
+
   app.use(session({
-    secret: process.env.SESSION_SECRET || 'your-session-secret-key',
+    secret: process.env.SESSION_SECRET,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
@@ -430,12 +435,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Add primary image from media assets (consistent with /api/salons endpoint)
       const mediaAssets = await storage.getMediaAssetsBySalonId(salonId);
-      const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
+      const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image' && asset.isPrimary === 1)?.url || 
+                          mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
       console.log(`Salon ${salon.name}: Found ${mediaAssets?.length || 0} media assets, primary: ${primaryImage || 'none'}`);
       
       const salonWithImage = {
         ...salon,
-        image: primaryImage
+        image: primaryImage,
+        // Add default business hours if not set
+        openTime: salon.openTime || '09:00',
+        closeTime: salon.closeTime || '18:00'
       };
       
       res.json(salonWithImage);
@@ -698,7 +707,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===============================================
 
   // Get all saved locations for the authenticated user
-  app.get('/api/user/saved-locations', isAuthenticated, async (req: express.Request, res) => {
+  app.get('/api/user/saved-locations', isAuthenticated, async (req: AuthenticatedRequest, res) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: 'User not authenticated' });
@@ -720,7 +729,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create a new saved location
-  app.post('/api/user/saved-locations', isAuthenticated, async (req: express.Request, res) => {
+  app.post('/api/user/saved-locations', isAuthenticated, async (req: AuthenticatedRequest, res) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: 'User not authenticated' });
@@ -773,7 +782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update a saved location
-  app.put('/api/user/saved-locations/:locationId', isAuthenticated, async (req: express.Request, res) => {
+  app.put('/api/user/saved-locations/:locationId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: 'User not authenticated' });
@@ -829,7 +838,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete a saved location
-  app.delete('/api/user/saved-locations/:locationId', isAuthenticated, async (req: express.Request, res) => {
+  app.delete('/api/user/saved-locations/:locationId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
     try {
       if (!req.user) {
         return res.status(401).json({ error: 'User not authenticated' });
@@ -862,6 +871,1166 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error deleting saved location:', error);
       res.status(500).json({ 
         error: 'Failed to delete location',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // ===============================================
+  // TEST DATA API - For adding test salons
+  // ===============================================
+  
+  // Debug endpoint to check salon data
+  app.get('/api/test/debug-salons', async (req, res) => {
+    try {
+      const allSalons = await storage.getAllSalons();
+      res.json({ 
+        count: allSalons.length,
+        salons: allSalons.map(s => ({
+          id: s.id,
+          name: s.name,
+          location: s.location,
+          latitude: s.latitude,
+          longitude: s.longitude,
+          category: s.category
+        }))
+      });
+    } catch (error) {
+      console.error('Error getting salons:', error);
+      res.status(500).json({ 
+        error: 'Failed to get salons',
+        message: error.message
+      });
+    }
+  });
+  
+  // Update existing salons to Greater Noida coordinates
+  app.post('/api/test/update-salons-location', async (req, res) => {
+    try {
+      const updates = [
+        {
+          id: '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon
+          location: 'Nirala Estate, Greater Noida West, Uttar Pradesh',
+          address: 'Shop no 101, Nirala Estate, Greater Noida West',
+          latitude: '28.5368704',
+          longitude: '77.3918726'
+        },
+        {
+          id: '91e3f720-b6b8-4530-8be2-ca18b58cec5e', // Gold Coast Hair Studio
+          location: 'Nirala Estate, Tech Zone IV, Greater Noida West, Uttar Pradesh',
+          address: 'Shop no 102, Nirala Estate, Tech Zone IV, Greater Noida West',
+          latitude: '28.5360',
+          longitude: '77.3920'
+        },
+        {
+          id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // Michigan Avenue Spa
+          location: 'Sector 1, Greater Noida West, Uttar Pradesh',
+          address: 'Shop no 103, Sector 1, Greater Noida West',
+          latitude: '28.5370',
+          longitude: '77.3930'
+        },
+        {
+          id: 'd509a5b0-6155-41e7-94db-8a8dd6c6c905', // John Organization Salon
+          location: 'Sector 2, Greater Noida West, Uttar Pradesh',
+          address: 'Shop no 104, Sector 2, Greater Noida West',
+          latitude: '28.5350',
+          longitude: '77.3900'
+        },
+        {
+          id: '400e5b87-1d2a-4c7b-bce7-da2f2047f897', // Michigan Avenue Spa (Chicago -> Greater Noida)
+          location: 'Sector 3, Greater Noida West, Uttar Pradesh',
+          address: 'Shop no 105, Sector 3, Greater Noida West',
+          latitude: '28.5340',
+          longitude: '77.3940'
+        },
+        {
+          id: '8ec1a7ca-6305-4999-a0b4-24257f727d21', // Magnificent Mile Nails (Chicago -> Greater Noida)
+          location: 'Sector 4, Greater Noida West, Uttar Pradesh',
+          address: 'Shop no 106, Sector 4, Greater Noida West',
+          latitude: '28.5880',
+          longitude: '77.4390'
+        }
+      ];
+
+      const updatedSalons = [];
+      for (const update of updates) {
+        try {
+          await storage.updateSalon(update.id, {
+            location: update.location,
+            address: update.address,
+            latitude: update.latitude,
+            longitude: update.longitude
+          });
+          updatedSalons.push(update);
+          console.log(`Updated salon location: ${update.id}`);
+        } catch (error) {
+          console.log(`Failed to update salon ${update.id}:`, error.message);
+        }
+      }
+
+      // Add sample images for test salons
+      const sampleImages = [
+        {
+          salonId: '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop&crop=center',
+          altText: 'AULNOVA Organization Salon interior',
+          isPrimary: 1
+        },
+        {
+          salonId: '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon - Additional images
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=400&h=300&fit=crop&crop=center',
+          altText: 'Hair styling station',
+          isPrimary: 0
+        },
+        {
+          salonId: '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon - Additional images
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1522337360788-8b13de7a37e?w=400&h=300&fit=crop&crop=center',
+          altText: 'Salon reception area',
+          isPrimary: 0
+        },
+        {
+          salonId: '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon - Additional images
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?w=400&h=300&fit=crop&crop=center',
+          altText: 'Nail art station',
+          isPrimary: 0
+        },
+        {
+          salonId: '91e3f720-b6b8-4530-8be2-ca18b58cec5e', // Gold Coast Hair Studio
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400&h=300&fit=crop&crop=center',
+          altText: 'Gold Coast Hair Studio interior',
+          isPrimary: 1
+        },
+        {
+          salonId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // Michigan Avenue Spa
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?w=400&h=300&fit=crop&crop=center',
+          altText: 'Michigan Avenue Spa interior',
+          isPrimary: 1
+        },
+        {
+          salonId: 'd509a5b0-6155-41e7-94db-8a8dd6c6c905', // John Organization Salon
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop&crop=center',
+          altText: 'John Organization Salon interior',
+          isPrimary: 1
+        },
+        {
+          salonId: '400e5b87-1d2a-4c7b-bce7-da2f2047f897', // Michigan Avenue Spa (Chicago -> Greater Noida)
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop&crop=center',
+          altText: 'Michigan Avenue Spa interior',
+          isPrimary: 1
+        },
+        {
+          salonId: '8ec1a7ca-6305-4999-a0b4-24257f727d21', // Magnificent Mile Nails
+          type: 'image',
+          url: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?w=400&h=300&fit=crop&crop=center',
+          altText: 'Magnificent Mile Nails interior',
+          isPrimary: 1
+        }
+      ];
+
+      // Check if images already exist, if not create them
+      for (const image of sampleImages) {
+        try {
+          const existingImages = await storage.getMediaAssetsBySalonId(image.salonId);
+          if (existingImages.length === 0) {
+            await storage.createMediaAsset(image);
+            console.log(`Added image for salon: ${image.salonId}`);
+          }
+        } catch (error) {
+          console.log(`Failed to add image for salon ${image.salonId}:`, error.message);
+        }
+      }
+
+      res.json({ 
+        message: 'Salon locations and images updated successfully',
+        count: updatedSalons.length,
+        updates: updatedSalons
+      });
+    } catch (error) {
+      console.error('Error updating salon locations:', error);
+      res.status(500).json({ 
+        error: 'Failed to update salon locations',
+        message: error.message
+      });
+    }
+  });
+
+  // Test endpoint to create availability patterns and time slots
+  app.post('/api/test/create-availability-patterns', async (req, res) => {
+    try {
+      const salonIds = [
+        '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon
+        '91e3f720-b6b8-4530-8be2-ca18b58cec5e', // Gold Coast Hair Studio
+        'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // Michigan Avenue Spa
+        'd509a5b0-6155-41e7-94db-8a8dd6c6c905', // John Organization Salon
+        '400e5b87-1d2a-4c7b-bce7-da2f2047f897', // Michigan Avenue Spa (Chicago -> Greater Noida)
+        '8ec1a7ca-6305-4999-a0b4-24257f727d21'  // Magnificent Mile Nails
+      ];
+
+      const createdPatterns = [];
+      
+      for (const salonId of salonIds) {
+        // Get staff for this salon
+        const staff = await storage.getStaffBySalonId(salonId);
+        
+        // Create availability patterns for each day of the week
+        const patterns = [
+          { dayOfWeek: 1, patternName: 'Monday Hours', startTime: '09:00', endTime: '18:00' },
+          { dayOfWeek: 2, patternName: 'Tuesday Hours', startTime: '09:00', endTime: '18:00' },
+          { dayOfWeek: 3, patternName: 'Wednesday Hours', startTime: '09:00', endTime: '18:00' },
+          { dayOfWeek: 4, patternName: 'Thursday Hours', startTime: '09:00', endTime: '18:00' },
+          { dayOfWeek: 5, patternName: 'Friday Hours', startTime: '09:00', endTime: '18:00' },
+          { dayOfWeek: 6, patternName: 'Saturday Hours', startTime: '10:00', endTime: '16:00' },
+          { dayOfWeek: 0, patternName: 'Sunday Hours', startTime: '10:00', endTime: '16:00' }
+        ];
+        
+        for (const pattern of patterns) {
+          // Create pattern for salon (general availability)
+          const salonPattern = {
+            salonId,
+            staffId: null, // General salon availability
+            patternName: pattern.patternName,
+            dayOfWeek: pattern.dayOfWeek,
+            startTime: pattern.startTime,
+            endTime: pattern.endTime,
+            slotDurationMinutes: 30,
+            isActive: 1
+          };
+          
+          try {
+            const createdPattern = await storage.createAvailabilityPattern(salonPattern);
+            createdPatterns.push(createdPattern);
+            
+            // Generate time slots for next 90 days
+            const startDate = new Date();
+            const endDate = new Date();
+            endDate.setDate(endDate.getDate() + 90);
+            
+            await storage.generateTimeSlotsFromPattern(createdPattern.id, startDate, endDate);
+          } catch (error) {
+            console.log(`Failed to create pattern for salon ${salonId}:`, error.message);
+          }
+        }
+        
+        // Create staff-specific patterns if staff exist
+        for (const staffMember of staff) {
+          for (const pattern of patterns) {
+            const staffPattern = {
+              salonId,
+              staffId: staffMember.id,
+              patternName: `${staffMember.name} - ${pattern.patternName}`,
+              dayOfWeek: pattern.dayOfWeek,
+              startTime: pattern.startTime,
+              endTime: pattern.endTime,
+              slotDurationMinutes: 30,
+              isActive: 1
+            };
+            
+            try {
+              const createdPattern = await storage.createAvailabilityPattern(staffPattern);
+              createdPatterns.push(createdPattern);
+              
+              // Generate time slots for next 90 days
+              const startDate = new Date();
+              const endDate = new Date();
+              endDate.setDate(endDate.getDate() + 90);
+              
+              await storage.generateTimeSlotsFromPattern(createdPattern.id, startDate, endDate);
+            } catch (error) {
+              console.log(`Failed to create staff pattern for ${staffMember.name}:`, error.message);
+            }
+          }
+        }
+      }
+
+      res.json({ 
+        message: 'Availability patterns and time slots created successfully',
+        patternsCreated: createdPatterns.length,
+        patterns: createdPatterns.slice(0, 10) // Show first 10 patterns as example
+      });
+    } catch (error) {
+      console.error('Error creating availability patterns:', error);
+      res.status(500).json({ 
+        error: 'Failed to create availability patterns',
+        message: error.message
+      });
+    }
+  });
+
+  // Create sample time slots for testing
+  app.post('/api/test/create-time-slots', async (req, res) => {
+    try {
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      const salonIds = [
+        '1dcdf672-8daa-4109-9194-a540b219f844', // AULNOVA Organization Salon
+        '91e3f720-b6b8-4530-8be2-ca18b58cec5e', // Gold Coast Hair Studio
+        'a1b2c3d4-e5f6-7890-abcd-ef1234567890', // Michigan Avenue Spa
+        'd509a5b0-6155-41e7-94db-8a8dd6c6c905', // John Organization Salon
+        '400e5b87-1d2a-4c7b-bce7-da2f2047f897', // Michigan Avenue Spa (Chicago -> Greater Noida)
+        '8ec1a7ca-6305-4999-a0b4-24257f727d21'  // Magnificent Mile Nails
+      ];
+
+      const createdSlots = [];
+      
+      for (const salonId of salonIds) {
+        // Create time slots for today and tomorrow
+        const dates = [today, tomorrow];
+        
+        for (const date of dates) {
+          // Create morning slots (9 AM - 12 PM)
+          for (let hour = 9; hour < 12; hour++) {
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            
+            const timeSlot = {
+              salonId,
+              startDateTime: startTime.toISOString(),
+              endDateTime: endTime.toISOString(),
+              isBooked: 0,
+              isBlocked: 0
+            };
+            
+            try {
+              const createdSlot = await storage.createTimeSlot(timeSlot);
+              createdSlots.push(createdSlot);
+            } catch (error) {
+              console.log(`Failed to create time slot for salon ${salonId}:`, error.message);
+            }
+          }
+          
+          // Create afternoon slots (2 PM - 6 PM)
+          for (let hour = 14; hour < 18; hour++) {
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            
+            const timeSlot = {
+              salonId,
+              startDateTime: startTime.toISOString(),
+              endDateTime: endTime.toISOString(),
+              isBooked: 0,
+              isBlocked: 0
+            };
+            
+            try {
+              const createdSlot = await storage.createTimeSlot(timeSlot);
+              createdSlots.push(createdSlot);
+            } catch (error) {
+              console.log(`Failed to create time slot for salon ${salonId}:`, error.message);
+            }
+          }
+          
+          // Create evening slots (7 PM - 9 PM)
+          for (let hour = 19; hour < 21; hour++) {
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            
+            const timeSlot = {
+              salonId,
+              startDateTime: startTime.toISOString(),
+              endDateTime: endTime.toISOString(),
+              isBooked: 0,
+              isBlocked: 0
+            };
+            
+            try {
+              const createdSlot = await storage.createTimeSlot(timeSlot);
+              createdSlots.push(createdSlot);
+            } catch (error) {
+              console.log(`Failed to create time slot for salon ${salonId}:`, error.message);
+            }
+          }
+        }
+      }
+
+      res.json({ 
+        message: 'Time slots created successfully',
+        count: createdSlots.length,
+        slots: createdSlots.slice(0, 10) // Show first 10 slots as example
+      });
+    } catch (error) {
+      console.error('Error creating time slots:', error);
+      res.status(500).json({ 
+        error: 'Failed to create time slots',
+        message: error.message
+      });
+    }
+  });
+
+  // ===============================================
+  // LOCATION SEARCH API (Public) - For LocationPickerModal
+  // ===============================================
+
+  // Location search endpoint for the location picker modal
+  // Redis client for caching
+  let redisClient: any = null;
+  const CACHE_DURATION = 5 * 60; // 5 minutes in seconds
+  
+  // Initialize Redis client
+  try {
+    const redisUrl = process.env.REDIS_URL;
+    if (redisUrl) {
+      redisClient = createClient({ url: redisUrl });
+      redisClient.on('error', (err: any) => console.error('Redis Client Error:', err));
+      redisClient.on('connect', () => console.log('✅ Redis connected successfully'));
+      redisClient.connect();
+    } else {
+      console.log('⚠️  REDIS_URL not found. Location search will use in-memory cache only.');
+      console.log('   Add REDIS_URL to your .env file for better performance.');
+    }
+  } catch (error) {
+    console.error('Redis connection error:', error);
+  }
+  
+  // Fallback in-memory cache
+  const locationSearchCache = new Map<string, { results: any[], timestamp: number }>();
+  
+  // Check Google Places API configuration
+  const googlePlacesKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!googlePlacesKey) {
+    console.log('⚠️  GOOGLE_PLACES_API_KEY not found. Add it to your .env file for better location search.');
+    console.log('   Get your API key at: https://console.cloud.google.com/');
+  } else {
+    console.log('✅ Google Places API configured - location search will use Google Places API');
+  }
+
+  app.get('/api/locations/search', communicationRateLimits.analytics, async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      
+      if (!query || query.length < 2) {
+        return res.json({ results: [] });
+      }
+
+      // Check cache first (Redis or in-memory)
+      const cacheKey = `location_search:${query.toLowerCase().trim()}`;
+      let cached: any = null;
+      
+      if (redisClient) {
+        try {
+          const cachedData = await redisClient.get(cacheKey);
+          if (cachedData) {
+            cached = JSON.parse(cachedData);
+            console.log(`🚀 Redis cache hit for: "${query}"`);
+            return res.json({ results: cached.results });
+          }
+        } catch (error) {
+          console.error('Redis cache read error:', error);
+        }
+      } else {
+        // Fallback to in-memory cache
+        const inMemoryCached = locationSearchCache.get(cacheKey);
+        if (inMemoryCached && (Date.now() - inMemoryCached.timestamp) < (CACHE_DURATION * 1000)) {
+          console.log(`🚀 In-memory cache hit for: "${query}"`);
+          return res.json({ results: inMemoryCached.results });
+        }
+      }
+
+      // Use the existing places autocomplete endpoint logic
+      const queryParams = {
+        q: query,
+        lat: req.query.lat as string,
+        lng: req.query.lng as string,
+        countrycode: req.query.countrycode as string
+      };
+
+      // Remove undefined values
+      Object.keys(queryParams).forEach(key => {
+        const value = (queryParams as any)[key];
+        if (value === undefined) {
+          delete (queryParams as any)[key];
+        }
+      });
+
+      const validation = placesAutocompleteSchema.safeParse(queryParams);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid parameters',
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      const validatedParams = validation.data;
+      let suggestions: any[] = [];
+
+      // First, check our comprehensive Delhi NCR database for instant results
+      const searchQuery = validatedParams.q.toLowerCase().trim();
+      const delhiNCRLocations = [
+        // Delhi - Central & South
+        { name: 'Connaught Place', area: 'New Delhi', coords: { lat: 28.6315, lng: 77.2167 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Karol Bagh', area: 'New Delhi', coords: { lat: 28.6517, lng: 77.1909 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Lajpat Nagar', area: 'New Delhi', coords: { lat: 28.5679, lng: 77.2431 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Rajouri Garden', area: 'New Delhi', coords: { lat: 28.6408, lng: 77.1214 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Pitampura', area: 'New Delhi', coords: { lat: 28.7000, lng: 77.1333 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Rohini', area: 'New Delhi', coords: { lat: 28.7433, lng: 77.1028 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Dwarka', area: 'New Delhi', coords: { lat: 28.5921, lng: 77.0465 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Vasant Kunj', area: 'New Delhi', coords: { lat: 28.5425, lng: 77.1528 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Saket', area: 'New Delhi', coords: { lat: 28.5245, lng: 77.2069 }, state: 'Delhi', country: 'India', priority: 1 },
+        { name: 'Greater Kailash', area: 'New Delhi', coords: { lat: 28.5480, lng: 77.2400 }, state: 'Delhi', country: 'India', priority: 1 },
+        
+        // Gurgaon/Gurugram
+        { name: 'Cyber City', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 29', area: 'Gurugram', coords: { lat: 28.4500, lng: 77.0300 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 14', area: 'Gurugram', coords: { lat: 28.4600, lng: 77.0400 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 15', area: 'Gurugram', coords: { lat: 28.4700, lng: 77.0500 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 18', area: 'Gurugram', coords: { lat: 28.4800, lng: 77.0600 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 25', area: 'Gurugram', coords: { lat: 28.4900, lng: 77.0700 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 26', area: 'Gurugram', coords: { lat: 28.5000, lng: 77.0800 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 27', area: 'Gurugram', coords: { lat: 28.5100, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 28', area: 'Gurugram', coords: { lat: 28.5200, lng: 77.1000 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 30', area: 'Gurugram', coords: { lat: 28.5300, lng: 77.1100 }, state: 'Haryana', country: 'India', priority: 1 },
+        
+        // Noida
+        { name: 'Sector 18', area: 'Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 62', area: 'Noida', coords: { lat: 28.6000, lng: 77.3300 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 63', area: 'Noida', coords: { lat: 28.6100, lng: 77.3400 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 64', area: 'Noida', coords: { lat: 28.6200, lng: 77.3500 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 65', area: 'Noida', coords: { lat: 28.6300, lng: 77.3600 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 66', area: 'Noida', coords: { lat: 28.6400, lng: 77.3700 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 67', area: 'Noida', coords: { lat: 28.6500, lng: 77.3800 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 68', area: 'Noida', coords: { lat: 28.6600, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 69', area: 'Noida', coords: { lat: 28.6700, lng: 77.4000 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector 70', area: 'Noida', coords: { lat: 28.6800, lng: 77.4100 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        
+          // Greater Noida - Nirala Estate
+          { name: 'Nirala Estate', area: 'Tech Zone IV, Patwari, Greater Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Estate Phase 1', area: 'Greater Noida West Road, Tech Zone IV', coords: { lat: 28.5360, lng: 77.3920 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Estate Phase 3', area: 'Tech Zone IV, Patwari', coords: { lat: 28.5350, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Estate Main Gate', area: 'Patwari, Greater Noida', coords: { lat: 28.5365, lng: 77.3915 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          
+          // Greater Noida - Nirala Aspire (matching Fresha.com results)
+          { name: 'Nirala Aspire', area: 'Sector 16, Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire', area: 'Greater Noida West, Panchsheel Greens 2, Ghaziabad', coords: { lat: 28.5360, lng: 77.3920 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'NIRALA ASPIRE', area: 'Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5350, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower A-6', area: 'Panchsheel Greens 2, Ithaira, Ghaziabad', coords: { lat: 28.5364, lng: 77.3924 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower D-5', area: 'Nirala Aspire, Sector 16, Panchsheel Greens 2, Ithaira', coords: { lat: 28.5366, lng: 77.3926 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower B-3', area: 'Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5368, lng: 77.3928 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower C-7', area: 'Sector 16, Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5370, lng: 77.3930 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector Alpha 1', area: 'Greater Noida', coords: { lat: 28.5400, lng: 77.4000 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector Alpha 2', area: 'Greater Noida', coords: { lat: 28.5500, lng: 77.4100 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector Beta 1', area: 'Greater Noida', coords: { lat: 28.5600, lng: 77.4200 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector Beta 2', area: 'Greater Noida', coords: { lat: 28.5700, lng: 77.4300 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector Gamma 1', area: 'Greater Noida', coords: { lat: 28.5800, lng: 77.4400 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Sector Gamma 2', area: 'Greater Noida', coords: { lat: 28.5900, lng: 77.4500 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        
+        // Faridabad
+        { name: 'Sector 15', area: 'Faridabad', coords: { lat: 28.4000, lng: 77.3000 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 16', area: 'Faridabad', coords: { lat: 28.4100, lng: 77.3100 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 17', area: 'Faridabad', coords: { lat: 28.4200, lng: 77.3200 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 18', area: 'Faridabad', coords: { lat: 28.4300, lng: 77.3300 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 19', area: 'Faridabad', coords: { lat: 28.4400, lng: 77.3400 }, state: 'Haryana', country: 'India', priority: 1 },
+        { name: 'Sector 20', area: 'Faridabad', coords: { lat: 28.4500, lng: 77.3500 }, state: 'Haryana', country: 'India', priority: 1 },
+        
+        // Ghaziabad
+        { name: 'Vaishali', area: 'Ghaziabad', coords: { lat: 28.6500, lng: 77.3500 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Indirapuram', area: 'Ghaziabad', coords: { lat: 28.6400, lng: 77.3600 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Crossings Republik', area: 'Ghaziabad', coords: { lat: 28.6300, lng: 77.3700 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Raj Nagar', area: 'Ghaziabad', coords: { lat: 28.6200, lng: 77.3800 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        { name: 'Kaushambi', area: 'Ghaziabad', coords: { lat: 28.6100, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+        
+        // Popular landmarks and malls
+        { name: 'Trident Embassy', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 2 },
+        { name: 'Select City Walk', area: 'Saket, New Delhi', coords: { lat: 28.5245, lng: 77.2069 }, state: 'Delhi', country: 'India', priority: 2 },
+        { name: 'DLF Cyber Hub', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 2 },
+        { name: 'Ambience Mall', area: 'Gurugram', coords: { lat: 28.5000, lng: 77.1000 }, state: 'Haryana', country: 'India', priority: 2 },
+        { name: 'Pacific Mall', area: 'Tagore Garden, New Delhi', coords: { lat: 28.6408, lng: 77.1214 }, state: 'Delhi', country: 'India', priority: 2 },
+        { name: 'Metro Walk', area: 'Rohini, New Delhi', coords: { lat: 28.7433, lng: 77.1028 }, state: 'Delhi', country: 'India', priority: 2 },
+        { name: 'Cross River Mall', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
+        { name: 'Great India Place', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
+        { name: 'Logix City Centre', area: 'Sector 32, Noida', coords: { lat: 28.6000, lng: 77.3300 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
+        { name: 'DLF Mall of India', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 }
+      ];
+
+      // Smart search algorithm for Delhi NCR with fuzzy matching
+      const searchResults = delhiNCRLocations.filter(loc => {
+        const searchTerms = searchQuery.split(' ').filter(term => term.length > 0);
+        const fullText = `${loc.name} ${loc.area} ${loc.state} ${loc.country}`.toLowerCase();
+        
+        // Check if all search terms match (with fuzzy matching for common variations)
+        return searchTerms.every(term => {
+          const lowerTerm = term.toLowerCase();
+          
+          // Direct match
+          if (fullText.includes(lowerTerm)) return true;
+          
+          // Fuzzy matching for common variations
+          if (lowerTerm === 'aspir' && fullText.includes('aspire')) return true;
+          if (lowerTerm === 'aspire' && fullText.includes('aspir')) return true;
+          if (lowerTerm === 'sec' && fullText.includes('sector')) return true;
+          if (lowerTerm === 'sector' && fullText.includes('sec')) return true;
+          if (lowerTerm === 'gr' && fullText.includes('greater')) return true;
+          if (lowerTerm === 'greater' && fullText.includes('gr')) return true;
+          if (lowerTerm === 'noida' && fullText.includes('noida')) return true;
+          if (lowerTerm === 'delhi' && fullText.includes('delhi')) return true;
+          
+          return false;
+        });
+      });
+
+      // Sort by priority and relevance
+      suggestions = searchResults
+        .sort((a, b) => {
+          // First sort by priority (1 = high, 2 = medium)
+          if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+          }
+          // Then by exact name match
+          const aExactMatch = a.name.toLowerCase().includes(searchQuery);
+          const bExactMatch = b.name.toLowerCase().includes(searchQuery);
+          if (aExactMatch && !bExactMatch) return -1;
+          if (!aExactMatch && bExactMatch) return 1;
+          return 0;
+        })
+        .slice(0, parseInt(queryParams.limit) || 10)
+        .map((loc, index) => ({
+          id: `delhi-ncr-${index}`,
+          title: `${loc.name}, ${loc.area}`,
+          subtitle: `${loc.state}, ${loc.country}`,
+          address: `${loc.name}, ${loc.area}, ${loc.state}, ${loc.country}`,
+          coords: loc.coords
+        }));
+
+      // If we have good results from our database, return them immediately
+      if (suggestions.length > 0) {
+        console.log(`✅ Found ${suggestions.length} Delhi NCR locations for "${searchQuery}"`);
+        // Cache the results (Redis or in-memory)
+        const cacheData = {
+          results: suggestions,
+          timestamp: Date.now()
+        };
+        
+        if (redisClient) {
+          try {
+            await redisClient.setEx(cacheKey, CACHE_DURATION, JSON.stringify(cacheData));
+            console.log(`💾 Cached in Redis: "${searchQuery}"`);
+          } catch (error) {
+            console.error('Redis cache write error:', error);
+            // Fallback to in-memory cache
+            locationSearchCache.set(cacheKey, cacheData);
+          }
+        } else {
+          // Fallback to in-memory cache
+          locationSearchCache.set(cacheKey, cacheData);
+          console.log(`💾 Cached in memory: "${searchQuery}"`);
+        }
+        return res.json({ results: suggestions });
+      }
+
+      // Use Google Places API for best results
+      try {
+        const googlePlacesKey = process.env.GOOGLE_PLACES_API_KEY;
+        if (!googlePlacesKey) {
+          console.log('Google Places API key not found, using fallback locations');
+          throw new Error('Google Places API key not configured');
+        }
+
+        // Google Places Autocomplete API
+        const googleUrl = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
+        const googleParams = new URLSearchParams({
+          input: validatedParams.q,
+          key: googlePlacesKey,
+          types: 'establishment|geocode',
+          language: 'en',
+          components: 'country:in', // Focus on India
+          location: '28.6139,77.2090', // Delhi coordinates for ranking
+          radius: '50000' // 50km radius around Delhi
+        });
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        
+        const googleResponse = await fetch(`${googleUrl}?${googleParams}`, {
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'SalonHub/1.0'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (googleResponse.ok) {
+          const data = await googleResponse.json();
+          
+          if (data.status === 'OK' && data.predictions) {
+            // Get detailed place information for each prediction
+            const placeDetailsPromises = data.predictions.slice(0, 8).map(async (prediction: any) => {
+              try {
+                const detailsUrl = 'https://maps.googleapis.com/maps/api/place/details/json';
+                const detailsParams = new URLSearchParams({
+                  place_id: prediction.place_id,
+                  key: googlePlacesKey,
+                  fields: 'formatted_address,geometry,name,address_components'
+                });
+
+                const detailsResponse = await fetch(`${detailsUrl}?${detailsParams}`);
+                const detailsData = await detailsResponse.json();
+                
+                if (detailsData.status === 'OK' && detailsData.result) {
+                  const place = detailsData.result;
+                  const coords = place.geometry?.location;
+                  
+                  // Extract city, state, country from address components
+                  const components = place.address_components || [];
+                  const city = components.find((c: any) => c.types.includes('locality'))?.long_name || '';
+                  const state = components.find((c: any) => c.types.includes('administrative_area_level_1'))?.long_name || '';
+                  const country = components.find((c: any) => c.types.includes('country'))?.long_name || '';
+                  
+                  return {
+                    id: prediction.place_id,
+                    title: prediction.structured_formatting?.main_text || place.name || prediction.description,
+                    subtitle: prediction.structured_formatting?.secondary_text || [city, state, country].filter(Boolean).join(', '),
+                    address: place.formatted_address || prediction.description,
+                    coords: coords ? {
+                      lat: coords.lat,
+                      lng: coords.lng
+                    } : null
+                  };
+                }
+              } catch (error) {
+                console.error('Error fetching place details:', error);
+              }
+              
+              // Fallback to basic prediction data
+              return {
+                id: prediction.place_id,
+                title: prediction.structured_formatting?.main_text || prediction.description.split(',')[0],
+                subtitle: prediction.structured_formatting?.secondary_text || prediction.description,
+                address: prediction.description,
+                coords: null
+              };
+            });
+
+            suggestions = (await Promise.all(placeDetailsPromises)).filter(s => s.coords);
+            console.log(`✅ Google Places found ${suggestions.length} results for "${validatedParams.q}"`);
+            
+            // Cache the Google Places results
+            const cacheData = {
+              results: suggestions,
+              timestamp: Date.now()
+            };
+            
+            if (redisClient) {
+              try {
+                await redisClient.setEx(cacheKey, CACHE_DURATION, JSON.stringify(cacheData));
+                console.log(`💾 Cached Google Places in Redis: "${validatedParams.q}"`);
+              } catch (error) {
+                console.error('Redis cache write error:', error);
+                locationSearchCache.set(cacheKey, cacheData);
+              }
+            } else {
+              locationSearchCache.set(cacheKey, cacheData);
+              console.log(`💾 Cached Google Places in memory: "${validatedParams.q}"`);
+            }
+          } else {
+            console.log(`Google Places API error: ${data.status} - ${data.error_message || 'Unknown error'}`);
+            throw new Error(`Google Places API error: ${data.status}`);
+          }
+        } else {
+          throw new Error(`Google Places API HTTP error: ${googleResponse.status}`);
+        }
+        
+      } catch (googleError) {
+        console.error('Google Places search error:', googleError);
+        
+        // Fallback: Comprehensive Delhi NCR locations database
+        const fallbackQuery = validatedParams.q.toLowerCase();
+        const delhiNCRLocations = [
+          // Delhi - Central & South
+          { name: 'Connaught Place', area: 'New Delhi', coords: { lat: 28.6315, lng: 77.2167 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Karol Bagh', area: 'New Delhi', coords: { lat: 28.6517, lng: 77.1909 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Lajpat Nagar', area: 'New Delhi', coords: { lat: 28.5679, lng: 77.2431 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Rajouri Garden', area: 'New Delhi', coords: { lat: 28.6408, lng: 77.1214 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Pitampura', area: 'New Delhi', coords: { lat: 28.7000, lng: 77.1333 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Rohini', area: 'New Delhi', coords: { lat: 28.7433, lng: 77.1028 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Dwarka', area: 'New Delhi', coords: { lat: 28.5921, lng: 77.0465 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Vasant Kunj', area: 'New Delhi', coords: { lat: 28.5425, lng: 77.1528 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Saket', area: 'New Delhi', coords: { lat: 28.5245, lng: 77.2069 }, state: 'Delhi', country: 'India', priority: 1 },
+          { name: 'Greater Kailash', area: 'New Delhi', coords: { lat: 28.5480, lng: 77.2400 }, state: 'Delhi', country: 'India', priority: 1 },
+          
+          // Gurgaon/Gurugram
+          { name: 'Cyber City', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 29', area: 'Gurugram', coords: { lat: 28.4500, lng: 77.0300 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 14', area: 'Gurugram', coords: { lat: 28.4600, lng: 77.0400 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 15', area: 'Gurugram', coords: { lat: 28.4700, lng: 77.0500 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 18', area: 'Gurugram', coords: { lat: 28.4800, lng: 77.0600 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 25', area: 'Gurugram', coords: { lat: 28.4900, lng: 77.0700 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 26', area: 'Gurugram', coords: { lat: 28.5000, lng: 77.0800 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 27', area: 'Gurugram', coords: { lat: 28.5100, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 28', area: 'Gurugram', coords: { lat: 28.5200, lng: 77.1000 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 30', area: 'Gurugram', coords: { lat: 28.5300, lng: 77.1100 }, state: 'Haryana', country: 'India', priority: 1 },
+          
+          // Noida
+          { name: 'Sector 18', area: 'Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 62', area: 'Noida', coords: { lat: 28.6000, lng: 77.3300 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 63', area: 'Noida', coords: { lat: 28.6100, lng: 77.3400 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 64', area: 'Noida', coords: { lat: 28.6200, lng: 77.3500 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 65', area: 'Noida', coords: { lat: 28.6300, lng: 77.3600 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 66', area: 'Noida', coords: { lat: 28.6400, lng: 77.3700 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 67', area: 'Noida', coords: { lat: 28.6500, lng: 77.3800 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 68', area: 'Noida', coords: { lat: 28.6600, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 69', area: 'Noida', coords: { lat: 28.6700, lng: 77.4000 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector 70', area: 'Noida', coords: { lat: 28.6800, lng: 77.4100 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          
+          // Greater Noida - Nirala Estate
+          { name: 'Nirala Estate', area: 'Tech Zone IV, Patwari, Greater Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Estate Phase 1', area: 'Greater Noida West Road, Tech Zone IV', coords: { lat: 28.5360, lng: 77.3920 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Estate Phase 3', area: 'Tech Zone IV, Patwari', coords: { lat: 28.5350, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Estate Main Gate', area: 'Patwari, Greater Noida', coords: { lat: 28.5365, lng: 77.3915 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          
+          // Greater Noida - Nirala Aspire (matching Fresha.com results)
+          { name: 'Nirala Aspire', area: 'Sector 16, Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire', area: 'Greater Noida West, Panchsheel Greens 2, Ghaziabad', coords: { lat: 28.5360, lng: 77.3920 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'NIRALA ASPIRE', area: 'Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5350, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower A-6', area: 'Panchsheel Greens 2, Ithaira, Ghaziabad', coords: { lat: 28.5364, lng: 77.3924 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower D-5', area: 'Nirala Aspire, Sector 16, Panchsheel Greens 2, Ithaira', coords: { lat: 28.5366, lng: 77.3926 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower B-3', area: 'Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5368, lng: 77.3928 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Nirala Aspire Tower C-7', area: 'Sector 16, Panchsheel Greens 2, Greater Noida', coords: { lat: 28.5370, lng: 77.3930 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector Alpha 1', area: 'Greater Noida', coords: { lat: 28.5400, lng: 77.4000 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector Alpha 2', area: 'Greater Noida', coords: { lat: 28.5500, lng: 77.4100 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector Beta 1', area: 'Greater Noida', coords: { lat: 28.5600, lng: 77.4200 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector Beta 2', area: 'Greater Noida', coords: { lat: 28.5700, lng: 77.4300 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector Gamma 1', area: 'Greater Noida', coords: { lat: 28.5800, lng: 77.4400 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Sector Gamma 2', area: 'Greater Noida', coords: { lat: 28.5900, lng: 77.4500 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          
+          // Faridabad
+          { name: 'Sector 15', area: 'Faridabad', coords: { lat: 28.4000, lng: 77.3000 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 16', area: 'Faridabad', coords: { lat: 28.4100, lng: 77.3100 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 17', area: 'Faridabad', coords: { lat: 28.4200, lng: 77.3200 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 18', area: 'Faridabad', coords: { lat: 28.4300, lng: 77.3300 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 19', area: 'Faridabad', coords: { lat: 28.4400, lng: 77.3400 }, state: 'Haryana', country: 'India', priority: 1 },
+          { name: 'Sector 20', area: 'Faridabad', coords: { lat: 28.4500, lng: 77.3500 }, state: 'Haryana', country: 'India', priority: 1 },
+          
+          // Ghaziabad
+          { name: 'Vaishali', area: 'Ghaziabad', coords: { lat: 28.6500, lng: 77.3500 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Indirapuram', area: 'Ghaziabad', coords: { lat: 28.6400, lng: 77.3600 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Crossings Republik', area: 'Ghaziabad', coords: { lat: 28.6300, lng: 77.3700 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Raj Nagar', area: 'Ghaziabad', coords: { lat: 28.6200, lng: 77.3800 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          { name: 'Kaushambi', area: 'Ghaziabad', coords: { lat: 28.6100, lng: 77.3900 }, state: 'Uttar Pradesh', country: 'India', priority: 1 },
+          
+          // Popular landmarks and malls
+          { name: 'Trident Embassy', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 2 },
+          { name: 'Select City Walk', area: 'Saket, New Delhi', coords: { lat: 28.5245, lng: 77.2069 }, state: 'Delhi', country: 'India', priority: 2 },
+          { name: 'DLF Cyber Hub', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana', country: 'India', priority: 2 },
+          { name: 'Ambience Mall', area: 'Gurugram', coords: { lat: 28.5000, lng: 77.1000 }, state: 'Haryana', country: 'India', priority: 2 },
+          { name: 'Pacific Mall', area: 'Tagore Garden, New Delhi', coords: { lat: 28.6408, lng: 77.1214 }, state: 'Delhi', country: 'India', priority: 2 },
+          { name: 'Metro Walk', area: 'Rohini, New Delhi', coords: { lat: 28.7433, lng: 77.1028 }, state: 'Delhi', country: 'India', priority: 2 },
+          { name: 'Cross River Mall', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
+          { name: 'Great India Place', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
+          { name: 'Logix City Centre', area: 'Sector 32, Noida', coords: { lat: 28.6000, lng: 77.3300 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
+          { name: 'DLF Mall of India', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 }
+        ];
+        
+        // Smart search algorithm for Delhi NCR with fuzzy matching
+        const searchResults = delhiNCRLocations.filter(loc => {
+          const searchTerms = fallbackQuery.split(' ').filter(term => term.length > 0);
+          const fullText = `${loc.name} ${loc.area} ${loc.state} ${loc.country}`.toLowerCase();
+          
+          // Check if all search terms match (with fuzzy matching for common variations)
+          return searchTerms.every(term => {
+            const lowerTerm = term.toLowerCase();
+            
+            // Direct match
+            if (fullText.includes(lowerTerm)) return true;
+            
+            // Fuzzy matching for common variations
+            if (lowerTerm === 'aspir' && fullText.includes('aspire')) return true;
+            if (lowerTerm === 'aspire' && fullText.includes('aspir')) return true;
+            if (lowerTerm === 'sec' && fullText.includes('sector')) return true;
+            if (lowerTerm === 'sector' && fullText.includes('sec')) return true;
+            if (lowerTerm === 'gr' && fullText.includes('greater')) return true;
+            if (lowerTerm === 'greater' && fullText.includes('gr')) return true;
+            if (lowerTerm === 'noida' && fullText.includes('noida')) return true;
+            if (lowerTerm === 'delhi' && fullText.includes('delhi')) return true;
+            
+            return false;
+          });
+        });
+
+        // Sort by priority and relevance
+        suggestions = searchResults
+          .sort((a, b) => {
+            // First sort by priority (1 = high, 2 = medium)
+            if (a.priority !== b.priority) {
+              return a.priority - b.priority;
+            }
+            // Then by exact name match
+            const aExactMatch = a.name.toLowerCase().includes(fallbackQuery);
+            const bExactMatch = b.name.toLowerCase().includes(fallbackQuery);
+            if (aExactMatch && !bExactMatch) return -1;
+            if (!aExactMatch && bExactMatch) return 1;
+            return 0;
+          })
+          .slice(0, parseInt(queryParams.limit) || 10)
+          .map((loc, index) => ({
+            id: `delhi-ncr-${index}`,
+            title: `${loc.name}, ${loc.area}`,
+            subtitle: `${loc.state}, ${loc.country}`,
+            address: `${loc.name}, ${loc.area}, ${loc.state}, ${loc.country}`,
+            coords: loc.coords
+          }));
+      }
+
+      // Cache the results
+      locationSearchCache.set(cacheKey, {
+        results: suggestions,
+        timestamp: Date.now()
+      });
+
+      console.log(`✅ Found ${suggestions.length} results for "${searchQuery}"`);
+      res.json({ results: suggestions });
+
+    } catch (error) {
+      console.error('Location search error:', error);
+      res.status(500).json({ 
+        error: 'Failed to search locations',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Location details endpoint for the location picker modal
+  app.get('/api/locations/details', communicationRateLimits.analytics, async (req, res) => {
+    try {
+      const placeId = req.query.place_id as string;
+      
+      if (!placeId) {
+        return res.status(400).json({
+          error: 'Missing place_id parameter'
+        });
+      }
+
+      // Use the existing places details endpoint logic
+      const validation = placesDetailsSchema.safeParse({ placeId });
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid parameters',
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      if (!GEOAPIFY_API_KEY) {
+        return res.status(503).json({ 
+          error: 'Places service not available', 
+          message: 'Geocoding service is not configured' 
+        });
+      }
+
+      const geoapifyParams = {
+        apiKey: GEOAPIFY_API_KEY,
+        id: placeId
+      };
+
+      const geoapifyResponse = await makeGeoapifyRequest(
+        'https://api.geoapify.com/v1/geocode/search',
+        geoapifyParams
+      );
+
+      if (!geoapifyResponse.features || geoapifyResponse.features.length === 0) {
+        return res.status(404).json({ 
+          error: 'Place not found',
+          message: 'The specified place could not be found'
+        });
+      }
+
+      const feature = geoapifyResponse.features[0];
+      const result = {
+        result: {
+          place_id: feature.properties.place_id,
+          formatted_address: feature.properties.formatted,
+          geometry: {
+            location: {
+              lat: feature.geometry.coordinates[1],
+              lng: feature.geometry.coordinates[0]
+            }
+          },
+          address_components: feature.properties.address_components || [],
+          name: feature.properties.name || feature.properties.street || feature.properties.city
+        }
+      };
+
+      res.json(result);
+
+    } catch (error) {
+      console.error('Location details error:', error);
+      res.status(500).json({ 
+        error: 'Failed to get location details',
+        message: 'Please try again later'
+      });
+    }
+  });
+
+  // Geocode endpoint for the location picker modal
+  app.get('/api/locations/geocode', communicationRateLimits.analytics, async (req, res) => {
+    try {
+      const address = req.query.address as string;
+      const lat = req.query.lat as string;
+      const lng = req.query.lng as string;
+      
+      // Check if this is reverse geocoding (lat,lng to address)
+      if (lat && lng) {
+        try {
+          const nominatimResponse = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
+          );
+          
+          if (nominatimResponse.ok) {
+            const nominatimData = await nominatimResponse.json();
+            if (nominatimData && nominatimData.display_name) {
+              const result = {
+                results: [{
+                  geometry: {
+                    location: {
+                      lat: parseFloat(lat),
+                      lng: parseFloat(lng)
+                    }
+                  },
+                  formatted_address: nominatimData.display_name,
+                  address_components: nominatimData.address || []
+                }]
+              };
+              console.log(`Nominatim reverse geocoded ${lat}, ${lng} to:`, result.results[0].formatted_address);
+              return res.json(result);
+            }
+          }
+        } catch (nominatimError) {
+          console.error('Nominatim reverse geocoding failed:', nominatimError);
+        }
+        
+        return res.status(404).json({ 
+          error: 'Location not found',
+          message: 'The specified coordinates could not be reverse geocoded'
+        });
+      }
+      
+      if (!address) {
+        return res.status(400).json({
+          error: 'Missing address or coordinates parameter'
+        });
+      }
+
+      // Use the existing places geocode endpoint logic
+      const queryParams = {
+        address: address,
+        countrycode: req.query.countrycode as string
+      };
+
+      const validation = placesGeocodeSchema.safeParse(queryParams);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid parameters',
+          details: validation.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      const validatedParams = validation.data;
+      let result: any = null;
+
+      if (GEOAPIFY_API_KEY) {
+        try {
+          const geoapifyParams: any = {
+            apiKey: GEOAPIFY_API_KEY,
+            text: validatedParams.address,
+            limit: 1
+          };
+
+          if (validatedParams.countrycode) {
+            geoapifyParams.filter = `countrycode:${validatedParams.countrycode}`;
+          }
+
+          const geoapifyResponse = await makeGeoapifyRequest(
+            'https://api.geoapify.com/v1/geocode/search',
+            geoapifyParams
+          );
+
+          if (geoapifyResponse.features && geoapifyResponse.features.length > 0) {
+            const feature = geoapifyResponse.features[0];
+            result = {
+              results: [{
+                geometry: {
+                  location: {
+                    lat: feature.geometry.coordinates[1],
+                    lng: feature.geometry.coordinates[0]
+                  }
+                },
+                formatted_address: feature.properties.formatted,
+                address_components: feature.properties.address_components || []
+              }]
+            };
+          }
+        } catch (geoapifyError) {
+          console.error('Geoapify geocoding error:', geoapifyError);
+        }
+      }
+
+      // Fallback to Nominatim if Geoapify fails
+      if (!result) {
+        try {
+          const nominatimResponse = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(validatedParams.address)}&limit=1&addressdetails=1`
+          );
+          
+          if (nominatimResponse.ok) {
+            const nominatimData = await nominatimResponse.json();
+            if (nominatimData && nominatimData.length > 0) {
+              const place = nominatimData[0];
+              result = {
+                results: [{
+                  geometry: {
+                    location: {
+                      lat: parseFloat(place.lat),
+                      lng: parseFloat(place.lon)
+                    }
+                  },
+                  formatted_address: place.display_name,
+                  address_components: place.address || []
+                }]
+              };
+              console.log(`Nominatim geocoded "${validatedParams.address}" to:`, result.results[0].geometry.location);
+            }
+          }
+        } catch (nominatimError) {
+          console.error('Nominatim geocoding also failed:', nominatimError);
+        }
+      }
+
+      if (!result) {
+        return res.status(404).json({ 
+          error: 'Address not found',
+          message: 'The specified address could not be geocoded'
+        });
+      }
+
+      res.json(result);
+
+    } catch (error) {
+      console.error('Location geocode error:', error);
+      res.status(500).json({ 
+        error: 'Failed to geocode address',
         message: 'Please try again later'
       });
     }
@@ -906,7 +2075,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Nominatim API fallback helper functions (free, no API key required)
-  const makeNominatimRequest = async (url: string, params: Record<string, string>): Promise<any> => {
+  const makeNominatimRequest = async (url: string, params: Record<string, string>, options: RequestInit = {}): Promise<any> => {
     const urlParams = new URLSearchParams({
       ...params,
       format: 'json',
@@ -919,7 +2088,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'SalonHub/1.0 (proximity search)'
-      }
+      },
+      ...options
     });
 
     if (!response.ok) {
@@ -1601,6 +2771,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sort: req.query.sort as string || 'distance',
         page: parseInt(req.query.page as string) || 1,
         pageSize: parseInt(req.query.pageSize as string) || 20,
+        time: req.query.time as string, // Add time parameter
+        date: req.query.date as string, // Add date parameter
       };
 
       console.log('📍 PROXIMITY SEARCH PARAMS:', rawParams);
@@ -1618,7 +2790,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get all matching salons using proximity search
       console.log(`🌍 Searching salons near (${params.lat}, ${params.lng}) within ${params.radiusKm}km`);
-      const allResults = await storage.findSalonsNearLocation(
+      let allResults = await storage.findSalonsNearLocation(
         params.lat, 
         params.lng, 
         params.radiusKm, 
@@ -1626,25 +2798,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       console.log(`📊 Found ${allResults.length} salons within radius`);
 
+      // If no results found within radius, show some nearby salons with warning
+      if (allResults.length === 0) {
+        console.log('No salons found within radius, showing nearby salons...');
+        const nearbySalons = await storage.findSalonsNearLocation(
+          params.lat, 
+          params.lng, 
+          50, // Search within 50km
+          5 // Limit to 5 results
+        );
+        allResults = nearbySalons.map(salon => ({
+          ...salon,
+          distance_km: salon.distance_km || 999, // Mark as far away
+          outside_radius: true // Flag to show warning
+        }));
+      }
+
       // Apply additional filters
       let filteredResults = allResults;
 
       // Filter by category if specified
       if (params.category) {
-        filteredResults = filteredResults.filter(salon => 
-          salon.category.toLowerCase().includes(params.category!.toLowerCase())
-        );
+        filteredResults = filteredResults.filter(salon => {
+          const salonCategory = salon.category.toLowerCase();
+          const searchCategory = params.category!.toLowerCase();
+          
+          // Handle different category formats
+          if (searchCategory === 'hair') {
+            return salonCategory.includes('hair') || 
+                   salonCategory.includes('salon') || 
+                   salonCategory === 'hair_salon';
+          }
+          
+          return salonCategory.includes(searchCategory);
+        });
       }
 
-      // Filter by text search if specified
+      // Smart service-to-category mapping and text search
       if (params.q) {
-        const query = params.q.toLowerCase();
-        filteredResults = filteredResults.filter(salon => 
-          salon.name.toLowerCase().includes(query) ||
-          (salon.description && salon.description.toLowerCase().includes(query)) ||
-          salon.address.toLowerCase().includes(query) ||
-          salon.city.toLowerCase().includes(query)
-        );
+        const searchQuery = params.q.toLowerCase();
+        
+        // Map common service searches to categories
+        const serviceToCategoryMap: { [key: string]: string[] } = {
+          'hair': ['hair', 'salon', 'hair_salon'],
+          'hair cut': ['hair', 'salon', 'hair_salon'],
+          'haircut': ['hair', 'salon', 'hair_salon'],
+          'hair color': ['hair', 'salon', 'hair_salon'],
+          'hair coloring': ['hair', 'salon', 'hair_salon'],
+          'styling': ['hair', 'salon', 'hair_salon'],
+          'nails': ['nails', 'nail', 'nail_salon'],
+          'manicure': ['nails', 'nail', 'nail_salon'],
+          'pedicure': ['nails', 'nail', 'nail_salon'],
+          'nail art': ['nails', 'nail', 'nail_salon'],
+          'massage': ['massage', 'spa'],
+          'facial': ['skincare', 'facial', 'beauty'],
+          'skincare': ['skincare', 'facial', 'beauty'],
+          'eyebrows': ['eyebrows', 'brows', 'beauty'],
+          'waxing': ['waxing', 'beauty', 'hair'],
+          'makeup': ['makeup', 'beauty', 'bridal'],
+          'bridal': ['bridal', 'makeup', 'beauty']
+        };
+        
+        // Find matching categories for the search query
+        const matchingCategories = new Set<string>();
+        for (const [service, categories] of Object.entries(serviceToCategoryMap)) {
+          if (searchQuery.includes(service)) {
+            categories.forEach(cat => matchingCategories.add(cat));
+          }
+        }
+        
+        // If we found matching categories, filter by them
+        if (matchingCategories.size > 0) {
+          filteredResults = filteredResults.filter(salon => {
+            const salonCategory = salon.category.toLowerCase();
+            return Array.from(matchingCategories).some(cat => 
+              salonCategory.includes(cat)
+            );
+          });
+        } else {
+          // Only do text search if no category mapping was found
+          filteredResults = filteredResults.filter(salon => 
+            salon.name.toLowerCase().includes(searchQuery) ||
+            (salon.description && salon.description.toLowerCase().includes(searchQuery)) ||
+            salon.address.toLowerCase().includes(searchQuery) ||
+            salon.city.toLowerCase().includes(searchQuery)
+          );
+        }
+      }
+
+      // Apply time-based filtering if time parameter is provided
+      if (params.time) {
+        console.log(`⏰ Filtering by time availability: ${params.time}`);
+        
+        // Parse time range (e.g., "12:00 PM - 6:00 PM")
+        const timeRange = params.time;
+        if (timeRange.includes(' - ')) {
+          const [startTimeStr, endTimeStr] = timeRange.split(' - ');
+          
+          const parseTime = (timeStr: string) => {
+            const [time, period] = timeStr.trim().split(' ');
+            const [hours, minutes] = time.split(':').map(Number);
+            let hour24 = hours;
+            if (period === 'PM' && hours !== 12) hour24 += 12;
+            if (period === 'AM' && hours === 12) hour24 = 0;
+            return hour24 + (minutes / 60);
+          };
+          
+          const startHour = parseTime(startTimeStr);
+          const endHour = parseTime(endTimeStr);
+          
+          console.log(`⏰ Looking for salons available between ${startHour}:00 and ${endHour}:00`);
+          
+          // Filter salons that have availability during the requested time
+          filteredResults = await Promise.all(
+            filteredResults.map(async (salon) => {
+              try {
+                // Get available time slots for the salon
+                const today = new Date();
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                
+                // Use tomorrow's date if date parameter is "tomorrow" or similar
+                const searchDate = params.date === 'tomorrow' ? tomorrow : today;
+                const dateStr = searchDate.toISOString().split('T')[0];
+                
+                const timeSlots = await storage.getAvailableTimeSlots(salon.id, dateStr);
+                
+                // Check if any time slots overlap with the requested time range
+                const hasAvailability = timeSlots.some((slot: any) => {
+                  const slotStart = new Date(slot.startDateTime);
+                  const slotEnd = new Date(slot.endDateTime);
+                  const slotStartHour = slotStart.getHours() + (slotStart.getMinutes() / 60);
+                  const slotEndHour = slotEnd.getHours() + (slotEnd.getMinutes() / 60);
+                  
+                  // Check if slot overlaps with requested time range
+                  return slotStartHour < endHour && slotEndHour > startHour;
+                });
+                
+                return hasAvailability ? salon : null;
+              } catch (error) {
+                console.log(`Error checking availability for salon ${salon.id}:`, error.message);
+                return null; // Exclude salon if we can't check availability
+              }
+            })
+          );
+          
+          // Remove null results
+          filteredResults = filteredResults.filter(salon => salon !== null);
+          console.log(`⏰ Time filtering complete: ${filteredResults.length} salons available during requested time`);
+        }
       }
 
       // Apply sorting
@@ -1669,30 +2971,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const endIndex = startIndex + params.pageSize;
       const paginatedResults = filteredResults.slice(startIndex, endIndex);
 
-      // Format response
+      // Format response with images
       const response: SalonSearchResult = {
-        salons: paginatedResults.map(salon => ({
-          id: salon.id,
-          name: salon.name,
-          description: salon.description,
-          address: salon.address,
-          city: salon.city,
-          state: salon.state,
-          zipCode: salon.zipCode,
-          latitude: salon.latitude,
-          longitude: salon.longitude,
-          phone: salon.phone,
-          email: salon.email,
-          website: salon.website,
-          category: salon.category,
-          priceRange: salon.priceRange,
-          rating: salon.rating || '0.00',
-          reviewCount: salon.reviewCount,
-          imageUrl: salon.imageUrl,
-          openTime: salon.openTime,
-          closeTime: salon.closeTime,
-          distance_km: Number(salon.distance.toFixed(2)),
-          createdAt: salon.createdAt,
+        salons: await Promise.all(paginatedResults.map(async salon => {
+          // Fetch media assets for each salon
+          const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
+          const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
+          
+          return {
+            id: salon.id,
+            name: salon.name,
+            description: salon.description,
+            address: salon.address,
+            city: salon.city,
+            state: salon.state,
+            zipCode: salon.zipCode,
+            latitude: salon.latitude,
+            longitude: salon.longitude,
+            phone: salon.phone,
+            email: salon.email,
+            website: salon.website,
+            category: salon.category,
+            priceRange: salon.priceRange,
+            rating: salon.rating || '0.00',
+            reviewCount: salon.reviewCount,
+            imageUrl: primaryImage,
+            openTime: salon.openTime,
+            closeTime: salon.closeTime,
+            distance_km: Math.max(0.01, Number(salon.distance.toFixed(2))),
+            createdAt: salon.createdAt,
+          };
         })),
         pagination: {
           page: params.page,
@@ -1756,10 +3064,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             rating: parseFloat(salon.rating?.toString() || '0'),
             reviewCount: salon.reviewCount,
             location: `${salon.address}, ${salon.city}`,
+            address: salon.address,
             category: salon.category,
             priceRange: salon.priceRange,
             openTime: salon.closeTime, // Show when it closes
-            image: primaryImage?.url || '' // Include primary image URL
+            image: primaryImage?.url || '', // Include primary image URL
+            latitude: salon.latitude,
+            longitude: salon.longitude
           };
         } catch (error) {
           console.error(`Error fetching media for salon ${salon.id}:`, error);
@@ -1769,10 +3080,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             rating: parseFloat(salon.rating?.toString() || '0'),
             reviewCount: salon.reviewCount,
             location: `${salon.address}, ${salon.city}`,
+            address: salon.address,
             category: salon.category,
             priceRange: salon.priceRange,
             openTime: salon.closeTime,
-            image: '' // Fallback to empty string
+            image: '', // Fallback to empty string
+            latitude: salon.latitude,
+            longitude: salon.longitude
           };
         }
       }));
@@ -2309,7 +3623,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/salons/:salonId/services', async (req: any, res) => {
     try {
       const { salonId } = req.params;
+      const t0 = Date.now();
       const services = await storage.getServicesBySalonId(salonId);
+      const t1 = Date.now();
+      console.log(`[perf] getServicesBySalonId(salonId=${salonId}) took ${t1 - t0}ms, count=${services?.length ?? 0}`);
       res.json(services || []);
     } catch (error) {
       console.error('Error fetching salon services:', error);
@@ -2348,7 +3665,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: normalizeIsActive(req.body.isActive)
       };
       
+      const t0 = Date.now();
       const service = await storage.createService(serviceData);
+      const t1 = Date.now();
+      console.log(`[perf] createService took ${t1 - t0}ms (salonId=${salonId})`);
       res.json(service);
     } catch (error) {
       console.error('Error creating salon service:', error);
@@ -2490,6 +3810,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create booking record BEFORE payment - ensures we have a record
+      const tCreateBooking0 = Date.now();
       const booking = await storage.createBooking({
         salonId: input.salonId,
         serviceId: input.serviceId,
@@ -2505,6 +3826,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         notes: input.booking.notes,
         guestSessionId: input.booking.guestSessionId // Store guest session ID if provided
       });
+      const tCreateBooking1 = Date.now();
+      console.log(`[perf] createBooking took ${tCreateBooking1 - tCreateBooking0}ms (bookingId=${booking.id})`);
 
       // Auto-send booking confirmation if customer opted in
       try {
@@ -2545,6 +3868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Handle "pay now" with Razorpay
         // Create payment record
+        const tCreatePayment0 = Date.now();
         const payment = await storage.createPayment({
           bookingId: booking.id,
           amountPaisa: service.priceInPaisa, // SERVER-CONTROLLED AMOUNT
@@ -2554,6 +3878,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           razorpayPaymentId: null,
           razorpaySignature: null
         });
+        const tCreatePayment1 = Date.now();
+        console.log(`[perf] createPayment took ${tCreatePayment1 - tCreatePayment0}ms (paymentId=${payment.id})`);
 
         // Create Razorpay order
         const razorpayOrderOptions = {
@@ -2572,10 +3898,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(503).json({ error: 'Payment service not configured' });
         }
         
+        const tRz0 = Date.now();
         const order = await razorpay.orders.create(razorpayOrderOptions);
+        const tRz1 = Date.now();
+        console.log(`[perf] razorpay.orders.create took ${tRz1 - tRz0}ms (orderId=${order.id})`);
         
         // Update payment with Razorpay order ID
+        const tUpdatePayment0 = Date.now();
         await storage.updatePaymentOrderId(payment.id, order.id);
+        const tUpdatePayment1 = Date.now();
+        console.log(`[perf] updatePaymentOrderId took ${tUpdatePayment1 - tUpdatePayment0}ms (paymentId=${payment.id})`);
 
         res.json({
           id: order.id,

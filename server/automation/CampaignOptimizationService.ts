@@ -982,4 +982,4 @@ class CampaignOptimizationService {
   }
 }
 
-export const campaignOptimizationService = new CampaignOptimizationService(
+export const campaignOptimizationService = new CampaignOptimizationService();

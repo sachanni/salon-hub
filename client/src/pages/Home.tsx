@@ -1,5 +1,6 @@
-import Hero from "@/components/Hero";
+import FreshaSearchBar from "@/components/FreshaSearchBar";
 import SalonGrid from "@/components/SalonGrid";
+import SalonMapView from "@/components/SalonMapView";
 import RecentlyViewed from "@/components/RecentlyViewed";
 import Footer from "@/components/Footer";
 import BookingModal from "@/components/BookingModal";
@@ -30,6 +31,10 @@ export default function Home() {
   const [salonsData, setSalonsData] = useState<any[]>([]);
   const [searchParams, setSearchParams] = useState<SearchParams>({});
   const [isSearchActive, setIsSearchActive] = useState(false);
+  const [showMapView, setShowMapView] = useState(false);
+  const [searchLocationName, setSearchLocationName] = useState<string>("Nirala Estate, Greater Noida");
+  const [currentLocationCoords, setCurrentLocationCoords] = useState<{lat: number, lng: number} | undefined>(undefined);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | undefined>(undefined);
   
   const { addRecentlyViewed } = useRecentlyViewed();
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -60,6 +65,43 @@ export default function Home() {
       }
     }
   }, [isAuthenticated, user, isLoading, setLocation]);
+
+  // Detect user's current location
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          setCurrentLocationCoords(coords);
+          setLocationAccuracy(position.coords.accuracy);
+          console.log('Current location detected:', coords, 'Accuracy:', position.coords.accuracy);
+        },
+        (error) => {
+          console.warn('Geolocation error:', error.message);
+          // Try to get cached location from localStorage
+          const cachedLocation = localStorage.getItem('user_location');
+          if (cachedLocation) {
+            try {
+              const location = JSON.parse(cachedLocation);
+              setCurrentLocationCoords({ lat: location.lat, lng: location.lng });
+              setLocationAccuracy(location.accuracy);
+              console.log('Using cached location:', location);
+            } catch (e) {
+              console.warn('Failed to parse cached location');
+            }
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 300000 // 5 minutes
+        }
+      );
+    }
+  }, []);
 
   // Fetch salon data on component mount for recently viewed tracking
   useEffect(() => {
@@ -114,48 +156,96 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <main>
-        <Hero onSearch={(params: SearchParams) => {
-          console.log('Home: Received search params from Hero:', params);
-          console.log('Home: Has coordinates:', !!params.coordinates);
-          console.log('Home: Full search params object:', JSON.stringify(params, null, 2));
-          if (params.coordinates) {
-            console.log('Home: Proximity search with coordinates:', params.coordinates, 'radius:', params.radius);
-          } else {
-            console.log('Home: Regular search without coordinates');
-          }
-          setSearchParams(params);
-          setIsSearchActive(true);
-        }} />
-        <RecentlyViewed onBookingClick={handleBookingClick} />
-        {isSearchActive ? (
-          <SalonGrid 
-            title="Search Results" 
-            subtitle={searchParams.coordinates 
-              ? `Found salons within ${searchParams.radius || 10}km of your location`
-              : "Results for your search"
-            }
-            searchParams={searchParams}
-            onBookingClick={handleBookingClick}
+        {/* Hero Section with Fresha-style Search */}
+        <div className="relative bg-gradient-to-br from-purple-600 via-pink-600 to-blue-600 min-h-screen flex items-center justify-center overflow-hidden">
+          {/* Background Image */}
+          <div 
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-20"
+            style={{
+              backgroundImage: "url('https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1974&q=80')"
+            }}
           />
-        ) : (
-          <SalonGrid 
-            title="Recommended" 
-            subtitle="Discover the most popular salons and spas in your area" 
-            onBookingClick={handleBookingClick}
-          />
-        )}
-        {!isSearchActive && (
+          
+          {/* Content */}
+          <div className="relative z-10 w-full max-w-6xl mx-auto px-4 py-16">
+            {/* Hero Text */}
+            <div className="text-center mb-12">
+              <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 leading-tight">
+                Book local beauty and<br />
+                <span className="text-yellow-300">wellness services</span>
+              </h1>
+              <p className="text-xl md:text-2xl text-white/90 max-w-3xl mx-auto leading-relaxed">
+                Discover and book appointments at top-rated salons, spas, and wellness centers near you
+              </p>
+            </div>
+            
+            {/* Fresha Search Bar */}
+            <FreshaSearchBar
+              onSearch={(params) => {
+                console.log('Home: Received search params from FreshaSearchBar:', params);
+                console.log('Home: Coordinates received:', params.coords);
+                const searchParams: SearchParams = {
+                  service: params.service,
+                  coordinates: params.coords,
+                  radius: params.radius,
+                  category: params.service, // Map service to category
+                };
+                console.log('Home: Setting search params:', searchParams);
+                setSearchParams(searchParams);
+                setSearchLocationName(params.locationName || "Current Location"); // Set the actual location name
+                setIsSearchActive(true);
+                setShowMapView(true); // Show map view when search is performed
+              }}
+              currentLocationCoords={currentLocationCoords}
+              locationAccuracy={locationAccuracy}
+              savedLocations={[]}
+            />
+          </div>
+        </div>
+            {showMapView ? (
+              <SalonMapView
+                searchParams={searchParams}
+                onBackToSearch={() => {
+                  setShowMapView(false);
+                  setIsSearchActive(false);
+                  setSearchParams({});
+                }}
+                searchLocationName={searchLocationName}
+              />
+            ) : (
           <>
-            <SalonGrid 
-              title="New to SalonHub" 
-              subtitle="Recently joined salons offering exceptional services" 
-              onBookingClick={handleBookingClick}
-            />
-            <SalonGrid 
-              title="Trending" 
-              subtitle="The most booked services this week" 
-              onBookingClick={handleBookingClick}
-            />
+            <RecentlyViewed onBookingClick={handleBookingClick} />
+            {isSearchActive ? (
+              <SalonGrid 
+                title="Search Results" 
+                subtitle={searchParams.coordinates 
+                  ? `Found salons within ${searchParams.radius || 10}km of your location`
+                  : "Results for your search"
+                }
+                searchParams={searchParams}
+                onBookingClick={handleBookingClick}
+              />
+            ) : (
+              <SalonGrid 
+                title="Recommended" 
+                subtitle="Discover the most popular salons and spas in your area" 
+                onBookingClick={handleBookingClick}
+              />
+            )}
+            {!isSearchActive && (
+              <>
+                <SalonGrid 
+                  title="New to SalonHub" 
+                  subtitle="Recently joined salons offering exceptional services" 
+                  onBookingClick={handleBookingClick}
+                />
+                <SalonGrid 
+                  title="Trending" 
+                  subtitle="The most booked services this week" 
+                  onBookingClick={handleBookingClick}
+                />
+              </>
+            )}
           </>
         )}
       </main>

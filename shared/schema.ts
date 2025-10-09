@@ -2920,12 +2920,14 @@ export const inventoryAdjustmentItemsRelations = relations(inventoryAdjustmentIt
 export const salonSearchSchema = z.object({
   lat: z.number().min(-90).max(90, "Latitude must be between -90 and 90 degrees"),
   lng: z.number().min(-180).max(180, "Longitude must be between -180 and 180 degrees"),
-  radiusKm: z.number().min(0.2).max(2, "Radius must be between 0.2 and 2 kilometers").default(0.5),
+  radiusKm: z.number().min(0.1).max(50, "Radius must be between 0.1 and 50 kilometers").default(1),
   category: z.string().optional(),
   q: z.string().optional(),
   sort: z.enum(['distance', 'rating', 'name']).default('distance'),
   page: z.number().min(1).default(1),
   pageSize: z.number().min(1).max(50).default(20),
+  time: z.string().optional(),
+  date: z.string().optional(),
 });
 
 export type SalonSearchParams = z.infer<typeof salonSearchSchema>;

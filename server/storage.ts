@@ -1258,8 +1258,8 @@ export class DatabaseStorage implements IStorage {
       if (longitude < -180 || longitude > 180) {
         throw new Error('Longitude must be between -180 and 180 degrees');
       }
-      if (radiusKm < 0.2 || radiusKm > 2) {
-        throw new Error('Radius must be between 0.2 and 2 kilometers');
+      if (radiusKm < 0.1 || radiusKm > 50) {
+        throw new Error('Radius must be between 0.1 and 50 kilometers');
       }
 
       const searchLimit = Math.min(limit || 50, 500); // Get more results for filtering
@@ -2809,6 +2809,16 @@ export class DatabaseStorage implements IStorage {
       conditions.push(eq(timeSlots.staffId, staffId));
     }
 
+    // Add date filtering
+    if (date) {
+      const startOfDay = new Date(date + 'T00:00:00.000Z');
+      const endOfDay = new Date(date + 'T23:59:59.999Z');
+      conditions.push(
+        sql`${timeSlots.startDateTime} >= ${startOfDay.toISOString()}`,
+        sql`${timeSlots.startDateTime} <= ${endOfDay.toISOString()}`
+      );
+    }
+
     return await db.select().from(timeSlots).where(and(...conditions));
   }
 
@@ -3322,6 +3332,9 @@ export class DatabaseStorage implements IStorage {
     const mediaComplete = mediaAssets.length > 0;
 
     // Calculate overall progress
+    // Only count mandatory sections for completion percentage
+    // Mandatory: profile, services, staff, settings, media (5 sections)
+    // Optional: resources, payment-setup (not counted in completion)
     const completedSections = [
       profileComplete,
       servicesComplete,
@@ -3332,16 +3345,16 @@ export class DatabaseStorage implements IStorage {
     
     const overallProgress = Math.round((completedSections / 5) * 100);
 
-    // Determine next step
+    // Determine next step (only mandatory steps)
     let nextStep: string | undefined;
     if (!profileComplete) {
-      nextStep = 'profile';
+      nextStep = 'business-info'; // Updated to match frontend step IDs
     } else if (!servicesComplete) {
       nextStep = 'services';
     } else if (!staffComplete) {
       nextStep = 'staff';
     } else if (!settingsComplete) {
-      nextStep = 'settings';
+      nextStep = 'booking-settings'; // Updated to match frontend step IDs
     } else if (!mediaComplete) {
       nextStep = 'media';
     }
@@ -6196,6 +6209,123 @@ async function initializeSalonsAndServices() {
       
       await db.insert(services).values(salonServices);
       console.log('✅ Initialized services in database');
+      
+      // Create sample media assets for each salon
+      const sampleMediaAssets: InsertMediaAsset[] = [
+        // Artisan Theory Salon images
+        { 
+          salonId: createdSalons[0].id, 
+          type: 'image', 
+          url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop&crop=center', 
+          altText: 'Artisan Theory Salon interior', 
+          isPrimary: 1 
+        },
+        { 
+          salonId: createdSalons[0].id, 
+          type: 'image', 
+          url: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400&h=300&fit=crop&crop=center', 
+          altText: 'Hair styling station', 
+          isPrimary: 0 
+        },
+        
+        // LO Spa & Nails images
+        { 
+          salonId: createdSalons[1].id, 
+          type: 'image', 
+          url: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?w=400&h=300&fit=crop&crop=center', 
+          altText: 'LO Spa & Nails interior', 
+          isPrimary: 1 
+        },
+        { 
+          salonId: createdSalons[1].id, 
+          type: 'image', 
+          url: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?w=400&h=300&fit=crop&crop=center', 
+          altText: 'Nail art station', 
+          isPrimary: 0 
+        },
+        
+        // Tranquil Spa Retreat images
+        { 
+          salonId: createdSalons[2].id, 
+          type: 'image', 
+          url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop&crop=center', 
+          altText: 'Tranquil Spa Retreat interior', 
+          isPrimary: 1 
+        },
+        { 
+          salonId: createdSalons[2].id, 
+          type: 'image', 
+          url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop&crop=center', 
+          altText: 'Spa treatment room', 
+          isPrimary: 0 
+        }
+      ];
+      
+      await db.insert(mediaAssets).values(sampleMediaAssets);
+      console.log('✅ Initialized media assets in database');
+      
+      // Create sample time slots for each salon
+      const sampleTimeSlots: InsertTimeSlot[] = [];
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      for (const salon of createdSalons) {
+        const dates = [today, tomorrow];
+        
+        for (const date of dates) {
+          // Create morning slots (9 AM - 12 PM)
+          for (let hour = 9; hour < 12; hour++) {
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            
+            sampleTimeSlots.push({
+              salonId: salon.id,
+              startDateTime: startTime,
+              endDateTime: endTime,
+              isBooked: 0,
+              isBlocked: 0
+            });
+          }
+          
+          // Create afternoon slots (2 PM - 6 PM)
+          for (let hour = 14; hour < 18; hour++) {
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            
+            sampleTimeSlots.push({
+              salonId: salon.id,
+              startDateTime: startTime,
+              endDateTime: endTime,
+              isBooked: 0,
+              isBlocked: 0
+            });
+          }
+          
+          // Create evening slots (7 PM - 9 PM)
+          for (let hour = 19; hour < 21; hour++) {
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            
+            sampleTimeSlots.push({
+              salonId: salon.id,
+              startDateTime: startTime,
+              endDateTime: endTime,
+              isBooked: 0,
+              isBlocked: 0
+            });
+          }
+        }
+      }
+      
+      await db.insert(timeSlots).values(sampleTimeSlots);
+      console.log('✅ Initialized time slots in database');
     }
   } catch (error) {
     console.error('Error initializing salons and services:', error);

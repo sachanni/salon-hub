@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import LocationSearch from './LocationSearch';
 
 // Haversine formula for accurate distance calculations (industry standard)
 const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -200,6 +201,11 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
   const [showLocationPermissionModal, setShowLocationPermissionModal] = useState(false);
   const [locationPermissionStatus, setLocationPermissionStatus] = useState<'idle' | 'checking' | 'granted' | 'denied' | 'blocked'>('idle');
   
+  // Fresha-style location picker modal
+  const [locationPickerQuery, setLocationPickerQuery] = useState('');
+  const [locationPickerSuggestions, setLocationPickerSuggestions] = useState<any[]>([]);
+  const [isLocationPickerSearching, setIsLocationPickerSearching] = useState(false);
+  
   // Autocomplete state
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [showMobileAutocomplete, setShowMobileAutocomplete] = useState(false);
@@ -222,12 +228,11 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
     return saved ? parseFloat(saved) : 0.5; // Default: 500m
   });
 
-  // Radius preset options with labels and transport modes
+  // Radius preset options with labels and transport modes (Fresha-style quick presets)
   const radiusPresets = [
-    { value: 0.2, label: '200m', description: 'Walking', icon: '🚶' },
-    { value: 0.5, label: '500m', description: 'Short trip', icon: '🏃' },
-    { value: 1, label: '1km', description: 'Bike', icon: '🚲' },
-    { value: 2, label: '2km', description: 'Car/Bus', icon: '🚗' }
+    { value: 0.3, label: '300m', description: 'Nearby', icon: '📍' },
+    { value: 0.5, label: '500m', description: 'Short walk', icon: '🚶' },
+    { value: 1, label: '1km', description: 'Walk/Bike', icon: '🚲' },
   ];
 
   // Update localStorage when radius changes
@@ -1189,94 +1194,6 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
     }, 300);
   }, [performLocationSearch]);
 
-  // Show location suggestions on focus
-  const handleLocationInputFocus = () => {
-    setShowLocationAutocomplete(true);
-    if (location.length === 0) {
-      // Show saved locations and current location option
-      const suggestions = [];
-      
-      // Only show current location if permission was previously granted
-      if (localStorage.getItem('location_permission_granted') === 'true') {
-        suggestions.push({
-          type: 'current',
-          id: 'current-location', 
-          title: 'Use current location',
-          subtitle: 'Find salons near you',
-          icon: Navigation
-        });
-      }
-      
-      // Add saved locations
-      savedLocations.forEach(savedLoc => {
-        suggestions.push({
-          type: 'saved',
-          id: savedLoc.id,
-          title: savedLoc.label,
-          subtitle: savedLoc.address,
-          icon: savedLoc.icon,
-          address: savedLoc.address
-        });
-      });
-      
-      // Add "Add Home" and "Add Work" if not already saved
-      if (!savedLocations.find(loc => loc.type === 'home')) {
-        suggestions.push({
-          type: 'add-saved',
-          id: 'add-home',
-          title: 'Add Home',
-          subtitle: 'Save your home address',
-          icon: Home,
-          saveType: 'home'
-        });
-      }
-      
-      if (!savedLocations.find(loc => loc.type === 'work')) {
-        suggestions.push({
-          type: 'add-saved',
-          id: 'add-work',
-          title: 'Add Work',
-          subtitle: 'Save your work address',
-          icon: Building2,
-          saveType: 'work'
-        });
-      }
-      
-      // Always show current location option
-      suggestions.push({
-        type: 'current',
-        id: 'current-location',
-        title: 'Use current location',
-        subtitle: 'Find salons near you',
-        icon: Navigation
-      });
-      
-      // Add options to save new locations if no saved locations exist
-      if (savedLocations.length === 0) {
-        suggestions.push({
-          type: 'add-saved',
-          id: 'add-home',
-          title: 'Add home address',
-          subtitle: 'Save your home location for easy access',
-          icon: Home,
-          saveType: 'home'
-        });
-        
-        suggestions.push({
-          type: 'add-saved',
-          id: 'add-work',
-          title: 'Add work address',
-          subtitle: 'Save your work location for easy access',
-          icon: Building2,
-          saveType: 'work'
-        });
-      }
-      
-      setLocationSuggestions(suggestions);
-    } else {
-      performLocationSearch(location);
-    }
-  };
 
   // Handle location suggestion selection
   const handleLocationSuggestionSelect = (suggestion: any) => {
@@ -1767,80 +1684,24 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
 
           {/* Location Input Segment */}
           <div className="relative flex-1 w-full sm:min-w-0">
-            <div className="flex items-center h-12 sm:h-9 px-4 rounded-xl sm:rounded-full bg-transparent hover:bg-white/60 dark:hover:bg-gray-700/60 transition-colors group focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:shadow-sm">
-              <MapPin className="h-4 w-4 text-muted-foreground mr-2 group-focus-within:text-primary transition-colors" />
-              <Input
-                value={location}
-                onChange={(e) => handleLocationInputChange(e.target.value)}
-                onFocus={handleLocationInputFocus}
-                onBlur={handleLocationInputBlur}
-                placeholder="Current location"
-                className="border-0 bg-transparent p-0 h-auto focus-visible:ring-0 placeholder:text-muted-foreground/70 text-sm"
-                data-testid="input-location"
-              />
-              {currentLocationStatus === 'detecting' && (
-                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin ml-2"></div>
-              )}
-            </div>
+            <LocationSearch
+              value={location}
+              onChange={(newLocation, coords) => {
+                setLocation(newLocation);
+                if (coords) {
+                  setSelectedLocationCoords(coords);
+                }
+              }}
+              placeholder="Search for an address or place..."
+              currentLocationCoords={currentLocationCoords}
+              locationAccuracy={locationAccuracy || undefined}
+              savedLocations={savedLocations}
+              showRadius={true}
+              radius={searchRadius}
+              onRadiusChange={setSearchRadius}
+              className="flex-1"
+            />
             
-            {/* Location Autocomplete Dropdown - Mobile-first design */}
-            {showLocationAutocomplete && (
-              <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-md shadow-lg z-50 max-h-80 overflow-y-auto w-full sm:w-72 sm:max-w-[280px]">
-                {isLocationSearching && (
-                  <div className="py-3 px-3 text-muted-foreground text-sm flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                    Searching locations...
-                  </div>
-                )}
-                
-                {!isLocationSearching && locationSuggestions.length > 0 && (
-                  <div className="py-1">
-                    {locationSuggestions.map((suggestion, index) => {
-                      const IconComponent = suggestion.icon || MapPin;
-                      return (
-                        <div
-                          key={`${suggestion.type}-${suggestion.id}-${index}`}
-                          className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                          onClick={() => handleLocationSuggestionSelect(suggestion)}
-                          data-testid={`location-suggestion-${suggestion.type}-${suggestion.id}`}
-                        >
-                          {suggestion.type === 'current' && (
-                            <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                              <Navigation className="h-3 w-3" />
-                            </div>
-                          )}
-                          {suggestion.type === 'saved' && (
-                            <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-green-500/10 text-green-700 dark:text-green-300">
-                              <IconComponent className="h-3 w-3" />
-                            </div>
-                          )}
-                          {suggestion.type === 'add-saved' && (
-                            <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-gray-500/10 text-gray-700 dark:text-gray-300">
-                              <IconComponent className="h-3 w-3" />
-                            </div>
-                          )}
-                          {suggestion.type === 'location' && (
-                            <div className="p-1 rounded flex items-center justify-center w-6 h-6 bg-purple-500/10 text-purple-700 dark:text-purple-300">
-                              <MapPin className="h-3 w-3" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0 text-left">
-                            <div className="font-medium text-sm leading-tight text-left">{suggestion.title}</div>
-                            <div className="text-xs text-muted-foreground leading-tight text-left">{suggestion.subtitle}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                {!isLocationSearching && locationSuggestions.length === 0 && (
-                  <div className="py-3 px-3 text-muted-foreground text-sm text-left">
-                    No locations found
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Separator - Hidden on mobile */}
@@ -2058,39 +1919,28 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
                   {selectedLocationCoords && (
                     <div className="space-y-3">
                       <label className="text-sm font-medium flex items-center gap-2">
-                        Search radius
-                        <span className="text-xs text-muted-foreground">
-                          ({formatDistance(searchRadius)})
-                        </span>
+                        Distance
+                        <span className="text-xs text-muted-foreground">({formatDistance(searchRadius)})</span>
                       </label>
-                      
-                      {/* Radius Preset Buttons */}
-                      <div className="grid grid-cols-2 gap-2">
-                        {radiusPresets.map((preset) => (
-                          <Button
+                      {/* Fresha-like segmented control */}
+                      <div className="inline-flex w-full sm:w-auto rounded-md border border-border overflow-hidden">
+                        {radiusPresets.map((preset, idx) => (
+                          <button
                             key={preset.value}
-                            variant={searchRadius === preset.value ? "default" : "outline"}
-                            size="sm"
                             onClick={() => setSearchRadius(preset.value)}
-                            className="h-auto py-2 px-3 flex flex-col items-center gap-1 text-xs"
-                            data-testid={`button-radius-${preset.label}`}
+                            className={`px-3 py-2 text-xs font-medium transition-colors ${
+                              searchRadius === preset.value
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-background hover:bg-muted/50 text-foreground'
+                            } ${idx !== radiusPresets.length - 1 ? 'border-r border-border' : ''}`}
+                            data-testid={`seg-radius-${preset.label}`}
                           >
-                            <div className="flex items-center gap-1">
-                              <span className="text-base">{preset.icon}</span>
-                              <span className="font-medium">{preset.label}</span>
-                            </div>
-                            <span className="text-[10px] text-muted-foreground leading-none">
-                              {preset.description}
-                            </span>
-                          </Button>
+                            {preset.label}
+                          </button>
                         ))}
                       </div>
-                      
-                      {/* Current Selection Display */}
-                      <div className="text-center p-2 bg-muted/50 rounded-md">
-                        <span className="text-xs text-muted-foreground">
-                          Finding salons within <span className="font-medium text-primary">{formatDistance(searchRadius)}</span> of your location
-                        </span>
+                      <div className="text-[11px] text-muted-foreground">
+                        Showing results near your location within <span className="font-medium text-primary">{formatDistance(searchRadius)}</span>
                       </div>
                     </div>
                   )}
@@ -2662,6 +2512,7 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }

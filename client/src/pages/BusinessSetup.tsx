@@ -107,16 +107,14 @@ export default function BusinessSetup() {
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
 
-  // Get user's salon from org memberships
-  const userSalons = user?.orgMemberships
-    ?.filter(membership => ['owner', 'manager', 'staff'].includes(membership.orgRole))
-    .map(membership => ({
-      id: membership.organization.id,
-      name: membership.organization.name,
-      orgRole: membership.orgRole,
-    })) ?? [];
+  // Get user's salons from API
+  const { data: userSalons, isLoading: salonsLoading } = useQuery({
+    queryKey: ['/api/my/salons'],
+    enabled: isAuthenticated,
+    staleTime: 60000
+  });
 
-  const currentSalon = userSalons[0]; // Use first salon for now
+  const currentSalon = Array.isArray(userSalons) && userSalons.length > 0 ? userSalons[0] : null;
 
   // Create organization and salon for new business owners
   const createOrganizationMutation = useMutation({
@@ -129,9 +127,10 @@ export default function BusinessSetup() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/my/salons'] });
       toast({
         title: "Organization Created",
-        description: "Your business organization has been set up. Let's configure your salon!",
+        description: "Your business organization and salon have been set up. Let's configure your salon!",
       });
     },
     onError: (error) => {
@@ -152,7 +151,7 @@ export default function BusinessSetup() {
     }
 
     // If user is a business owner but has no salons, create organization
-    if (user && user.roles.includes('owner') && userSalons.length === 0) {
+    if (user && user.roles.includes('owner') && (!userSalons || userSalons.length === 0)) {
       createOrganizationMutation.mutate();
     }
   }, [isAuthenticated, user, userSalons.length, setLocation]);
@@ -249,11 +248,30 @@ export default function BusinessSetup() {
   const currentStepConfig = SETUP_STEPS[currentStep - 1];
   const CurrentStepComponent = currentStepConfig.component;
 
-  if (!isAuthenticated || !currentSalon?.id) {
+  if (!isAuthenticated || salonsLoading || createOrganizationMutation.isPending) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <p>Loading salon information...</p>
+          <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4 animate-pulse" />
+          <h1 className="text-2xl font-bold mb-4">Setting up your business...</h1>
+          <p className="text-muted-foreground mb-6">
+            {createOrganizationMutation.isPending ? 'Creating your organization and salon...' : 'Loading your business profile...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentSalon?.id) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <h1 className="text-2xl font-bold mb-4">No Business Found</h1>
+          <p className="text-muted-foreground mb-6">Please create a business organization first.</p>
+          <Button onClick={() => createOrganizationMutation.mutate()}>
+            Create Business Organization
+          </Button>
         </div>
       </div>
     );

@@ -34,7 +34,11 @@ export interface AuthUser {
   }>;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
 
 export async function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers['authorization'];

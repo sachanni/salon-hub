@@ -60,6 +60,8 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
       params.append('radiusKm', (searchParams.radius || 0.5).toString());
       if (searchParams.service) params.append('q', searchParams.service);
       if (searchParams.category) params.append('category', searchParams.category);
+      if (searchParams.time) params.append('time', searchParams.time);
+      if (searchParams.date) params.append('date', searchParams.date);
       params.append('sort', searchParams.sortBy || 'distance');
       return `/api/search/salons?${params.toString()}`;
     } else {

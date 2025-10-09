@@ -70,3 +70,43 @@ Preferred communication style: Simple, everyday language.
 - **PostCSS**: CSS processing with autoprefixer
 - **ESBuild**: Fast JavaScript bundling for production builds
 - **WebSocket Support**: Real-time capabilities via ws library for database connections
+
+## Replit Deployment
+
+### Required Environment Variables for Replit
+
+The following environment variables must be configured in Replit Secrets for the application to work:
+
+#### Core Required:
+- `DATABASE_URL` - PostgreSQL connection string (auto-provided by Replit database)
+- `SESSION_SECRET` - Strong random string for session security
+- `JWT_SECRET` - Strong random string for JWT tokens
+
+#### Replit-Specific:
+- `REPLIT_DOMAINS` - Auto-configured by Replit
+- `ISSUER_URL` - Auto-configured by Replit for OIDC
+- `REPL_ID` - Auto-configured by Replit
+
+#### Optional Services:
+- `SENDGRID_API_KEY` - For email functionality
+- `SENDGRID_FROM_EMAIL` - Sender email address
+- `TWILIO_ACCOUNT_SID` - For SMS functionality  
+- `TWILIO_AUTH_TOKEN` - Twilio authentication
+- `TWILIO_PHONE_NUMBER` - Twilio phone number
+- `RAZORPAY_KEY_ID` - For payment processing
+- `RAZORPAY_KEY_SECRET` - Razorpay secret key
+- `GEOAPIFY_API_KEY` - For location services
+
+### Deployment Configuration
+
+The application is configured for VM deployment with:
+- **Build Command**: `npm run build`
+- **Run Command**: `npm start`
+- **Port**: 5000 (configured in workflow)
+
+### Generate Secrets
+
+Use this command to generate secure secrets:
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+```

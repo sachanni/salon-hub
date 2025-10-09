@@ -44,7 +44,8 @@ import {
   Home,
   ChevronDown,
   Menu,
-  Cog
+  Cog,
+  MapPin
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "wouter";
@@ -115,11 +116,14 @@ interface AnalyticsData {
   bookingTrends?: BookingTrend[];
 }
 
-// Import step components
-import ProfileStep from "@/components/business-setup/ProfileStep";
+// Import step components - Use the same components as BusinessSetup
+import BusinessInfoStep from "@/components/business-setup/BusinessInfoStep";
+import LocationContactStep from "@/components/business-setup/LocationContactStep";
 import ServicesStep from "@/components/business-setup/ServicesStep";
 import StaffStep from "@/components/business-setup/StaffStep";
+import ResourcesStep from "@/components/business-setup/ResourcesStep";
 import BookingSettingsStep from "@/components/business-setup/BookingSettingsStep";
+import PaymentSetupStep from "@/components/business-setup/PaymentSetupStep";
 import MediaStep from "@/components/business-setup/MediaStep";
 import ReviewPublishStep from "@/components/business-setup/ReviewPublishStep";
 
@@ -299,7 +303,7 @@ export default function BusinessDashboard() {
     });
   };
 
-  // Navigation structure with grouped sections
+  // Navigation structure with grouped sections - Industry Standard Approach
   const navigationSections = [
     {
       id: "overview",
@@ -310,22 +314,28 @@ export default function BusinessDashboard() {
       ]
     },
     {
-      id: "calendar",
-      label: "Calendar & Bookings",
+      id: "operations",
+      label: "Operations",
       icon: Calendar,
       items: [
-        { id: "calendar", label: "Bookings & Calendar", icon: Calendar }
+        { id: "calendar", label: "Bookings & Calendar", icon: Calendar },
+        { id: "inventory", label: "Inventory Management", icon: Package }
       ]
     },
     {
       id: "business",
-      label: "Business Management",
+      label: "Business Setup & Management",
       icon: Building,
       items: [
-        { id: "services", label: "Services", icon: Scissors, isComplete: hasServices },
-        { id: "staff", label: "Staff", icon: Users, isComplete: hasStaff },
-        { id: "media", label: "Media Gallery", icon: Camera, isComplete: hasMedia },
-        { id: "inventory", label: "Inventory", icon: Package }
+        { id: "business-info", label: "Business Info", icon: Building, isComplete: isProfileComplete, isSetup: true },
+        { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: isProfileComplete, isSetup: true },
+        { id: "services", label: "Services & Pricing", icon: Scissors, isComplete: hasServices, isSetup: true },
+        { id: "staff", label: "Staff Management", icon: Users, isComplete: hasStaff, isSetup: true },
+        { id: "resources", label: "Resources & Equipment", icon: Settings, isComplete: false, isSetup: false, isOptional: true },
+        { id: "booking-settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings, isSetup: true },
+        { id: "payment-setup", label: "Payment Setup", icon: CreditCard, isComplete: false, isSetup: false, isOptional: true },
+        { id: "media", label: "Media Gallery", icon: Camera, isComplete: hasMedia, isSetup: true },
+        { id: "publish", label: "Publish Business", icon: CheckCircle, progress: completionPercentage, isSetup: true }
       ]
     },
     {
@@ -343,16 +353,6 @@ export default function BusinessDashboard() {
       icon: MessageSquare,
       items: [
         { id: "communications", label: "Customer Communications", icon: MessageSquare }
-      ]
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      icon: Settings,
-      items: [
-        { id: "profile", label: "Business Profile", icon: Building, isComplete: isProfileComplete },
-        { id: "settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings },
-        { id: "publish", label: "Publish Business", icon: CheckCircle, progress: completionPercentage }
       ]
     }
   ];
@@ -429,18 +429,26 @@ export default function BusinessDashboard() {
                                   <item.icon className="h-4 w-4" />
                                   <span className="group-data-[collapsible=icon]:hidden flex items-center gap-2">
                                     {item.label}
-                                    {item.isComplete && (
-                                      <CheckCircle className="h-3 w-3 text-green-500" />
-                                    )}
-                                    {item.isComplete === false && (
-                                      <span className="text-xs text-red-500">*</span>
-                                    )}
-                                    {'progress' in item && item.progress !== undefined && item.progress < 100 && (
-                                      <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
-                                    )}
-                                    {'progress' in item && item.progress === 100 && (
-                                      <CheckCircle className="h-3 w-3 text-green-500" />
-                                    )}
+                                    <div className="ml-auto flex items-center gap-1">
+                                      {item.isComplete && (
+                                        <CheckCircle className="h-3 w-3 text-green-500" title="Complete" />
+                                      )}
+                                      {item.isSetup && !item.isComplete && (
+                                        <div className="h-2 w-2 rounded-full bg-orange-500" title="Setup required" />
+                                      )}
+                                      {item.isOptional && (
+                                        <span className="text-xs text-blue-500" title="Optional">(Optional)</span>
+                                      )}
+                                      {!item.isSetup && !item.isOptional && item.isComplete === false && (
+                                        <span className="text-xs text-red-500">*</span>
+                                      )}
+                                      {'progress' in item && item.progress !== undefined && item.progress < 100 && (
+                                        <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
+                                      )}
+                                      {'progress' in item && item.progress === 100 && (
+                                        <CheckCircle className="h-3 w-3 text-green-500" />
+                                      )}
+                                    </div>
                                   </span>
                                 </SidebarMenuButton>
                               </SidebarMenuItem>
@@ -522,18 +530,26 @@ export default function BusinessDashboard() {
                               <item.icon className="h-4 w-4 mr-3" />
                               <span className="flex items-center gap-2 text-sm">
                                 {item.label}
-                                {item.isComplete && (
-                                  <CheckCircle className="h-3 w-3 text-green-500" />
-                                )}
-                                {item.isComplete === false && (
-                                  <span className="text-xs text-red-500">*</span>
-                                )}
-                                {'progress' in item && item.progress !== undefined && item.progress < 100 && (
-                                  <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
-                                )}
-                                {'progress' in item && item.progress === 100 && (
-                                  <CheckCircle className="h-3 w-3 text-green-500" />
-                                )}
+                                <div className="ml-auto flex items-center gap-1">
+                                  {item.isComplete && (
+                                    <CheckCircle className="h-3 w-3 text-green-500" title="Complete" />
+                                  )}
+                                  {item.isSetup && !item.isComplete && (
+                                    <div className="h-2 w-2 rounded-full bg-orange-500" title="Setup required" />
+                                  )}
+                                  {item.isOptional && (
+                                    <span className="text-xs text-blue-500" title="Optional">(Optional)</span>
+                                  )}
+                                  {!item.isSetup && !item.isOptional && item.isComplete === false && (
+                                    <span className="text-xs text-red-500">*</span>
+                                  )}
+                                  {'progress' in item && item.progress !== undefined && item.progress < 100 && (
+                                    <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
+                                  )}
+                                  {'progress' in item && item.progress === 100 && (
+                                    <CheckCircle className="h-3 w-3 text-green-500" />
+                                  )}
+                                </div>
                               </span>
                             </Button>
                           ))}
@@ -571,21 +587,29 @@ export default function BusinessDashboard() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                    Progress: {completionPercentage}% Complete
+                    Progress: {completionPercentage}% Complete (6 mandatory steps)
                   </span>
                 </div>
                 <Progress value={completionPercentage} className="h-2" />
+                
+                <div className="text-xs text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900 p-2 rounded">
+                  💡 <strong>Tip:</strong> You can publish your salon with just the 6 mandatory steps. Resources & Equipment and Payment Setup can be added later.
+                </div>
                 
                 <div className="flex items-center justify-between pt-2">
                   <div>
                     <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
                       Next: {
                         nextStep ? (
-                          nextStep === 'profile' ? 'Complete Profile' :
-                          nextStep === 'services' ? 'Add Services' :
-                          nextStep === 'staff' ? 'Add Staff' :
-                          nextStep === 'settings' ? 'Configure Settings' :
-                          nextStep === 'media' ? 'Add Media' :
+                          nextStep === 'business-info' ? 'Complete Business Info' :
+                          nextStep === 'location-contact' ? 'Add Location & Contact' :
+                          nextStep === 'services' ? 'Add Services & Pricing' :
+                          nextStep === 'staff' ? 'Add Staff Management' :
+                          nextStep === 'resources' ? 'Setup Resources & Equipment' :
+                          nextStep === 'booking-settings' ? 'Configure Booking Settings' :
+                          nextStep === 'payment-setup' ? 'Setup Payment Processing' :
+                          nextStep === 'media' ? 'Add Media Gallery' :
+                          nextStep === 'publish' ? 'Publish Business' :
                           'Continue Setup'
                         ) : 'Setup Complete'
                       }
@@ -1060,14 +1084,17 @@ export default function BusinessDashboard() {
       );
     }
 
-    // Render step components
+    // Render step components - Unified with BusinessSetup
     const components = {
-      profile: ProfileStep,
-      services: ServicesStep,
-      staff: StaffStep,
-      settings: BookingSettingsStep,
-      media: MediaStep,
-      publish: ReviewPublishStep
+      'business-info': BusinessInfoStep,
+      'location-contact': LocationContactStep,
+      'services': ServicesStep,
+      'staff': StaffStep,
+      'resources': ResourcesStep,
+      'booking-settings': BookingSettingsStep,
+      'payment-setup': PaymentSetupStep,
+      'media': MediaStep,
+      'publish': ReviewPublishStep
     };
 
     // Handle analytics tab
