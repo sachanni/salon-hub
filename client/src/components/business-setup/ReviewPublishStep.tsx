@@ -3,9 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useSalonSetupStatus } from "@/hooks/useSalonSetupStatus";
 import { 
   CheckCircle, 
   AlertCircle, 
@@ -15,7 +17,9 @@ import {
   Users, 
   Settings, 
   Camera,
-  Globe
+  Globe,
+  XCircle,
+  ArrowRight
 } from "lucide-react";
 
 interface ReviewPublishStepProps {
@@ -82,6 +86,11 @@ export default function ReviewPublishStep({
     totalSections: SETUP_SECTIONS.length,
     issues: [] as string[]
   });
+  
+  const [showMissingStepsModal, setShowMissingStepsModal] = useState(false);
+
+  // Use new unified setup status API
+  const { data: setupStatus, isLoading: setupStatusLoading } = useSalonSetupStatus(salonId);
 
   // Use dashboard completion data instead of custom logic
   const { data: dashboardCompletion } = useQuery({
@@ -280,6 +289,12 @@ export default function ReviewPublishStep({
   }, [dashboardCompletion, salonData, bookingSettings, services, staff, resources, payoutAccounts, mediaAssets]);
 
   const handlePublish = async () => {
+    // Use new setup status API to validate
+    if (setupStatus && !setupStatus.isSetupComplete) {
+      setShowMissingStepsModal(true);
+      return;
+    }
+
     if (!publishStatus.canPublish) {
       toast({
         title: "Setup Incomplete",
@@ -504,7 +519,12 @@ export default function ReviewPublishStep({
                 
                 <Button
                   onClick={handlePublish}
-                  disabled={actualCompletedSections < SETUP_SECTIONS.length || isPublishing || publishSalonMutation.isPending}
+                  disabled={
+                    (setupStatus && !setupStatus.isSetupComplete) || 
+                    actualCompletedSections < SETUP_SECTIONS.length || 
+                    isPublishing || 
+                    publishSalonMutation.isPending
+                  }
                   size="lg"
                   className="w-full md:w-auto"
                   data-testid="button-publish-salon"
@@ -512,7 +532,12 @@ export default function ReviewPublishStep({
                   {isPublishing || publishSalonMutation.isPending ? "Publishing..." : "🚀 Publish My Salon"}
                 </Button>
 
-                {actualCompletedSections < SETUP_SECTIONS.length && (
+                {setupStatus && !setupStatus.isSetupComplete && (
+                  <p className="text-sm text-amber-600">
+                    Complete all {setupStatus.totalSteps} required steps to publish your salon
+                  </p>
+                )}
+                {!setupStatus && actualCompletedSections < SETUP_SECTIONS.length && (
                   <p className="text-sm text-amber-600">
                     Complete the core sections to publish your salon
                   </p>
@@ -541,6 +566,119 @@ export default function ReviewPublishStep({
           </Button>
         )}
       </div>
+
+      {/* Missing Steps Modal */}
+      <Dialog open={showMissingStepsModal} onOpenChange={setShowMissingStepsModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertCircle className="h-5 w-5" />
+              Setup Incomplete
+            </DialogTitle>
+            <DialogDescription>
+              Complete these required steps before publishing your salon
+            </DialogDescription>
+          </DialogHeader>
+
+          {setupStatus && (
+            <div className="space-y-3 py-4">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-medium">Progress</span>
+                <span className="text-sm text-muted-foreground">
+                  {setupStatus.completedSteps} of {setupStatus.totalSteps} complete
+                </span>
+              </div>
+              <Progress value={setupStatus.progress} className="h-2 mb-6" />
+
+              <div className="space-y-2">
+                {!setupStatus.steps.businessInfo.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Business Info</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Required fields: name, description, category)
+                    </span>
+                  </div>
+                )}
+                {!setupStatus.steps.locationContact.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Location & Contact</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Address, city, phone, email)
+                    </span>
+                  </div>
+                )}
+                {!setupStatus.steps.services.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Services & Pricing</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Add at least 1 service)
+                    </span>
+                  </div>
+                )}
+                {!setupStatus.steps.staff.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Team Members</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Add at least 1 staff member)
+                    </span>
+                  </div>
+                )}
+                {!setupStatus.steps.bookingSettings.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Booking Settings</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Configure booking policies)
+                    </span>
+                  </div>
+                )}
+                {!setupStatus.steps.paymentSetup.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Payment Setup</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Add payment account)
+                    </span>
+                  </div>
+                )}
+                {!setupStatus.steps.media.completed && (
+                  <div className="flex items-center gap-2 text-sm p-2 bg-amber-50 rounded">
+                    <XCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Photos & Gallery</span>
+                    <span className="text-muted-foreground text-xs">
+                      (Upload at least 1 photo)
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowMissingStepsModal(false)}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={() => {
+                setShowMissingStepsModal(false);
+                // Navigate to setup wizard
+                window.location.href = '/business/setup';
+              }}
+              className="gap-2"
+            >
+              Complete Setup
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

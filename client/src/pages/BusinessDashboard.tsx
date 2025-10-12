@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import { useSalonSetupStatus } from "@/hooks/useSalonSetupStatus";
 import {
   SidebarProvider,
   Sidebar,
@@ -45,7 +46,16 @@ import {
   ChevronDown,
   Menu,
   Cog,
-  MapPin
+  MapPin,
+  Sparkles,
+  Bell,
+  Star,
+  Gift,
+  Zap,
+  Crown,
+  UserCircle,
+  LogOut,
+  ChevronRight
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "wouter";
@@ -55,6 +65,7 @@ import FinancialReportingDashboard from "@/components/FinancialReportingDashboar
 import CustomerCommunicationDashboard from "@/components/CustomerCommunicationDashboard";
 import InventoryManagementDashboard from "@/components/InventoryManagementDashboard";
 import CalendarManagement from "@/pages/CalendarManagement";
+import PackageManagement from "@/components/business-dashboard/PackageManagement";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -155,6 +166,9 @@ export default function BusinessDashboard() {
     enabled: !!salonId,
     staleTime: 30000
   });
+
+  // Fetch setup status from new unified API
+  const { data: setupStatus, isLoading: setupStatusLoading } = useSalonSetupStatus(salonId);
 
   // Keep individual data queries for components that still need them
   const { data: salonData } = useQuery<Salon>({
@@ -289,13 +303,13 @@ export default function BusinessDashboard() {
         <div className="text-center">
           <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <h1 className="text-2xl font-bold mb-4">No Business Found</h1>
-          <Link href="/business-setup"><Button>Create Business Profile</Button></Link>
+          <Link href="/business/setup"><Button>Create Business Profile</Button></Link>
         </div>
       </div>
     );
   }
 
-  const handleStepComplete = () => {
+  const handleStepComplete = (data?: any) => {
     // No automatic redirect - let user control navigation
     toast({
       title: "Step Completed",
@@ -330,6 +344,7 @@ export default function BusinessDashboard() {
         { id: "business-info", label: "Business Info", icon: Building, isComplete: isProfileComplete, isSetup: true },
         { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: isProfileComplete, isSetup: true },
         { id: "services", label: "Services & Pricing", icon: Scissors, isComplete: hasServices, isSetup: true },
+        { id: "packages", label: "Package & Combos", icon: Gift, isComplete: false, isSetup: false },
         { id: "staff", label: "Staff Management", icon: Users, isComplete: hasStaff, isSetup: true },
         { id: "resources", label: "Resources & Equipment", icon: Settings, isComplete: false, isSetup: false, isOptional: true },
         { id: "booking-settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings, isSetup: true },
@@ -357,115 +372,228 @@ export default function BusinessDashboard() {
     }
   ];
 
-  // Sidebar navigation component
-  const SidebarNavigation = () => (
-    <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-3 px-3 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Building className="h-4 w-4" />
+  // Stunning Sidebar navigation component with WOW factors
+  const SidebarNavigation = () => {
+    const getGreeting = () => {
+      const hour = new Date().getHours();
+      if (hour < 12) return "Good Morning";
+      if (hour < 17) return "Good Afternoon";
+      return "Good Evening";
+    };
+
+    const servicesCount = services?.length || 0;
+    const staffCount = staff?.length || 0;
+    const todayBookingsCount = todayBookings || 0;
+
+    return (
+      <Sidebar collapsible="icon" className="border-r-0 h-screen flex flex-col">
+        {/* Premium Profile Section - Compact */}
+        <SidebarHeader className="flex-shrink-0 border-none bg-gradient-to-br from-violet-500 via-purple-500 to-pink-500 p-3 pt-4 group-data-[collapsible=icon]:p-2">
+          <div className="flex flex-col gap-2 group-data-[collapsible=icon]:items-center">
+            {/* User Avatar & Greeting */}
+            <div className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center">
+              <div className="relative">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm ring-2 ring-white/40 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:w-8">
+                  <UserCircle className="h-6 w-6 text-white group-data-[collapsible=icon]:h-5 group-data-[collapsible=icon]:w-5" />
+                </div>
+                <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-400 border-2 border-white group-data-[collapsible=icon]:h-2.5 group-data-[collapsible=icon]:w-2.5" />
+              </div>
+              
+              <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
+                <p className="text-[10px] font-medium text-white/90">{getGreeting()}</p>
+                <p className="text-sm font-bold text-white truncate">{user?.username || 'Business Owner'}</p>
+                <p className="text-[10px] text-white/80 truncate flex items-center gap-1">
+                  <Building className="h-2.5 w-2.5" />
+                  {salonData?.name || 'Your Business'}
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Stats - Compact */}
+            <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-white/20 group-data-[collapsible=icon]:hidden">
+              <div className="text-center">
+                <p className="text-base font-bold text-white">{todayBookingsCount}</p>
+                <p className="text-[9px] text-white/80">Today</p>
+              </div>
+              <div className="text-center">
+                <p className="text-base font-bold text-white">{servicesCount}</p>
+                <p className="text-[9px] text-white/80">Services</p>
+              </div>
+              <div className="text-center">
+                <p className="text-base font-bold text-white">{staffCount}</p>
+                <p className="text-[9px] text-white/80">Team</p>
+              </div>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold group-data-[collapsible=icon]:hidden">
-              Business Dashboard
-            </span>
-            <span className="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-              {salonData?.name || 'Professional Management'}
-            </span>
-          </div>
-        </div>
-      </SidebarHeader>
-      <SidebarContent>
-        <ScrollArea className="flex-1">
-          <div className="p-2">
-            <Accordion type="multiple" defaultValue={["overview", "business"]} className="w-full">
-              {navigationSections.map((section) => (
-                section.items.length === 1 ? (
-                  // Single item sections (no accordion)
-                  <div key={section.id} className="mb-2">
-                    <SidebarGroup>
-                      <SidebarGroupContent>
-                        <SidebarMenu>
-                          <SidebarMenuItem>
-                            <SidebarMenuButton
-                              onClick={() => setActiveTab(section.items[0].id)}
-                              isActive={activeTab === section.items[0].id}
-                              tooltip={section.label}
-                              className="w-full justify-start"
-                              data-testid={`nav-${section.items[0].id}`}
-                            >
-                              <section.icon className="h-4 w-4" />
-                              <span className="group-data-[collapsible=icon]:hidden">{section.label}</span>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        </SidebarMenu>
-                      </SidebarGroupContent>
-                    </SidebarGroup>
+        </SidebarHeader>
+
+        <SidebarContent className="flex-1 bg-gradient-to-b from-slate-50 to-white overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="p-3 space-y-1">
+              {/* Quick Actions Panel - Compact */}
+              <div className="mb-3 group-data-[collapsible=icon]:hidden">
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-2 border border-blue-100">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Zap className="h-3.5 w-3.5 text-blue-600" />
+                    <span className="text-[10px] font-semibold text-blue-900">Quick Actions</span>
                   </div>
-                ) : (
-                  // Multi-item sections (with accordion)
-                  <AccordionItem key={section.id} value={section.id} className="border-none">
-                    <AccordionTrigger className="group-data-[collapsible=icon]:justify-center px-3 py-2 hover:no-underline hover:bg-sidebar-accent hover:text-sidebar-accent-foreground rounded-md">
-                      <div className="flex items-center gap-3">
-                        <section.icon className="h-4 w-4" />
-                        <span className="group-data-[collapsible=icon]:hidden text-sm font-medium">
-                          {section.label}
-                        </span>
-                      </div>
-                    </AccordionTrigger>
-                    <AccordionContent className="pb-2">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button 
+                      onClick={() => setActiveTab('calendar')}
+                      className="flex items-center justify-center gap-1 px-2 py-1 bg-white hover:bg-blue-50 rounded-md border border-blue-100 transition-all text-[10px] font-medium text-blue-700 hover:shadow-sm"
+                    >
+                      <Calendar className="h-3 w-3" />
+                      <span>Book</span>
+                    </button>
+                    <button 
+                      onClick={() => setActiveTab('services')}
+                      className="flex items-center justify-center gap-1 px-2 py-1 bg-white hover:bg-blue-50 rounded-md border border-blue-100 transition-all text-[10px] font-medium text-blue-700 hover:shadow-sm"
+                    >
+                      <Scissors className="h-3 w-3" />
+                      <span>Services</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <Accordion type="multiple" defaultValue={["overview", "business", "operations"]} className="w-full space-y-1">
+                {navigationSections.map((section) => (
+                  section.items.length === 1 ? (
+                    // Single item sections (no accordion)
+                    <div key={section.id}>
                       <SidebarGroup>
                         <SidebarGroupContent>
                           <SidebarMenu>
-                            {section.items.map((item) => (
-                              <SidebarMenuItem key={item.id}>
-                                <SidebarMenuButton
-                                  onClick={() => setActiveTab(item.id)}
-                                  isActive={activeTab === item.id}
-                                  tooltip={item.label}
-                                  className="w-full justify-start ml-6 group-data-[collapsible=icon]:ml-0"
-                                  data-testid={`nav-${item.id}`}
-                                >
-                                  <item.icon className="h-4 w-4" />
-                                  <span className="group-data-[collapsible=icon]:hidden flex items-center gap-2">
-                                    {item.label}
-                                    <div className="ml-auto flex items-center gap-1">
-                                      {item.isComplete && (
-                                        <CheckCircle className="h-3 w-3 text-green-500" title="Complete" />
-                                      )}
-                                      {item.isSetup && !item.isComplete && (
-                                        <div className="h-2 w-2 rounded-full bg-orange-500" title="Setup required" />
-                                      )}
-                                      {item.isOptional && (
-                                        <span className="text-xs text-blue-500" title="Optional">(Optional)</span>
-                                      )}
-                                      {!item.isSetup && !item.isOptional && item.isComplete === false && (
-                                        <span className="text-xs text-red-500">*</span>
-                                      )}
-                                      {'progress' in item && item.progress !== undefined && item.progress < 100 && (
-                                        <span className="text-xs text-amber-500">({Math.round(item.progress)}%)</span>
-                                      )}
-                                      {'progress' in item && item.progress === 100 && (
-                                        <CheckCircle className="h-3 w-3 text-green-500" />
-                                      )}
-                                    </div>
-                                  </span>
-                                </SidebarMenuButton>
-                              </SidebarMenuItem>
-                            ))}
+                            <SidebarMenuItem>
+                              <SidebarMenuButton
+                                onClick={() => setActiveTab(section.items[0].id)}
+                                isActive={activeTab === section.items[0].id}
+                                tooltip={section.label}
+                                className={`w-full justify-start h-10 rounded-lg transition-all ${
+                                  activeTab === section.items[0].id 
+                                    ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-md hover:shadow-lg' 
+                                    : 'hover:bg-violet-50 hover:text-violet-700'
+                                }`}
+                                data-testid={`nav-${section.items[0].id}`}
+                              >
+                                <section.icon className="h-4 w-4" />
+                                <span className="group-data-[collapsible=icon]:hidden font-medium">{section.label}</span>
+                                {activeTab === section.items[0].id && (
+                                  <ChevronRight className="h-4 w-4 ml-auto group-data-[collapsible=icon]:hidden" />
+                                )}
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
                           </SidebarMenu>
                         </SidebarGroupContent>
                       </SidebarGroup>
-                    </AccordionContent>
-                  </AccordionItem>
-                )
-              ))}
-            </Accordion>
-          </div>
-        </ScrollArea>
-      </SidebarContent>
-    </Sidebar>
-  );
+                    </div>
+                  ) : (
+                    // Multi-item sections (with accordion)
+                    <AccordionItem key={section.id} value={section.id} className="border-none">
+                      <AccordionTrigger className="group-data-[collapsible=icon]:justify-center px-3 py-2 hover:no-underline hover:bg-violet-50 rounded-lg transition-colors data-[state=open]:bg-violet-50">
+                        <div className="flex items-center gap-2">
+                          <section.icon className="h-4 w-4 text-violet-600" />
+                          <span className="group-data-[collapsible=icon]:hidden text-sm font-semibold text-slate-700">
+                            {section.label}
+                          </span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-2 pt-1">
+                        <SidebarGroup>
+                          <SidebarGroupContent>
+                            <SidebarMenu className="space-y-0.5">
+                              {section.items.map((item) => {
+                                const isActive = activeTab === item.id;
+                                return (
+                                  <SidebarMenuItem key={item.id}>
+                                    <SidebarMenuButton
+                                      onClick={() => setActiveTab(item.id)}
+                                      isActive={isActive}
+                                      tooltip={item.label}
+                                      className={`w-full justify-start ml-4 group-data-[collapsible=icon]:ml-0 h-9 rounded-lg transition-all ${
+                                        isActive 
+                                          ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-sm' 
+                                          : 'hover:bg-violet-50/50'
+                                      }`}
+                                      data-testid={`nav-${item.id}`}
+                                    >
+                                      <item.icon className="h-4 w-4" />
+                                      <span className="group-data-[collapsible=icon]:hidden flex items-center justify-between w-full text-sm">
+                                        <span className={isActive ? 'font-medium' : ''}>{item.label}</span>
+                                        <div className="flex items-center gap-1.5">
+                                          {item.isComplete && (
+                                            <div className="flex items-center justify-center h-5 w-5 rounded-full bg-green-500/20">
+                                              <CheckCircle className="h-3 w-3 text-green-600" title="Complete" />
+                                            </div>
+                                          )}
+                                          {item.isSetup && !item.isComplete && (
+                                            <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" title="Setup required" />
+                                          )}
+                                          {item.isOptional && (
+                                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-blue-50 text-blue-600 border-blue-200">
+                                              Optional
+                                            </Badge>
+                                          )}
+                                          {'progress' in item && item.progress !== undefined && item.progress < 100 && (
+                                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-amber-50 text-amber-600 border-amber-200">
+                                              {Math.round(item.progress)}%
+                                            </Badge>
+                                          )}
+                                          {'progress' in item && item.progress === 100 && (
+                                            <div className="flex items-center justify-center h-5 w-5 rounded-full bg-green-500/20">
+                                              <CheckCircle className="h-3 w-3 text-green-600" />
+                                            </div>
+                                          )}
+                                          {isActive && (
+                                            <ChevronRight className="h-3 w-3 ml-1" />
+                                          )}
+                                        </div>
+                                      </span>
+                                    </SidebarMenuButton>
+                                  </SidebarMenuItem>
+                                );
+                              })}
+                            </SidebarMenu>
+                          </SidebarGroupContent>
+                        </SidebarGroup>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )
+                ))}
+              </Accordion>
+
+              {/* Premium Features Teaser - Compact */}
+              <div className="mt-3 group-data-[collapsible=icon]:hidden">
+                <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-pink-50 rounded-lg p-2 border border-amber-100">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Crown className="h-3.5 w-3.5 text-amber-600" />
+                    <span className="text-[10px] font-semibold text-amber-900">Premium Features</span>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5 text-[10px] text-amber-800">
+                      <Star className="h-2.5 w-2.5 text-amber-500" />
+                      <span>Advanced Analytics</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-amber-800">
+                      <Gift className="h-2.5 w-2.5 text-amber-500" />
+                      <span>Loyalty Programs</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-amber-800">
+                      <Sparkles className="h-2.5 w-2.5 text-amber-500" />
+                      <span>AI Recommendations</span>
+                    </div>
+                    <Button size="sm" variant="default" className="w-full mt-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm h-6 text-[10px]">
+                      Upgrade Now
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
+        </SidebarContent>
+      </Sidebar>
+    );
+  };
 
   // Mobile navigation component
   const MobileNavigation = () => (
@@ -570,8 +698,8 @@ export default function BusinessDashboard() {
     if (activeTab === "overview") {
       return (
         <div className="p-6 space-y-6">
-          {/* Setup Progress */}
-          {completionPercentage < 100 && (
+          {/* Setup Progress - Using Unified Setup Status API */}
+          {setupStatus && !setupStatus.isSetupComplete && (
             <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950">
               <CardHeader>
                 <div className="flex items-center gap-3">
@@ -579,7 +707,7 @@ export default function BusinessDashboard() {
                   <div>
                     <CardTitle className="text-blue-900 dark:text-blue-100">Complete Setup</CardTitle>
                     <p className="text-blue-700 dark:text-blue-300 text-sm">
-                      Finish your profile to start accepting bookings
+                      Complete all {setupStatus.totalSteps} steps to publish your salon
                     </p>
                   </div>
                 </div>
@@ -587,44 +715,73 @@ export default function BusinessDashboard() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                    Progress: {completionPercentage}% Complete (6 mandatory steps)
+                    Progress: {setupStatus.completedSteps} of {setupStatus.totalSteps} steps complete ({setupStatus.progress}%)
                   </span>
                 </div>
-                <Progress value={completionPercentage} className="h-2" />
+                <Progress value={setupStatus.progress} className="h-2" />
                 
-                <div className="text-xs text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900 p-2 rounded">
-                  💡 <strong>Tip:</strong> You can publish your salon with just the 6 mandatory steps. Resources & Equipment and Payment Setup can be added later.
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-blue-900 dark:text-blue-100">Required Steps:</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.businessInfo.completed ? '✓' : '○'} Business Info
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.locationContact.completed ? '✓' : '○'} Location & Contact
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.services.completed ? '✓' : '○'} Services ({setupStatus.steps.services.count})
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.staff.completed ? '✓' : '○'} Team Members ({setupStatus.steps.staff.count})
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.bookingSettings.completed ? '✓' : '○'} Booking Settings
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.paymentSetup.completed ? '✓' : '○'} Payment Setup
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {setupStatus.steps.media.completed ? '✓' : '○'} Photos ({setupStatus.steps.media.count})
+                    </div>
+                    <div className="flex items-center gap-1 text-gray-500">
+                      {setupStatus.steps.resources.completed ? '✓' : '○'} Resources (optional)
+                    </div>
+                  </div>
                 </div>
                 
                 <div className="flex items-center justify-between pt-2">
-                  <div>
-                    <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                      Next: {
-                        nextStep ? (
-                          nextStep === 'business-info' ? 'Complete Business Info' :
-                          nextStep === 'location-contact' ? 'Add Location & Contact' :
-                          nextStep === 'services' ? 'Add Services & Pricing' :
-                          nextStep === 'staff' ? 'Add Staff Management' :
-                          nextStep === 'resources' ? 'Setup Resources & Equipment' :
-                          nextStep === 'booking-settings' ? 'Configure Booking Settings' :
-                          nextStep === 'payment-setup' ? 'Setup Payment Processing' :
-                          nextStep === 'media' ? 'Add Media Gallery' :
-                          nextStep === 'publish' ? 'Publish Business' :
-                          'Continue Setup'
-                        ) : 'Setup Complete'
-                      }
-                    </p>
-                  </div>
-                  {nextStep && (
+                  <p className="text-xs text-blue-600 dark:text-blue-400">
+                    💡 Complete all steps to publish your salon
+                  </p>
+                  <Link href="/business/setup">
                     <Button 
-                      onClick={() => setActiveTab(nextStep)}
                       size="sm"
                       className="bg-blue-600 hover:bg-blue-700"
                     >
                       Continue Setup
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
-                  )}
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Setup Complete Message */}
+          {setupStatus && setupStatus.isSetupComplete && (
+            <Card className="border-green-200 bg-green-50 dark:bg-green-950">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="h-6 w-6 text-green-600" />
+                  <div>
+                    <p className="font-medium text-green-900 dark:text-green-100">
+                      🎉 Setup Complete!
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Your salon profile is ready to go live
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1140,6 +1297,15 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle packages tab
+    if (activeTab === "packages") {
+      return (
+        <div className="p-6">
+          <PackageManagement salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     // Handle calendar tab
     if (activeTab === "calendar") {
       return (
@@ -1167,36 +1333,65 @@ export default function BusinessDashboard() {
 
   return (
     <SidebarProvider defaultOpen={true}>
-      <div className="min-h-screen bg-background flex w-full">
+      <div className="h-screen bg-background flex w-full overflow-hidden">
         {/* Desktop Sidebar */}
         <SidebarNavigation />
         
         {/* Main Content */}
-        <SidebarInset className="flex-1">
-          {/* Header */}
-          <header className="flex h-16 items-center gap-3 border-b bg-sidebar px-4 md:px-6">
-            <div className="flex items-center gap-3">
-              <SidebarTrigger className="md:hidden" />
-              <MobileNavigation />
+        <SidebarInset className="flex-1 flex flex-col">
+          {/* Premium Header with User Name */}
+          <header className="flex h-20 items-center justify-between gap-4 border-b bg-gradient-to-r from-white via-violet-50/30 to-pink-50/30 px-4 md:px-8 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
+                <SidebarTrigger className="md:hidden" />
+                <MobileNavigation />
+              </div>
               
               <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground md:hidden">
-                  <Building className="h-4 w-4" />
+                <div className="hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-purple-500 text-white shadow-md">
+                  <Building className="h-5 w-5" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-semibold md:text-xl">Business Dashboard</h1>
-                  <p className="text-xs text-muted-foreground md:text-sm">Professional salon management</p>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                      {user?.username || 'Business Owner'}
+                    </h1>
+                    <div className="h-4 w-4 rounded-full bg-green-500 ring-2 ring-green-100" title="Online" />
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <Building className="h-3.5 w-3.5 text-violet-500" />
+                    {salonData?.name || 'Your Business'}
+                    {salonData?.city && (
+                      <>
+                        <span className="text-slate-300">•</span>
+                        <MapPin className="h-3.5 w-3.5 text-pink-500" />
+                        {salonData.city}
+                      </>
+                    )}
+                  </p>
                 </div>
               </div>
             </div>
             
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {completionPercentage === 100 && (
-                <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                <Badge className="bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0 shadow-md hidden md:flex">
                   <CheckCircle className="h-3 w-3 mr-1" />
                   Setup Complete
                 </Badge>
               )}
+              {completionPercentage < 100 && (
+                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700 hidden md:flex">
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  {Math.round(completionPercentage)}% Complete
+                </Badge>
+              )}
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-violet-100">
+                <Bell className="h-4 w-4 text-slate-600" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-violet-100">
+                <Settings className="h-4 w-4 text-slate-600" />
+              </Button>
             </div>
           </header>
 

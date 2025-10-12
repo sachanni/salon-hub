@@ -36,12 +36,6 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
-    proxy: {
-      '/api': {
-        target: 'http://localhost:5001',
-        changeOrigin: true,
-        secure: false,
-      },
-    },
+    // No proxy needed - Express routes are integrated via middlewareMode in server/vite.ts
   },
 });

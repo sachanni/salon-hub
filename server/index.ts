@@ -4,8 +4,11 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Increased limit to support batch image uploads (base64-encoded)
+// TODO: Migrate to multipart/form-data streaming for better performance and security
+// Current limit: 20MB allows ~6-8 compressed images, reduces DoS risk vs 50MB
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: false, limit: '20mb' }));
 
 app.use((req, res, next) => {
   const start = Date.now();

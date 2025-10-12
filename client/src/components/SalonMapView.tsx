@@ -96,7 +96,8 @@ const MapComponent: React.FC<{
   onSalonClick: (salon: Salon) => void;
   selectedSalonId?: string;
   searchLocationName?: string;
-}> = ({ salons, userLocation, searchLocation, onSalonClick, selectedSalonId, searchLocationName = "Nirala Estate, Greater Noida" }) => {
+  searchRadius?: number;
+}> = ({ salons, userLocation, searchLocation, onSalonClick, selectedSalonId, searchLocationName = "Nirala Estate, Greater Noida", searchRadius = 1 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const [mapLoading, setMapLoading] = useState(true);
@@ -104,6 +105,17 @@ const MapComponent: React.FC<{
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
   const salonMarkersRef = useRef<Record<string, L.Marker>>({});
+
+  // Calculate appropriate zoom level based on search radius
+  const getZoomLevelForRadius = (radiusKm: number): number => {
+    // Map radius to zoom levels for optimal viewing
+    if (radiusKm <= 0.3) return 16;      // 300m - very close zoom
+    if (radiusKm <= 0.5) return 15;      // 500m - close zoom
+    if (radiusKm <= 1) return 14;        // 1km - medium-close zoom
+    if (radiusKm <= 2) return 13;        // 2km - medium zoom
+    if (radiusKm <= 5) return 12;        // 5km - wider zoom
+    return 11;                            // Default for larger areas
+  };
 
   // Retry mechanism with exponential backoff (Urban Company style)
   const retryMapInitialization = useCallback(async () => {
@@ -146,7 +158,9 @@ const MapComponent: React.FC<{
         center = [userLocation.lat, userLocation.lng];
       }
 
-      const map = L.map(mapRef.current).setView(center, 13);
+      // Get appropriate zoom level based on search radius
+      const zoomLevel = getZoomLevelForRadius(searchRadius);
+      const map = L.map(mapRef.current).setView(center, zoomLevel);
 
       // Add tile layer with error handling (Fresha style)
       const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -204,58 +218,94 @@ const MapComponent: React.FC<{
     }
   }, [salons, userLocation, searchLocation]);
 
+  // Update map zoom when radius changes
+  useEffect(() => {
+    if (!mapInstance || !searchRadius) return;
+    
+    const newZoomLevel = getZoomLevelForRadius(searchRadius);
+    const currentZoom = mapInstance.getZoom();
+    
+    // Only update if zoom level actually changed
+    if (currentZoom !== newZoomLevel) {
+      // Disable animation to prevent race condition with marker updates
+      mapInstance.setZoom(newZoomLevel, { animate: false });
+    }
+  }, [mapInstance, searchRadius, getZoomLevelForRadius]);
+
   // Add markers when map is ready
   useEffect(() => {
     if (!mapInstance) return;
 
-    // Clear existing markers
-    mapInstance.eachLayer((layer) => {
-      if (layer instanceof L.Marker) {
-        mapInstance.removeLayer(layer);
+    // Ensure map container is mounted before adding markers
+    try {
+      const container = mapInstance.getContainer();
+      if (!container || !container.parentElement) {
+        console.warn('Map container not mounted yet, skipping marker addition');
+        return;
       }
-    });
 
-  // Add user location marker (search location)
-  if (searchLocation && mapInstance) {
-    const userIcon = L.divIcon({
-      html: `
-        <div style="position: relative; width: 32px; height: 32px;">
-          <!-- Outer pulsing ring -->
-          <div style="position: absolute; top: 0; left: 0; width: 32px; height: 32px; background-color: #60a5fa; border-radius: 50%; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite; opacity: 0.75;"></div>
-          <!-- Inner pulsing ring -->
-          <div style="position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; background-color: #3b82f6; border-radius: 50%; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
-          <!-- Center dot -->
-          <div style="position: relative; width: 16px; height: 16px; background-color: white; border-radius: 50%; border: 2px solid #2563eb; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; align-items: center; justify-content: center; margin: 8px auto;">
-            <div style="width: 8px; height: 8px; background-color: #2563eb; border-radius: 50%;"></div>
+      // Clear existing markers safely
+      const markersToRemove: L.Marker[] = [];
+      mapInstance.eachLayer((layer) => {
+        if (layer instanceof L.Marker) {
+          markersToRemove.push(layer);
+        }
+      });
+      
+      // Remove markers in a separate loop to avoid iteration issues
+      markersToRemove.forEach((marker) => {
+        try {
+          if (mapInstance.hasLayer(marker)) {
+            mapInstance.removeLayer(marker);
+          }
+        } catch (e) {
+          // Silently handle marker removal errors
+          console.debug('Marker removal warning:', e);
+        }
+      });
+      
+      // Clear marker references
+      salonMarkersRef.current = {};
+
+      // Add user location marker (search location)
+      if (searchLocation) {
+        const userIcon = L.divIcon({
+          html: `
+            <div style="position: relative; width: 32px; height: 32px;">
+              <!-- Outer pulsing ring -->
+              <div style="position: absolute; top: 0; left: 0; width: 32px; height: 32px; background-color: #60a5fa; border-radius: 50%; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite; opacity: 0.75;"></div>
+              <!-- Inner pulsing ring -->
+              <div style="position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; background-color: #3b82f6; border-radius: 50%; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
+              <!-- Center dot -->
+              <div style="position: relative; width: 16px; height: 16px; background-color: white; border-radius: 50%; border: 2px solid #2563eb; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; align-items: center; justify-content: center; margin: 8px auto;">
+                <div style="width: 8px; height: 8px; background-color: #2563eb; border-radius: 50%;"></div>
+              </div>
+            </div>
+          `,
+          className: 'custom-user-marker',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
+        
+        const userMarker = L.marker([searchLocation.lat, searchLocation.lng], { icon: userIcon })
+          .addTo(mapInstance);
+        
+        userMarker.bindPopup(`
+          <div class="text-center min-w-[200px]">
+            <div class="flex items-center justify-center mb-2">
+              <div class="w-3 h-3 bg-blue-500 rounded-full animate-pulse mr-2"></div>
+              <div class="font-semibold text-blue-600">Your Search Location</div>
+            </div>
+            <div class="text-sm text-gray-600 mb-2">You're searching from here</div>
+            <div class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded mb-1">
+              <div class="font-medium">${searchLocationName}</div>
+              <div class="text-gray-400">${searchLocation.lat.toFixed(4)}, ${searchLocation.lng.toFixed(4)}</div>
+            </div>
           </div>
-        </div>
-      `,
-      className: 'custom-user-marker',
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
-    });
-    
-    const userMarker = L.marker([searchLocation.lat, searchLocation.lng], { icon: userIcon })
-      .addTo(mapInstance);
-    
-    userMarker.bindPopup(`
-      <div class="text-center min-w-[200px]">
-        <div class="flex items-center justify-center mb-2">
-          <div class="w-3 h-3 bg-blue-500 rounded-full animate-pulse mr-2"></div>
-          <div class="font-semibold text-blue-600">Your Search Location</div>
-        </div>
-        <div class="text-sm text-gray-600 mb-2">You're searching from here</div>
-        <div class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded mb-1">
-          <div class="font-medium">${searchLocationName}</div>
-          <div class="text-gray-400">${searchLocation.lat.toFixed(4)}, ${searchLocation.lng.toFixed(4)}</div>
-        </div>
-      </div>
-    `);
-  }
+        `);
+      }
 
-
-    // Add salon markers
-    if (mapInstance) {
+      // Add salon markers
       salons.forEach((salon, index) => {
         const isSelected = selectedSalonId === salon.id;
         const salonIcon = L.divIcon({
@@ -277,35 +327,31 @@ const MapComponent: React.FC<{
         });
 
         const salonMarker = L.marker([parseFloat(salon.latitude), parseFloat(salon.longitude)], { icon: salonIcon });
+        salonMarker.addTo(mapInstance);
         
-        // Double-check mapInstance is still valid before adding marker
-        if (mapInstance) {
-          salonMarker.addTo(mapInstance);
-          
-          // Store marker reference for zoom functionality
-          salonMarkersRef.current[salon.id] = salonMarker;
-          
-          const popupContent = `
-            <div class="min-w-[200px]">
-              <div class="font-semibold text-gray-900 mb-1">${salon.name}</div>
-              <div class="text-sm text-gray-600 mb-2">${salon.address}</div>
-              <div class="flex items-center gap-2 mb-2">
-                <div class="flex items-center gap-1">
-                  <span class="text-sm">${parseFloat(salon.rating).toFixed(1)} (${salon.reviewCount})</span>
-                </div>
-                <div class="text-sm text-gray-500">
-                  ${salon.distance_km ? (salon.distance_km < 1 ? (salon.distance_km * 1000).toFixed(0) + 'm away' : salon.distance_km.toFixed(1) + 'km away') : 'Distance unknown'}
-                </div>
+        // Store marker reference for zoom functionality
+        salonMarkersRef.current[salon.id] = salonMarker;
+        
+        const popupContent = `
+          <div class="min-w-[200px]">
+            <div class="font-semibold text-gray-900 mb-1">${salon.name}</div>
+            <div class="text-sm text-gray-600 mb-2">${salon.address}</div>
+            <div class="flex items-center gap-2 mb-2">
+              <div class="flex items-center gap-1">
+                <span class="text-sm">${parseFloat(salon.rating).toFixed(1)} (${salon.reviewCount})</span>
               </div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs bg-gray-100 px-2 py-1 rounded">${salon.category.replace('_', ' ')}</span>
-                <button onclick="window.salonClickHandler && window.salonClickHandler('${salon.id}')" class="text-xs bg-blue-500 text-white px-2 py-1 rounded">View Details</button>
+              <div class="text-sm text-gray-500">
+                ${salon.distance_km ? (salon.distance_km < 1 ? (salon.distance_km * 1000).toFixed(0) + 'm away' : salon.distance_km.toFixed(1) + 'km away') : 'Distance unknown'}
               </div>
             </div>
-          `;
-          salonMarker.bindPopup(popupContent);
-          salonMarker.on('click', () => onSalonClick(salon));
-        }
+            <div class="flex items-center justify-between">
+              <span class="text-xs bg-gray-100 px-2 py-1 rounded">${salon.category.replace('_', ' ')}</span>
+              <button onclick="window.salonClickHandler && window.salonClickHandler('${salon.id}')" class="text-xs bg-blue-500 text-white px-2 py-1 rounded">View Details</button>
+            </div>
+          </div>
+        `;
+        salonMarker.bindPopup(popupContent);
+        salonMarker.on('click', () => onSalonClick(salon));
       });
 
       // Set up global handler for popup buttons
@@ -313,6 +359,9 @@ const MapComponent: React.FC<{
         const salon = salons.find(s => s.id === salonId);
         if (salon) onSalonClick(salon);
       };
+    } catch (error) {
+      console.error('Error adding markers to map:', error);
+      return;
     }
 
   }, [mapInstance, salons, userLocation, searchLocation, selectedSalonId, onSalonClick]);
@@ -1140,6 +1189,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                 onSalonClick={handleSalonClick}
                 selectedSalonId={selectedSalonId || undefined}
                 searchLocationName={searchLocationName}
+                searchRadius={searchParams.radius}
               />
             </ErrorBoundary>
           ) : (

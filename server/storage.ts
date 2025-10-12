@@ -2,7 +2,10 @@ import {
   type User, type InsertUser, type UpsertUser,
   type UserSavedLocation, type InsertUserSavedLocation,
   type Service, type InsertService,
+  type ServicePackage, type InsertServicePackage,
+  type PackageService, type InsertPackageService,
   type Booking, type InsertBooking,
+  type BookingService, type InsertBookingService,
   type Payment, type InsertPayment,
   type Salon, type InsertSalon,
   type Role, type InsertRole,
@@ -60,7 +63,7 @@ import {
   type OptimizationRecommendation, type InsertOptimizationRecommendation,
   type AutomatedActionLog, type InsertAutomatedActionLog,
   type CampaignOptimizationInsight, type InsertCampaignOptimizationInsight,
-  users, userSavedLocations, services, bookings, payments, salons, roles, organizations, userRoles, orgUsers,
+  users, userSavedLocations, services, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
   // Financial system tables
@@ -1276,12 +1279,15 @@ export class DatabaseStorage implements IStorage {
       const maxLng = longitude + lngDegreeOffset;
 
       // Get salons within the bounding box first (much faster)
+      // JOIN with publish_state to only show published salons
       const results = await db
         .select()
         .from(salons)
+        .innerJoin(publishState, eq(salons.id, publishState.salonId))
         .where(
           and(
             eq(salons.isActive, 1),
+            eq(publishState.isPublished, 1), // Only show published salons
             // Bounding box prefilter for performance
             sql`CAST(${salons.latitude} AS DECIMAL) >= ${minLat}`,
             sql`CAST(${salons.latitude} AS DECIMAL) <= ${maxLat}`,
@@ -1296,7 +1302,8 @@ export class DatabaseStorage implements IStorage {
 
       // Calculate Haversine distance in JavaScript and filter by actual distance
       const earthRadiusKm = 6371;
-      const salonsWithDistance = results.map(salon => {
+      const salonsWithDistance = results.map(result => {
+        const salon = result.salons; // Extract salon from joined result
         const salonLat = parseFloat(salon.latitude || '0');
         const salonLng = parseFloat(salon.longitude || '0');
         
@@ -1386,6 +1393,171 @@ export class DatabaseStorage implements IStorage {
 
   async deleteService(id: string): Promise<void> {
     await db.update(services).set({ isActive: 0 }).where(eq(services.id, id));
+  }
+
+  // Package/Combo operations
+  async getPackage(id: string) {
+    const [pkg] = await db.select().from(servicePackages).where(eq(servicePackages.id, id));
+    return pkg || undefined;
+  }
+
+  async getPackagesBySalonId(salonId: string) {
+    return await db.select().from(servicePackages).where(and(
+      eq(servicePackages.salonId, salonId),
+      eq(servicePackages.isActive, 1)
+    ));
+  }
+
+  async getPackageWithServices(packageId: string) {
+    // Get package details
+    const pkg = await this.getPackage(packageId);
+    if (!pkg) return undefined;
+
+    // Get all services in this package
+    const packageSvcs = await db.select({
+      packageService: packageServices,
+      service: services
+    })
+    .from(packageServices)
+    .innerJoin(services, eq(packageServices.serviceId, services.id))
+    .where(eq(packageServices.packageId, packageId))
+    .orderBy(packageServices.sequenceOrder);
+
+    return {
+      ...pkg,
+      services: packageSvcs.map(ps => ({
+        ...ps.service,
+        sequenceOrder: ps.packageService.sequenceOrder
+      }))
+    };
+  }
+
+  async createPackage(packageData: any) {
+    const [newPackage] = await db.insert(servicePackages).values(packageData).returning();
+    return newPackage;
+  }
+
+  async updatePackage(id: string, updates: any) {
+    await db.update(servicePackages).set({ ...updates, updatedAt: new Date() }).where(eq(servicePackages.id, id));
+  }
+
+  async deletePackage(id: string) {
+    await db.update(servicePackages).set({ isActive: 0 }).where(eq(servicePackages.id, id));
+  }
+
+  async addServiceToPackage(data: any) {
+    const [packageService] = await db.insert(packageServices).values(data).returning();
+    return packageService;
+  }
+
+  async removeAllServicesFromPackage(packageId: string) {
+    await db.delete(packageServices).where(eq(packageServices.packageId, packageId));
+  }
+
+  // Resilient transaction helper with retry logic for transient failures
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    maxAttempts: number = 3,
+    baseDelay: number = 100
+  ): Promise<T> {
+    let lastError: Error | undefined;
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check if error is transient (connection/WebSocket errors)
+        const isTransient = 
+          error.message?.includes('WebSocket') ||
+          error.message?.includes('fetch failed') ||
+          error.message?.includes('ECONNREFUSED') ||
+          error.message?.includes('ETIMEDOUT') ||
+          error.code === '57014' || // query_canceled
+          error.code === '57P01' || // admin_shutdown
+          error.code === '08006';   // connection_failure
+        
+        // Don't retry if it's not a transient error
+        if (!isTransient) {
+          throw error;
+        }
+        
+        // Don't retry on last attempt
+        if (attempt === maxAttempts) {
+          console.error(`Transaction failed after ${maxAttempts} attempts:`, error.message);
+          throw error;
+        }
+        
+        // Calculate delay with exponential backoff + jitter
+        const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 50;
+        console.warn(`Transaction attempt ${attempt} failed (transient error), retrying in ${Math.round(delay)}ms...`);
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError || new Error('Transaction failed');
+  }
+
+  // Transactional package operations - ensures atomicity for create/update with services
+  async createPackageWithServices(packageData: any, serviceIds: string[], salonId: string) {
+    return await this.withRetry(async () => {
+      return await db.transaction(async (tx) => {
+        // Create the package
+        const [newPackage] = await tx.insert(servicePackages).values(packageData).returning();
+        
+        // Add all services to the package
+        for (let i = 0; i < serviceIds.length; i++) {
+          await tx.insert(packageServices).values({
+            packageId: newPackage.id,
+            serviceId: serviceIds[i],
+            salonId,
+            sequenceOrder: i + 1
+          });
+        }
+        
+        return newPackage;
+      });
+    });
+  }
+
+  async updatePackageWithServices(packageId: string, packageData: any, serviceIds: string[] | null, salonId: string) {
+    return await this.withRetry(async () => {
+      return await db.transaction(async (tx) => {
+        // Update the package
+        await tx.update(servicePackages).set({ ...packageData, updatedAt: new Date() }).where(eq(servicePackages.id, packageId));
+        
+        // Service update behavior:
+        // - serviceIds = null/undefined: don't modify services at all (metadata-only update)
+        // - serviceIds = [] (empty array): remove all services from package
+        // - serviceIds = [id1, id2, ...]: replace all services with new list
+        if (serviceIds !== null && serviceIds !== undefined) {
+          // Always remove all existing services when serviceIds is explicitly provided
+          await tx.delete(packageServices).where(eq(packageServices.packageId, packageId));
+          
+          // Add new services only if the array is not empty
+          if (serviceIds.length > 0) {
+            for (let i = 0; i < serviceIds.length; i++) {
+              await tx.insert(packageServices).values({
+                packageId,
+                serviceId: serviceIds[i],
+                salonId,
+                sequenceOrder: i + 1
+              });
+            }
+          }
+        }
+        
+        // Return the updated package
+        const [updatedPackage] = await tx.select().from(servicePackages).where(eq(servicePackages.id, packageId));
+        if (!updatedPackage) {
+          throw new Error('Package not found');
+        }
+        return updatedPackage;
+      });
+    });
   }
 
   // Booking operations
@@ -6215,14 +6387,14 @@ async function initializeSalonsAndServices() {
         // Artisan Theory Salon images
         { 
           salonId: createdSalons[0].id, 
-          type: 'image', 
+          assetType: 'gallery', 
           url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop&crop=center', 
           altText: 'Artisan Theory Salon interior', 
           isPrimary: 1 
         },
         { 
           salonId: createdSalons[0].id, 
-          type: 'image', 
+          assetType: 'gallery', 
           url: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400&h=300&fit=crop&crop=center', 
           altText: 'Hair styling station', 
           isPrimary: 0 
@@ -6231,14 +6403,14 @@ async function initializeSalonsAndServices() {
         // LO Spa & Nails images
         { 
           salonId: createdSalons[1].id, 
-          type: 'image', 
+          assetType: 'gallery', 
           url: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?w=400&h=300&fit=crop&crop=center', 
           altText: 'LO Spa & Nails interior', 
           isPrimary: 1 
         },
         { 
           salonId: createdSalons[1].id, 
-          type: 'image', 
+          assetType: 'gallery', 
           url: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?w=400&h=300&fit=crop&crop=center', 
           altText: 'Nail art station', 
           isPrimary: 0 
@@ -6247,14 +6419,14 @@ async function initializeSalonsAndServices() {
         // Tranquil Spa Retreat images
         { 
           salonId: createdSalons[2].id, 
-          type: 'image', 
+          assetType: 'gallery', 
           url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop&crop=center', 
           altText: 'Tranquil Spa Retreat interior', 
           isPrimary: 1 
         },
         { 
           salonId: createdSalons[2].id, 
-          type: 'image', 
+          assetType: 'gallery', 
           url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop&crop=center', 
           altText: 'Spa treatment room', 
           isPrimary: 0 

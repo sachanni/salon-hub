@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Search, MapPin, Calendar, Clock, Navigation, X } from 'lucide-react';
+import { Search, MapPin, Calendar, Clock, Navigation, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -26,15 +26,109 @@ interface FreshaSearchBarProps {
   }>;
 }
 
-const serviceCategories = [
-  { id: 'hair', name: 'Hair', icon: '💇' },
-  { id: 'nails', name: 'Nails', icon: '💅' },
-  { id: 'skincare', name: 'Skincare', icon: '✨' },
-  { id: 'massage', name: 'Massage', icon: '💆' },
-  { id: 'eyebrows', name: 'Eyebrows', icon: '👁️' },
-  { id: 'lashes', name: 'Lashes', icon: '👀' },
-  { id: 'waxing', name: 'Waxing', icon: '🪶' },
-  { id: 'makeup', name: 'Makeup', icon: '💄' }
+// Two-level service structure (Fresha-style)
+interface ServiceCategory {
+  id: string;
+  name: string;
+  icon: string;
+  isCategory: boolean;
+  subServices?: string[];
+}
+
+interface Service {
+  id: string;
+  name: string;
+  icon: string;
+  categoryId: string;
+  isCategory: false;
+}
+
+// Main categories (Level 1)
+const mainCategories: ServiceCategory[] = [
+  { id: 'hair', name: 'Hair & styling', icon: '💇', isCategory: true, subServices: [] },
+  { id: 'nails', name: 'Nails', icon: '💅', isCategory: true, subServices: [] },
+  { id: 'skincare', name: 'Skincare & Facials', icon: '✨', isCategory: true, subServices: [] },
+  { id: 'massage', name: 'Massage & Spa', icon: '💆', isCategory: true, subServices: [] },
+  { id: 'eyes', name: 'Eyebrows & Lashes', icon: '👁️', isCategory: true, subServices: [] },
+  { id: 'hair-removal', name: 'Hair Removal', icon: '🪶', isCategory: true, subServices: [] },
+  { id: 'makeup', name: 'Makeup', icon: '💄', isCategory: true, subServices: [] },
+  { id: 'body', name: 'Body Treatments', icon: '🧖', isCategory: true, subServices: [] },
+  { id: 'mens', name: "Men's Grooming", icon: '💈', isCategory: true, subServices: [] },
+  { id: 'wellness', name: 'Wellness & Other', icon: '🧘‍♀️', isCategory: true, subServices: [] },
+];
+
+// Sub-services (Level 2) organized by category
+const subServices: Service[] = [
+  // Hair & styling sub-services
+  { id: 'haircut', name: 'Haircut & Styling', icon: '✂️', categoryId: 'hair', isCategory: false },
+  { id: 'hair-color', name: 'Hair Coloring', icon: '🎨', categoryId: 'hair', isCategory: false },
+  { id: 'hair-treatment', name: 'Hair Treatment & Spa', icon: '💆', categoryId: 'hair', isCategory: false },
+  { id: 'balayage', name: 'Balayage & Highlights', icon: '🌈', categoryId: 'hair', isCategory: false },
+  { id: 'keratin', name: 'Keratin Treatment', icon: '✨', categoryId: 'hair', isCategory: false },
+  { id: 'hair-extensions', name: 'Hair Extensions', icon: '💁', categoryId: 'hair', isCategory: false },
+  
+  // Nails sub-services
+  { id: 'manicure', name: 'Manicure', icon: '🤲', categoryId: 'nails', isCategory: false },
+  { id: 'pedicure', name: 'Pedicure', icon: '🦶', categoryId: 'nails', isCategory: false },
+  { id: 'nail-art', name: 'Nail Art & Design', icon: '💎', categoryId: 'nails', isCategory: false },
+  { id: 'gel-nails', name: 'Gel Nails', icon: '💅', categoryId: 'nails', isCategory: false },
+  { id: 'acrylic-nails', name: 'Acrylic Nails', icon: '✨', categoryId: 'nails', isCategory: false },
+  { id: 'nail-extensions', name: 'Nail Extensions', icon: '💎', categoryId: 'nails', isCategory: false },
+  
+  // Skincare & Facials sub-services
+  { id: 'facial', name: 'Classic Facial', icon: '✨', categoryId: 'skincare', isCategory: false },
+  { id: 'anti-aging', name: 'Anti-Aging Treatment', icon: '🌟', categoryId: 'skincare', isCategory: false },
+  { id: 'acne-treatment', name: 'Acne Treatment', icon: '🧴', categoryId: 'skincare', isCategory: false },
+  { id: 'hydrafacial', name: 'HydraFacial', icon: '💧', categoryId: 'skincare', isCategory: false },
+  { id: 'cleanup', name: 'Cleanup & Bleach', icon: '🧼', categoryId: 'skincare', isCategory: false },
+  { id: 'chemical-peel', name: 'Chemical Peel', icon: '🍋', categoryId: 'skincare', isCategory: false },
+  
+  // Massage & Spa sub-services
+  { id: 'body-massage', name: 'Full Body Massage', icon: '🧘', categoryId: 'massage', isCategory: false },
+  { id: 'aromatherapy', name: 'Aromatherapy', icon: '🌸', categoryId: 'massage', isCategory: false },
+  { id: 'deep-tissue', name: 'Deep Tissue Massage', icon: '💪', categoryId: 'massage', isCategory: false },
+  { id: 'thai-massage', name: 'Thai Massage', icon: '🙏', categoryId: 'massage', isCategory: false },
+  { id: 'hot-stone', name: 'Hot Stone Massage', icon: '🔥', categoryId: 'massage', isCategory: false },
+  { id: 'spa-package', name: 'Spa Packages', icon: '🛁', categoryId: 'massage', isCategory: false },
+  
+  // Eyebrows & Lashes sub-services
+  { id: 'eyebrow-shaping', name: 'Eyebrow Shaping', icon: '👁️', categoryId: 'eyes', isCategory: false },
+  { id: 'threading', name: 'Threading', icon: '🧵', categoryId: 'eyes', isCategory: false },
+  { id: 'eyelash-extensions', name: 'Eyelash Extensions', icon: '👀', categoryId: 'eyes', isCategory: false },
+  { id: 'lash-lift', name: 'Lash Lift & Tint', icon: '🌙', categoryId: 'eyes', isCategory: false },
+  { id: 'eyebrow-tint', name: 'Eyebrow Tinting', icon: '🎨', categoryId: 'eyes', isCategory: false },
+  { id: 'microblading', name: 'Microblading', icon: '✏️', categoryId: 'eyes', isCategory: false },
+  
+  // Hair Removal sub-services
+  { id: 'waxing', name: 'Waxing', icon: '🪶', categoryId: 'hair-removal', isCategory: false },
+  { id: 'laser-hair-removal', name: 'Laser Hair Removal', icon: '⚡', categoryId: 'hair-removal', isCategory: false },
+  { id: 'full-body-wax', name: 'Full Body Waxing', icon: '✨', categoryId: 'hair-removal', isCategory: false },
+  { id: 'bikini-wax', name: 'Bikini Wax', icon: '👙', categoryId: 'hair-removal', isCategory: false },
+  { id: 'brazilian-wax', name: 'Brazilian Wax', icon: '💫', categoryId: 'hair-removal', isCategory: false },
+  
+  // Makeup sub-services
+  { id: 'bridal-makeup', name: 'Bridal Makeup', icon: '👰', categoryId: 'makeup', isCategory: false },
+  { id: 'party-makeup', name: 'Party Makeup', icon: '🎉', categoryId: 'makeup', isCategory: false },
+  { id: 'hd-makeup', name: 'HD Makeup', icon: '📸', categoryId: 'makeup', isCategory: false },
+  { id: 'airbrush-makeup', name: 'Airbrush Makeup', icon: '💨', categoryId: 'makeup', isCategory: false },
+  { id: 'natural-makeup', name: 'Natural Makeup', icon: '🌸', categoryId: 'makeup', isCategory: false },
+  
+  // Body Treatments sub-services
+  { id: 'body-scrub', name: 'Body Scrub & Polishing', icon: '🧖', categoryId: 'body', isCategory: false },
+  { id: 'body-wrap', name: 'Body Wrap', icon: '🌿', categoryId: 'body', isCategory: false },
+  { id: 'tan-removal', name: 'Tan Removal', icon: '☀️', categoryId: 'body', isCategory: false },
+  { id: 'body-polish', name: 'Body Polishing', icon: '✨', categoryId: 'body', isCategory: false },
+  
+  // Men's Grooming sub-services
+  { id: 'mens-haircut', name: "Men's Haircut", icon: '💈', categoryId: 'mens', isCategory: false },
+  { id: 'beard-trim', name: 'Beard Trim & Styling', icon: '🧔', categoryId: 'mens', isCategory: false },
+  { id: 'mens-facial', name: "Men's Facial", icon: '👨', categoryId: 'mens', isCategory: false },
+  { id: 'mens-grooming', name: "Men's Grooming Package", icon: '🎩', categoryId: 'mens', isCategory: false },
+  
+  // Wellness & Other sub-services
+  { id: 'reflexology', name: 'Reflexology', icon: '🦶', categoryId: 'wellness', isCategory: false },
+  { id: 'wellness-therapy', name: 'Wellness Therapy', icon: '🧘‍♀️', categoryId: 'wellness', isCategory: false },
+  { id: 'consultation', name: 'Beauty Consultation', icon: '💬', categoryId: 'wellness', isCategory: false },
 ];
 
 const radiusOptions = [
@@ -45,13 +139,147 @@ const radiusOptions = [
   { value: 5, label: '5km' }
 ];
 
+// Fresha-style Calendar Component
+function FreshaCalendar({ selectedDate, onDateSelect }: { selectedDate: string; onDateSelect: (date: string) => void }) {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  
+  const daysInMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  };
+  
+  const firstDayOfMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+  };
+  
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const generateCalendarDays = () => {
+    const days = [];
+    const totalDays = daysInMonth(currentMonth);
+    const firstDay = firstDayOfMonth(currentMonth);
+    const adjustedFirstDay = firstDay === 0 ? 6 : firstDay - 1; // Adjust for Monday start
+    
+    // Previous month's trailing days
+    for (let i = 0; i < adjustedFirstDay; i++) {
+      days.push(null);
+    }
+    
+    // Current month's days
+    for (let day = 1; day <= totalDays; day++) {
+      days.push(day);
+    }
+    
+    return days;
+  };
+  
+  const handleDateClick = (day: number) => {
+    const selected = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+    const dateString = selected.toLocaleDateString('en-CA'); // YYYY-MM-DD in local timezone
+    onDateSelect(dateString);
+  };
+  
+  const isPastDate = (day: number) => {
+    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+    date.setHours(0, 0, 0, 0);
+    return date < today;
+  };
+  
+  const isSelectedDate = (day: number) => {
+    if (!selectedDate) return false;
+    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+    const dateString = date.toLocaleDateString('en-CA'); // YYYY-MM-DD in local timezone
+    return dateString === selectedDate;
+  };
+  
+  const isToday = (day: number) => {
+    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+    return date.toDateString() === today.toDateString();
+  };
+  
+  const goToPreviousMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  };
+  
+  const goToNextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  };
+  
+  return (
+    <div className="w-full">
+      {/* Month Navigation - Compact */}
+      <div className="flex items-center justify-between mb-3">
+        <button
+          onClick={goToPreviousMonth}
+          className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          <ChevronLeft className="h-4 w-4 text-gray-600" />
+        </button>
+        <h3 className="text-sm font-semibold text-gray-900">
+          {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+        </h3>
+        <button
+          onClick={goToNextMonth}
+          className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          <ChevronRight className="h-4 w-4 text-gray-600" />
+        </button>
+      </div>
+      
+      {/* Day Names - Compact */}
+      <div className="grid grid-cols-7 gap-1 mb-1.5">
+        {dayNames.map(day => (
+          <div key={day} className="text-center text-[10px] font-medium text-gray-500 py-1">
+            {day}
+          </div>
+        ))}
+      </div>
+      
+      {/* Calendar Grid - Compact */}
+      <div className="grid grid-cols-7 gap-0.5">
+        {generateCalendarDays().map((day, index) => {
+          if (day === null) {
+            return <div key={`empty-${index}`} className="aspect-square" />;
+          }
+          
+          const past = isPastDate(day);
+          const selected = isSelectedDate(day);
+          const todayDate = isToday(day);
+          
+          return (
+            <button
+              key={day}
+              onClick={() => !past && handleDateClick(day)}
+              disabled={past}
+              className={cn(
+                "aspect-square rounded-md text-xs font-medium transition-all",
+                past && "text-gray-300 cursor-not-allowed",
+                !past && !selected && !todayDate && "text-gray-900 hover:bg-gray-100",
+                todayDate && !selected && "border border-purple-600 text-purple-600",
+                selected && "bg-purple-600 text-white shadow-md"
+              )}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function FreshaSearchBar({
   onSearch,
   currentLocationCoords,
   locationAccuracy,
   savedLocations = []
 }: FreshaSearchBarProps) {
-  const [selectedService, setSelectedService] = useState('hair');
+  const [selectedService, setSelectedService] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [showSubServices, setShowSubServices] = useState(false);
   const [locationQuery, setLocationQuery] = useState('');
   const [selectedLocation, setSelectedLocation] = useState<{ name: string; coords: { lat: number; lng: number } } | null>(null);
   const [selectedRadius, setSelectedRadius] = useState(1);
@@ -279,15 +507,37 @@ export default function FreshaSearchBar({
     }
   };
 
+  // Reverse geocode to get location name from coordinates
+  const reverseGeocode = async (coords: { lat: number; lng: number }): Promise<string> => {
+    try {
+      const response = await fetch(`/api/locations/reverse?lat=${coords.lat}&lng=${coords.lng}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.address) {
+          return data.address;
+        }
+      }
+    } catch (error) {
+      console.error('Reverse geocoding error:', error);
+    }
+    return 'Current location';
+  };
+
   // Handle current location
-  const handleCurrentLocation = () => {
+  const handleCurrentLocation = async () => {
     if (currentLocationCoords) {
+      setIsGettingLocation(true);
+      setLocationQuery('Getting location name...');
+      
+      const locationName = await reverseGeocode(currentLocationCoords);
+      
       setSelectedLocation({
-        name: 'Current location',
+        name: locationName,
         coords: currentLocationCoords
       });
-      setLocationQuery('Current location');
+      setLocationQuery(locationName);
       setShowLocationDropdown(false);
+      setIsGettingLocation(false);
     } else {
       // Request geolocation with better error handling
       if (navigator.geolocation) {
@@ -296,16 +546,20 @@ export default function FreshaSearchBar({
         setLocationQuery('Getting your location...');
         
         navigator.geolocation.getCurrentPosition(
-          (position) => {
+          async (position) => {
             const coords = {
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
+            
+            // Get the actual location name
+            const locationName = await reverseGeocode(coords);
+            
             setSelectedLocation({
-              name: 'Current location',
+              name: locationName,
               coords
             });
-            setLocationQuery('Current location');
+            setLocationQuery(locationName);
             setShowLocationDropdown(false);
             setIsGettingLocation(false);
           },
@@ -336,7 +590,7 @@ export default function FreshaSearchBar({
           {
             enableHighAccuracy: true,
             timeout: 10000,
-            maximumAge: 300000 // 5 minutes
+            maximumAge: 0 // Always get fresh location, no caching
           }
         );
       } else {
@@ -376,7 +630,7 @@ export default function FreshaSearchBar({
     }
     
     onSearch({
-      service: selectedService,
+      service: selectedService || selectedCategory || '',
       coords: selectedLocation.coords,
       radius: selectedRadius,
       date: selectedDate,
@@ -385,8 +639,8 @@ export default function FreshaSearchBar({
     });
   };
 
-  // Get current date and time
-  const today = new Date().toISOString().split('T')[0];
+  // Get current date and time (using local timezone)
+  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local timezone
   const now = new Date();
   const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   
@@ -441,7 +695,7 @@ export default function FreshaSearchBar({
     } else if (type === 'tomorrow') {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      setSelectedDate(tomorrow.toISOString().split('T')[0]);
+      setSelectedDate(tomorrow.toLocaleDateString('en-CA')); // YYYY-MM-DD in local timezone
     } else {
       setSelectedDate('');
     }
@@ -460,50 +714,159 @@ export default function FreshaSearchBar({
     }
   };
 
+  // Timezone-aware time slot validation for "Today" selections
+  const isTimeSlotDisabled = (timeSlot: 'morning' | 'afternoon' | 'evening'): boolean => {
+    // Only apply filtering if "Today" is explicitly selected via the quick pill
+    // OR if the selected date matches today's date (for calendar selections)
+    
+    // Use local date comparison to avoid timezone issues with ISO strings
+    const todayLocal = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD format
+    const isTodaySelected = selectedDateType === 'today' || selectedDate === todayLocal;
+    
+    if (!isTodaySelected) return false;
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    // Morning (6:00 AM - 12:00 PM): Disabled if current time is >= 12:00 PM
+    if (timeSlot === 'morning' && currentHour >= 12) {
+      return true;
+    }
+    
+    // Afternoon (12:00 PM - 6:00 PM): Disabled if current time is >= 6:00 PM
+    if (timeSlot === 'afternoon' && currentHour >= 18) {
+      return true;
+    }
+    
+    // Evening (6:00 PM - 11:00 PM): Disabled if current time is >= 11:00 PM
+    if (timeSlot === 'evening' && currentHour >= 23) {
+      return true;
+    }
+    
+    return false;
+  };
+
   return (
-    <div className="w-full max-w-4xl mx-auto">
+    <div className="w-full max-w-4xl mx-auto px-4 md:px-0">
       {/* Main Search Bar */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-1">
-        <div className="flex items-center gap-1">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-2 md:p-1">
+        {/* Mobile: Stacked Layout | Desktop: Horizontal Layout */}
+        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-1">
           {/* Service Selection */}
-          <div className="relative flex-1" ref={serviceRef}>
+          <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0" ref={serviceRef}>
             <button
-              onClick={() => setShowServiceDropdown(!showServiceDropdown)}
-              className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors"
+              onClick={() => {
+                // If a category is already selected, show sub-services
+                if (selectedCategory && !showSubServices) {
+                  setShowSubServices(true);
+                  setShowServiceDropdown(true);
+                } else {
+                  setShowServiceDropdown(!showServiceDropdown);
+                  if (showServiceDropdown) {
+                    setShowSubServices(false);
+                  }
+                }
+              }}
+              className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 md:rounded-xl transition-colors"
             >
-              <Search className="h-4 w-4 text-gray-400" />
-              <span className="text-gray-900">
-                {serviceCategories.find(s => s.id === selectedService)?.name || 'All treatments'}
+              <Search className="h-4 w-4 text-gray-400 flex-shrink-0" />
+              <span className="flex-1 text-gray-900">
+                {selectedService 
+                  ? subServices.find(s => s.id === selectedService)?.name 
+                  : selectedCategory 
+                    ? mainCategories.find(c => c.id === selectedCategory)?.name
+                    : 'All treatments'}
               </span>
+              {/* Clear/Delete Icon - Only show when service is selected */}
+              {selectedService && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevent dropdown from opening
+                    setSelectedService('');
+                    setSelectedCategory('');
+                    setShowSubServices(false);
+                  }}
+                  className="flex-shrink-0 p-1 hover:bg-gray-200 rounded-full transition-colors"
+                  aria-label="Clear service selection"
+                >
+                  <X className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                </button>
+              )}
             </button>
             
             {showServiceDropdown && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-                {serviceCategories.map((service) => (
-                  <button
-                    key={service.id}
-                    onClick={() => {
-                      setSelectedService(service.id);
-                      setShowServiceDropdown(false);
-                    }}
-                    className={cn(
-                      "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50",
-                      selectedService === service.id && "bg-gray-50"
-                    )}
-                  >
-                    <span className="text-lg">{service.icon}</span>
-                    <span className="font-medium">{service.name}</span>
-                  </button>
-                ))}
+              <div className="absolute top-full left-0 right-0 md:left-auto md:w-96 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-[9999] max-h-96 overflow-y-auto">
+                {!showSubServices ? (
+                  // Show main categories
+                  <>
+                    <div className="px-4 py-3 border-b border-gray-100">
+                      <h3 className="text-sm font-semibold text-gray-900">Treatments</h3>
+                    </div>
+                    {mainCategories.map((category) => (
+                      <button
+                        key={category.id}
+                        onClick={() => {
+                          setSelectedCategory(category.id);
+                          setSelectedService('');
+                          setShowSubServices(true);
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors",
+                          selectedCategory === category.id && !selectedService && "bg-purple-50"
+                        )}
+                      >
+                        <span className="text-xl">{category.icon}</span>
+                        <span className="font-medium text-gray-900">{category.name}</span>
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  // Show sub-services for selected category
+                  <>
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setShowSubServices(false);
+                          setSelectedService('');
+                        }}
+                        className="text-purple-600 hover:text-purple-700"
+                      >
+                        ← Back
+                      </button>
+                      <h3 className="text-sm font-semibold text-gray-900">
+                        {mainCategories.find(c => c.id === selectedCategory)?.name}
+                      </h3>
+                    </div>
+                    {subServices
+                      .filter(service => service.categoryId === selectedCategory)
+                      .map((service) => (
+                        <button
+                          key={service.id}
+                          onClick={() => {
+                            setSelectedService(service.id);
+                            setShowServiceDropdown(false);
+                            setShowSubServices(false);
+                          }}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors",
+                            selectedService === service.id && "bg-purple-50"
+                          )}
+                        >
+                          <span className="text-lg">{service.icon}</span>
+                          <span className="text-gray-900">{service.name}</span>
+                        </button>
+                      ))}
+                  </>
+                )}
               </div>
             )}
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-8 bg-gray-200" />
+          {/* Divider - Hidden on mobile */}
+          <div className="hidden md:block w-px h-8 bg-gray-200" />
 
           {/* Location Selection */}
-          <div className="relative flex-1" ref={locationRef}>
+          <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0" ref={locationRef}>
             <div className="flex items-center gap-2 px-4 py-3">
               <MapPin className="h-4 w-4 text-gray-400" />
               <input
@@ -529,7 +892,7 @@ export default function FreshaSearchBar({
             </div>
             
             {showLocationDropdown && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] max-h-60 overflow-y-auto">
                 {/* Current Location */}
                 <button
                   onClick={handleCurrentLocation}
@@ -670,173 +1033,162 @@ export default function FreshaSearchBar({
             )}
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-8 bg-gray-200" />
+          {/* Divider - Hidden on mobile */}
+          <div className="hidden md:block w-px h-8 bg-gray-200" />
 
-          {/* Date Selection */}
-          <div className="relative" ref={dateRef}>
+          {/* Date & Time Container - Compact single row */}
+          <div className="flex gap-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0">
+            {/* Date Selection */}
+            <div className="relative flex-1" ref={dateRef}>
             <button
               onClick={() => setShowDatePicker(!showDatePicker)}
-              className="flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors"
+              className="flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors w-full"
             >
-              <Calendar className="h-4 w-4 text-gray-400" />
-              <span className="text-gray-900">
+              <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
+              <span className="text-gray-900 whitespace-nowrap">
                 {getDateDisplayText()}
               </span>
             </button>
             
             {showDatePicker && (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 w-80">
-                {/* Date Type Tabs */}
-                <div className="flex border-b border-gray-200">
+              <div className="fixed md:absolute top-auto md:top-full left-4 md:left-0 mt-2 bg-white rounded-2xl shadow-2xl z-[99999] w-[calc(100%-2rem)] md:w-[420px] border border-gray-100 max-h-[85vh] overflow-y-auto">
+                {/* Quick Date Selection Pills */}
+                <div className="p-4 flex gap-2 flex-wrap border-b border-gray-100 bg-white sticky top-0 z-10">
                   <button
                     onClick={() => handleDateTypeChange('any')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
+                    className={cn(
+                      "px-4 py-2 rounded-full text-sm font-medium transition-all",
                       selectedDateType === 'any'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    )}
                   >
                     Any date
                   </button>
                   <button
                     onClick={() => handleDateTypeChange('today')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
+                    className={cn(
+                      "px-4 py-2 rounded-full text-sm font-medium transition-all",
                       selectedDateType === 'today'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    )}
                   >
                     Today
                   </button>
                   <button
                     onClick={() => handleDateTypeChange('tomorrow')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
+                    className={cn(
+                      "px-4 py-2 rounded-full text-sm font-medium transition-all",
                       selectedDateType === 'tomorrow'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    )}
                   >
                     Tomorrow
                   </button>
                 </div>
                 
-                {/* Custom Date Picker */}
-                <div className="p-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Or choose a specific date:
-                  </label>
-                  <input
-                    type="date"
-                    min={today}
-                    value={selectedDate}
-                    onChange={(e) => {
-                      setSelectedDate(e.target.value);
-                      if (e.target.value) {
-                        setSelectedDateType('any');
-                      }
+                {/* Calendar Grid - Compact Padding */}
+                <div className="px-3 pb-3 pt-1">
+                  <FreshaCalendar
+                    selectedDate={selectedDate}
+                    onDateSelect={(date) => {
+                      setSelectedDate(date);
+                      setSelectedDateType('any');
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   />
                 </div>
               </div>
             )}
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-8 bg-gray-200" />
-
           {/* Time Selection */}
-          <div className="relative" ref={timeRef}>
+          <div className="relative flex-1" ref={timeRef}>
             <button
               onClick={() => setShowTimePicker(!showTimePicker)}
-              className="flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors"
+              className="flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors w-full"
             >
-              <Clock className="h-4 w-4 text-gray-400" />
-              <span className="text-gray-900">
+              <Clock className="h-4 w-4 text-gray-400 flex-shrink-0" />
+              <span className="text-gray-900 whitespace-nowrap">
                 {getTimeDisplayText()}
               </span>
             </button>
             
             {showTimePicker && (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 w-80">
-                {/* Time Type Tabs */}
-                <div className="flex border-b border-gray-200">
-                  <button
-                    onClick={() => handleTimeTypeChange('any')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
-                      selectedTimeType === 'any'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
-                  >
-                    Any time
-                  </button>
-                  <button
-                    onClick={() => handleTimeTypeChange('morning')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
-                      selectedTimeType === 'morning'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
-                  >
-                    Morning
-                  </button>
-                  <button
-                    onClick={() => handleTimeTypeChange('afternoon')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
-                      selectedTimeType === 'afternoon'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
-                  >
-                    Afternoon
-                  </button>
-                  <button
-                    onClick={() => handleTimeTypeChange('evening')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium text-center transition-colors ${
-                      selectedTimeType === 'evening'
-                        ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
-                  >
-                    Evening
-                  </button>
-                </div>
-                
-                {/* Custom Time Range */}
-                <div className="p-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Or choose a specific time range:
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <label className="block text-xs text-gray-500 mb-1">From</label>
-                      <input
-                        type="time"
-                        value={customTimeRange.start}
-                        onChange={(e) => {
-                          setCustomTimeRange(prev => ({ ...prev, start: e.target.value }));
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-xs text-gray-500 mb-1">To</label>
-                      <input
-                        type="time"
-                        value={customTimeRange.end}
-                        onChange={(e) => {
-                          setCustomTimeRange(prev => ({ ...prev, end: e.target.value }));
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                      />
-                    </div>
+              <div className="fixed md:absolute top-auto md:top-full left-4 md:left-0 mt-2 bg-white rounded-2xl shadow-2xl z-[99999] w-[calc(100%-2rem)] md:w-auto md:min-w-[280px] border border-gray-100 max-h-[85vh] overflow-y-auto">
+                {/* Quick Time Selection Pills */}
+                <div className="p-4 space-y-2 bg-white sticky top-0 z-10 border-b border-gray-100">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => handleTimeTypeChange('any')}
+                      className={cn(
+                        "px-4 py-2 rounded-full text-sm font-medium transition-all",
+                        selectedTimeType === 'any'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      Any time
+                    </button>
+                    <button
+                      onClick={() => !isTimeSlotDisabled('morning') && handleTimeTypeChange('morning')}
+                      disabled={isTimeSlotDisabled('morning')}
+                      className={cn(
+                        "px-4 py-2 rounded-full text-sm font-medium transition-all",
+                        isTimeSlotDisabled('morning')
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                          : selectedTimeType === 'morning'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      Morning
+                    </button>
+                    <button
+                      onClick={() => !isTimeSlotDisabled('afternoon') && handleTimeTypeChange('afternoon')}
+                      disabled={isTimeSlotDisabled('afternoon')}
+                      className={cn(
+                        "px-4 py-2 rounded-full text-sm font-medium transition-all",
+                        isTimeSlotDisabled('afternoon')
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                          : selectedTimeType === 'afternoon'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      Afternoon
+                    </button>
+                    <button
+                      onClick={() => !isTimeSlotDisabled('evening') && handleTimeTypeChange('evening')}
+                      disabled={isTimeSlotDisabled('evening')}
+                      className={cn(
+                        "px-4 py-2 rounded-full text-sm font-medium transition-all",
+                        isTimeSlotDisabled('evening')
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                          : selectedTimeType === 'evening'
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      Evening
+                    </button>
+                  </div>
+                  
+                  {/* Time range indicators */}
+                  <div className="text-xs text-gray-500 pl-1">
+                    {selectedTimeType === 'morning' && '6:00 AM - 12:00 PM'}
+                    {selectedTimeType === 'afternoon' && '12:00 PM - 6:00 PM'}
+                    {selectedTimeType === 'evening' && '6:00 PM - 11:00 PM'}
                   </div>
                 </div>
               </div>
             )}
           </div>
+          </div>
+
+          {/* Divider - Hidden on mobile */}
+          <div className="hidden md:block w-px h-8 bg-gray-200" />
 
           {/* Search Button */}
           <Button
@@ -855,7 +1207,13 @@ export default function FreshaSearchBar({
           {radiusOptions.map((option) => (
             <button
               key={option.value}
-              onClick={() => setSelectedRadius(option.value)}
+              onClick={() => {
+                setSelectedRadius(option.value);
+                // Auto-trigger search when radius changes
+                if (selectedLocation) {
+                  handleSearch();
+                }
+              }}
               className={cn(
                 "px-3 py-1 text-sm rounded-full transition-colors",
                 selectedRadius === option.value

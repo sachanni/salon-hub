@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Scissors, Plus, Trash2, Edit } from "lucide-react";
+import { Scissors, Plus, Trash2, Edit, Sparkles, Clock, IndianRupee, Check, X, ChevronRight, Package, Brain } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { getRelevantServiceCategories, getSmartServiceSuggestions } from "@/lib/serviceCategoryMapping";
 
 interface ServicesStepProps {
   salonId: string;
@@ -26,6 +28,178 @@ interface Service {
   category: string;
 }
 
+// Service category definitions
+const mainCategories = [
+  { id: 'hair', name: 'Hair & Styling', icon: '💇', gradient: 'from-purple-500 to-pink-500' },
+  { id: 'nails', name: 'Nails', icon: '💅', gradient: 'from-pink-500 to-rose-500' },
+  { id: 'skincare', name: 'Skincare & Facials', icon: '✨', gradient: 'from-violet-500 to-purple-500' },
+  { id: 'massage', name: 'Massage & Spa', icon: '💆', gradient: 'from-indigo-500 to-purple-500' },
+  { id: 'eyes', name: 'Eyebrows & Lashes', icon: '👁️', gradient: 'from-fuchsia-500 to-pink-500' },
+  { id: 'hair-removal', name: 'Hair Removal', icon: '🪶', gradient: 'from-rose-500 to-pink-500' },
+  { id: 'makeup', name: 'Makeup', icon: '💄', gradient: 'from-pink-500 to-fuchsia-500' },
+  { id: 'body', name: 'Body Treatments', icon: '🧖', gradient: 'from-purple-500 to-violet-500' },
+  { id: 'mens', name: "Men's Grooming", icon: '💈', gradient: 'from-slate-600 to-gray-600' },
+  { id: 'wellness', name: 'Wellness & Other', icon: '🧘‍♀️', gradient: 'from-emerald-500 to-teal-500' },
+];
+
+const subServices: Record<string, { name: string; icon: string }[]> = {
+  hair: [
+    { name: 'Haircut & Styling', icon: '✂️' },
+    { name: 'Hair Coloring', icon: '🎨' },
+    { name: 'Hair Treatment & Spa', icon: '💆' },
+    { name: 'Balayage & Highlights', icon: '🌈' },
+    { name: 'Keratin Treatment', icon: '✨' },
+    { name: 'Hair Extensions', icon: '💁' },
+  ],
+  nails: [
+    { name: 'Manicure', icon: '🤲' },
+    { name: 'Pedicure', icon: '🦶' },
+    { name: 'Nail Art & Design', icon: '💎' },
+    { name: 'Gel Nails', icon: '💅' },
+    { name: 'Acrylic Nails', icon: '✨' },
+    { name: 'Nail Extensions', icon: '💎' },
+  ],
+  skincare: [
+    { name: 'Classic Facial', icon: '✨' },
+    { name: 'Anti-Aging Treatment', icon: '🌟' },
+    { name: 'Acne Treatment', icon: '🧴' },
+    { name: 'HydraFacial', icon: '💧' },
+    { name: 'Cleanup & Bleach', icon: '🧼' },
+    { name: 'Chemical Peel', icon: '🍋' },
+  ],
+  massage: [
+    { name: 'Full Body Massage', icon: '🧘' },
+    { name: 'Aromatherapy', icon: '🌸' },
+    { name: 'Deep Tissue Massage', icon: '💪' },
+    { name: 'Thai Massage', icon: '🙏' },
+    { name: 'Hot Stone Massage', icon: '🔥' },
+    { name: 'Spa Packages', icon: '🛁' },
+  ],
+  eyes: [
+    { name: 'Eyebrow Shaping', icon: '👁️' },
+    { name: 'Threading', icon: '🧵' },
+    { name: 'Eyelash Extensions', icon: '👀' },
+    { name: 'Lash Lift & Tint', icon: '🌙' },
+    { name: 'Eyebrow Tinting', icon: '🎨' },
+    { name: 'Microblading', icon: '✏️' },
+  ],
+  'hair-removal': [
+    { name: 'Waxing', icon: '🪶' },
+    { name: 'Laser Hair Removal', icon: '⚡' },
+    { name: 'Full Body Waxing', icon: '✨' },
+    { name: 'Bikini Wax', icon: '👙' },
+    { name: 'Brazilian Wax', icon: '💫' },
+  ],
+  makeup: [
+    { name: 'Bridal Makeup', icon: '👰' },
+    { name: 'Party Makeup', icon: '🎉' },
+    { name: 'HD Makeup', icon: '📸' },
+    { name: 'Airbrush Makeup', icon: '💨' },
+    { name: 'Natural Makeup', icon: '🌸' },
+    { name: 'Daily Light Makeup', icon: '☀️' },
+  ],
+  body: [
+    { name: 'Body Scrub & Polishing', icon: '🧖' },
+    { name: 'Body Wrap', icon: '🌿' },
+    { name: 'Tan Removal', icon: '☀️' },
+    { name: 'Body Polishing', icon: '✨' },
+  ],
+  mens: [
+    { name: "Men's Haircut", icon: '💈' },
+    { name: 'Beard Trim & Styling', icon: '🧔' },
+    { name: "Men's Facial", icon: '👨' },
+    { name: "Men's Grooming Package", icon: '🎩' },
+  ],
+  wellness: [
+    { name: 'Reflexology', icon: '🦶' },
+    { name: 'Wellness Therapy', icon: '🧘‍♀️' },
+    { name: 'Beauty Consultation', icon: '💬' },
+  ],
+};
+
+// Smart price and duration suggestions by service type
+const serviceSuggestions: Record<string, { duration: number; price: number; description: string }> = {
+  // Hair & styling
+  'Haircut & Styling': { duration: 45, price: 500, description: 'Professional haircut with styling' },
+  'Hair Coloring': { duration: 120, price: 2500, description: 'Full hair coloring service' },
+  'Hair Treatment & Spa': { duration: 60, price: 1500, description: 'Deep conditioning hair treatment' },
+  'Balayage & Highlights': { duration: 150, price: 4000, description: 'Balayage or highlights color treatment' },
+  'Keratin Treatment': { duration: 120, price: 3500, description: 'Keratin smoothing treatment' },
+  'Hair Extensions': { duration: 120, price: 5000, description: 'Hair extension application' },
+  
+  // Nails
+  'Manicure': { duration: 30, price: 400, description: 'Classic manicure with polish' },
+  'Pedicure': { duration: 45, price: 600, description: 'Relaxing pedicure with foot massage' },
+  'Nail Art & Design': { duration: 45, price: 800, description: 'Custom nail art and design' },
+  'Gel Nails': { duration: 60, price: 1000, description: 'Gel nail application' },
+  'Acrylic Nails': { duration: 90, price: 1500, description: 'Acrylic nail extensions' },
+  'Nail Extensions': { duration: 90, price: 1200, description: 'Professional nail extensions' },
+  
+  // Skincare & Facials
+  'Classic Facial': { duration: 60, price: 1200, description: 'Deep cleansing facial treatment' },
+  'Anti-Aging Treatment': { duration: 75, price: 2500, description: 'Anti-aging facial therapy' },
+  'Acne Treatment': { duration: 60, price: 1500, description: 'Specialized acne treatment' },
+  'HydraFacial': { duration: 60, price: 3000, description: 'HydraFacial deep cleansing' },
+  'Cleanup & Bleach': { duration: 45, price: 800, description: 'Facial cleanup and bleach' },
+  'Chemical Peel': { duration: 60, price: 2000, description: 'Chemical peel treatment' },
+  
+  // Massage & Spa
+  'Full Body Massage': { duration: 60, price: 1800, description: 'Relaxing full body massage' },
+  'Aromatherapy': { duration: 60, price: 2000, description: 'Aromatherapy massage session' },
+  'Deep Tissue Massage': { duration: 75, price: 2200, description: 'Deep tissue therapeutic massage' },
+  'Thai Massage': { duration: 90, price: 2500, description: 'Traditional Thai massage' },
+  'Hot Stone Massage': { duration: 90, price: 2800, description: 'Hot stone therapy massage' },
+  'Spa Packages': { duration: 120, price: 4000, description: 'Complete spa package' },
+  
+  // Eyebrows & Lashes
+  'Eyebrow Shaping': { duration: 20, price: 200, description: 'Eyebrow shaping and grooming' },
+  'Threading': { duration: 15, price: 150, description: 'Eyebrow threading and shaping' },
+  'Eyelash Extensions': { duration: 90, price: 2500, description: 'Eyelash extension application' },
+  'Lash Lift & Tint': { duration: 45, price: 1200, description: 'Lash lift and tinting' },
+  'Eyebrow Tinting': { duration: 20, price: 300, description: 'Eyebrow tinting service' },
+  'Microblading': { duration: 120, price: 8000, description: 'Microblading eyebrow treatment' },
+  
+  // Hair Removal
+  'Waxing': { duration: 30, price: 400, description: 'Professional waxing service' },
+  'Laser Hair Removal': { duration: 30, price: 1500, description: 'Laser hair removal session' },
+  'Full Body Waxing': { duration: 90, price: 2500, description: 'Full body waxing service' },
+  'Bikini Wax': { duration: 30, price: 800, description: 'Bikini waxing service' },
+  'Brazilian Wax': { duration: 45, price: 1200, description: 'Brazilian wax service' },
+  
+  // Makeup
+  'Bridal Makeup': { duration: 120, price: 8000, description: 'Complete bridal makeup package' },
+  'Party Makeup': { duration: 60, price: 3000, description: 'Party and event makeup' },
+  'HD Makeup': { duration: 75, price: 4000, description: 'HD makeup for photography' },
+  'Airbrush Makeup': { duration: 60, price: 4500, description: 'Airbrush makeup application' },
+  'Natural Makeup': { duration: 45, price: 2000, description: 'Natural everyday makeup' },
+  'Daily Light Makeup': { duration: 30, price: 1200, description: 'Light makeup for office or casual events' },
+  
+  // Body Treatments
+  'Body Scrub & Polishing': { duration: 60, price: 1500, description: 'Full body scrub and polishing' },
+  'Body Wrap': { duration: 75, price: 2000, description: 'Therapeutic body wrap' },
+  'Tan Removal': { duration: 60, price: 1800, description: 'Tan removal treatment' },
+  'Body Polishing': { duration: 60, price: 1500, description: 'Body polishing service' },
+  
+  // Men's Grooming
+  "Men's Haircut": { duration: 30, price: 300, description: 'Professional men\'s haircut' },
+  'Beard Trim & Styling': { duration: 20, price: 250, description: 'Beard trimming and styling' },
+  "Men's Facial": { duration: 45, price: 1000, description: 'Men\'s facial treatment' },
+  "Men's Grooming Package": { duration: 60, price: 1500, description: 'Complete men\'s grooming package' },
+  
+  // Wellness & Other
+  'Reflexology': { duration: 45, price: 1200, description: 'Reflexology therapy session' },
+  'Wellness Therapy': { duration: 60, price: 1500, description: 'Wellness therapy treatment' },
+  'Beauty Consultation': { duration: 30, price: 500, description: 'Professional beauty consultation' },
+};
+
+// Business type templates for quick setup
+const businessTemplates = {
+  'hair-salon': ['Haircut & Styling', 'Hair Coloring', 'Balayage & Highlights', 'Keratin Treatment'],
+  'spa': ['Full Body Massage', 'Aromatherapy', 'Classic Facial', 'Body Scrub & Polishing'],
+  'nail-studio': ['Manicure', 'Pedicure', 'Gel Nails', 'Nail Art & Design'],
+  'beauty-parlour': ['Threading', 'Waxing', 'Cleanup & Bleach', 'Bridal Makeup'],
+};
+
 export default function ServicesStep({ 
   salonId, 
   initialData, 
@@ -33,35 +207,74 @@ export default function ServicesStep({
   isCompleted 
 }: ServicesStepProps) {
   const [services, setServices] = useState<Service[]>([]);
-  const [isAddingService, setIsAddingService] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>('hair');
+  const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [editingService, setEditingService] = useState<Service | null>(null);
-  const [newService, setNewService] = useState<Service>({
-    name: "",
-    description: "",
-    duration: 60,
-    price: 0,
-    category: "Hair"
-  });
+  const [showBulkReview, setShowBulkReview] = useState(false);
+  const [bulkServices, setBulkServices] = useState<Service[]>([]);
+  const [showAllCategories, setShowAllCategories] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  
+  // Ref for bulk review section to enable auto-scroll
+  const bulkReviewRef = useRef<HTMLDivElement>(null);
+  
+  // Auto-scroll to bulk review when it opens
+  useEffect(() => {
+    if (showBulkReview && bulkReviewRef.current) {
+      bulkReviewRef.current.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start' 
+      });
+    }
+  }, [showBulkReview]);
+
+  // Load salon data to get business categories
+  const { data: salonData } = useQuery({
+    queryKey: ['/api/salons', salonId],
+    enabled: !!salonId,
+  });
+
+  // Parse business categories and get relevant service categories
+  const parseCategories = (categoryData: any): string[] => {
+    if (!categoryData) return [];
+    if (Array.isArray(categoryData)) return categoryData;
+    if (typeof categoryData === 'string') {
+      try {
+        const parsed = JSON.parse(categoryData);
+        return Array.isArray(parsed) ? parsed : [categoryData];
+      } catch {
+        return [categoryData];
+      }
+    }
+    return [];
+  };
+
+  const businessCategories = parseCategories((salonData as any)?.category);
+  const relevantServiceCategories = getRelevantServiceCategories(businessCategories);
+  const smartSuggestions = getSmartServiceSuggestions(businessCategories);
+
+  // Filter main categories to show only relevant ones (unless user wants to see all)
+  const displayedCategories = showAllCategories 
+    ? mainCategories 
+    : mainCategories.filter(cat => relevantServiceCategories.includes(cat.id));
 
   // Load existing services
   const { data: existingServices } = useQuery({
     queryKey: ['/api/salons', salonId, 'services'],
     enabled: !!salonId,
-    staleTime: 0, // Always refetch when invalidated
+    staleTime: 0,
   });
 
   // Update local services state when query data changes
   useEffect(() => {
     if (existingServices && Array.isArray(existingServices)) {
-      // Convert backend format to frontend format
       const convertedServices = existingServices.map((service: any) => ({
         id: service.id,
         name: service.name,
         description: service.description,
-        duration: service.durationMinutes, // Convert field name
-        price: service.priceInPaisa / 100, // Convert paisa to rupees
+        duration: service.durationMinutes,
+        price: service.priceInPaisa / 100,
         category: service.category
       }));
       setServices(convertedServices);
@@ -71,12 +284,11 @@ export default function ServicesStep({
   // Add service mutation
   const addServiceMutation = useMutation({
     mutationFn: async (service: Service) => {
-      // Convert frontend format to backend format
       const serviceData = {
         name: service.name,
         description: service.description,
-        durationMinutes: service.duration, // Fix field name
-        priceInPaisa: Math.round(service.price * 100), // Convert price to paisa
+        durationMinutes: service.duration,
+        priceInPaisa: Math.round(service.price * 100),
         currency: 'INR',
         category: service.category,
         isActive: 1
@@ -85,34 +297,18 @@ export default function ServicesStep({
       return response.json();
     },
     onSuccess: (data) => {
-      // Convert backend response to frontend format before updating local state
       const frontendService = {
         id: data.id,
         name: data.name,
         description: data.description,
-        duration: data.durationMinutes, // Convert field name
-        price: data.priceInPaisa / 100, // Convert paisa to rupees
+        duration: data.durationMinutes,
+        price: data.priceInPaisa / 100,
         category: data.category
       };
       setServices(prev => [...prev, frontendService]);
-      setNewService({ name: "", description: "", duration: 60, price: 0, category: "Hair" });
-      setIsAddingService(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
-      // Also invalidate salon profile to ensure immediate updates
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
-      toast({
-        title: "Service Added!",
-        description: `${data.name} is now available for customers to book on your salon profile.`,
-      });
-    },
-    onError: (error) => {
-      console.error('Failed to add service:', error);
-      toast({
-        title: "Failed to Add Service",
-        description: "Unable to add service. Please check your connection and try again.",
-        variant: "destructive",
-      });
     }
   });
 
@@ -121,12 +317,11 @@ export default function ServicesStep({
     mutationFn: async (service: Service) => {
       if (!service.id) throw new Error('Service ID required for update');
       
-      // Convert frontend format to backend format
       const serviceData = {
         name: service.name,
         description: service.description,
-        durationMinutes: service.duration, // Fix field name
-        priceInPaisa: Math.round(service.price * 100), // Convert price to paisa
+        durationMinutes: service.duration,
+        priceInPaisa: Math.round(service.price * 100),
         currency: 'INR',
         category: service.category,
         isActive: 1
@@ -135,32 +330,22 @@ export default function ServicesStep({
       return response.json();
     },
     onSuccess: (data) => {
-      // Convert backend response to frontend format before updating local state
       const frontendService = {
         id: data.id,
         name: data.name,
         description: data.description,
-        duration: data.durationMinutes, // Convert field name
-        price: data.priceInPaisa / 100, // Convert paisa to rupees
+        duration: data.durationMinutes,
+        price: data.priceInPaisa / 100,
         category: data.category
       };
       setServices(prev => prev.map(s => s.id === data.id ? frontendService : s));
       setEditingService(null);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
-      // Also invalidate salon profile to ensure immediate updates
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
         title: "Service Updated!",
-        description: `${data.name} has been updated and changes are immediately visible to customers.`,
-      });
-    },
-    onError: (error) => {
-      console.error('Failed to update service:', error);
-      toast({
-        title: "Failed to Update Service",
-        description: "Unable to update service. Please check your connection and try again.",
-        variant: "destructive",
+        description: `${data.name} has been updated successfully.`,
       });
     }
   });
@@ -176,39 +361,89 @@ export default function ServicesStep({
       setServices(prev => prev.filter(s => s.id !== serviceId));
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
-      // Also invalidate salon profile to ensure immediate updates
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       toast({
         title: "Service Removed",
-        description: `${removedService?.name || 'Service'} is no longer available for booking.`,
-      });
-    },
-    onError: (error) => {
-      console.error('Failed to delete service:', error);
-      toast({
-        title: "Failed to Delete Service",
-        description: "Unable to delete service. Please check your connection and try again.",
-        variant: "destructive",
+        description: `${removedService?.name || 'Service'} has been removed.`,
       });
     }
   });
 
-  const handleAddService = async () => {
-    if (!newService.name.trim() || newService.price <= 0) {
-      toast({
-        title: "Invalid Service",
-        description: "Please provide a service name and valid price.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    await addServiceMutation.mutateAsync(newService);
+  // Toggle service selection
+  const toggleServiceSelection = (serviceName: string) => {
+    setSelectedServices(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(serviceName)) {
+        newSet.delete(serviceName);
+      } else {
+        newSet.add(serviceName);
+      }
+      return newSet;
+    });
   };
 
-  const handleUpdateService = async () => {
-    if (!editingService) return;
-    await updateServiceMutation.mutateAsync(editingService);
+  // Handle bulk add services
+  const handleBulkAdd = () => {
+    const newServices: Service[] = Array.from(selectedServices).map(serviceName => {
+      const suggestion = serviceSuggestions[serviceName];
+      return {
+        name: serviceName,
+        description: suggestion?.description || `Professional ${serviceName.toLowerCase()} service`,
+        duration: suggestion?.duration || 60,
+        price: suggestion?.price || 0,
+        category: serviceName
+      };
+    });
+    
+    setBulkServices(newServices);
+    setShowBulkReview(true);
+  };
+
+  // Save all bulk services (using bulk endpoint for maximum performance)
+  const handleSaveBulkServices = async () => {
+    try {
+      // Transform frontend format to API format
+      const servicesForApi = bulkServices.map(service => ({
+        name: service.name,
+        description: service.description,
+        durationMinutes: service.duration,
+        priceInPaisa: Math.round(service.price * 100),
+        currency: 'INR',
+        category: service.category,
+        isActive: 1
+      }));
+      
+      // Use bulk endpoint to create all services in a single request
+      await apiRequest('POST', `/api/salons/${salonId}/services/bulk`, servicesForApi);
+      
+      // Invalidate query cache to refresh the services list
+      queryClient.invalidateQueries({ queryKey: [`/api/salons/${salonId}/services`] });
+      
+      toast({
+        title: "Services Added Successfully!",
+        description: `${bulkServices.length} services have been added to your salon.`,
+      });
+      
+      setSelectedServices(new Set());
+      setBulkServices([]);
+      setShowBulkReview(false);
+    } catch (error) {
+      toast({
+        title: "Error Adding Services",
+        description: "Some services failed to add. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Quick add template
+  const handleQuickTemplate = (template: string) => {
+    const serviceNames = businessTemplates[template as keyof typeof businessTemplates] || [];
+    setSelectedServices(new Set(serviceNames));
+    toast({
+      title: "Template Applied!",
+      description: `${serviceNames.length} services selected. Review and add them.`,
+    });
   };
 
   const handleContinue = () => {
@@ -224,279 +459,446 @@ export default function ServicesStep({
     onComplete({ services });
   };
 
+  const currentSubServices = subServices[selectedCategory] || [];
+  const categoryInfo = mainCategories.find(c => c.id === selectedCategory);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3 mb-6">
-        <Scissors className="h-6 w-6 text-primary" />
-        <div>
-          <h3 className="text-lg font-semibold">What services do you offer?</h3>
-          <p className="text-muted-foreground">
-            Add the services customers can book with you
-          </p>
-        </div>
-      </div>
-
-      {/* Existing Services */}
-      {services.length > 0 && (
-        <div className="space-y-4">
-          <h4 className="font-medium">Your Services ({services.length})</h4>
-          <div className="grid gap-4">
-            {services.map((service) => (
-              <Card key={service.id} className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1">
-                        <h5 className="font-medium">{service.name}</h5>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {service.description}
-                        </p>
-                        <div className="flex items-center gap-4 mt-2">
-                          <Badge variant="outline">{service.category}</Badge>
-                          <span className="text-sm text-muted-foreground">
-                            {service.duration} min
-                          </span>
-                          <span className="font-medium text-primary">
-                            ₹{service.price}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditingService(service)}
-                      data-testid={`button-edit-service-${service.id}`}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => service.id && deleteServiceMutation.mutate(service.id)}
-                      disabled={deleteServiceMutation.isPending}
-                      data-testid={`button-delete-service-${service.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
+      {/* Header */}
+      {!showBulkReview && (
+        <div className="flex items-center gap-3">
+          <Scissors className="h-6 w-6 text-purple-600" />
+          <div>
+            <h3 className="text-lg font-semibold">What services do you offer?</h3>
+            <p className="text-sm text-muted-foreground">
+              Select multiple services quickly, then customize prices & durations
+            </p>
           </div>
         </div>
       )}
 
-      {/* Add New Service */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">
-            {isAddingService ? "Add New Service" : "Add Your First Service"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!isAddingService ? (
-            <Button
-              onClick={() => setIsAddingService(true)}
-              className="w-full"
-              variant="outline"
-              data-testid="button-add-service"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Service
-            </Button>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="service-name">Service Name *</Label>
-                  <Input
-                    id="service-name"
-                    value={newService.name}
-                    onChange={(e) => setNewService(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g., Haircut & Style"
-                    data-testid="input-service-name"
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="service-category">Category</Label>
-                  <Input
-                    id="service-category"
-                    value={newService.category}
-                    onChange={(e) => setNewService(prev => ({ ...prev, category: e.target.value }))}
-                    placeholder="e.g., Hair, Nails, Massage"
-                    data-testid="input-service-category"
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="service-duration">Duration (minutes) *</Label>
-                  <Input
-                    id="service-duration"
-                    type="number"
-                    min="15"
-                    max="480"
-                    value={newService.duration}
-                    onChange={(e) => setNewService(prev => ({ ...prev, duration: parseInt(e.target.value) }))}
-                    data-testid="input-service-duration"
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="service-price">Price (₹) *</Label>
-                  <Input
-                    id="service-price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newService.price}
-                    onChange={(e) => setNewService(prev => ({ ...prev, price: parseFloat(e.target.value) }))}
-                    data-testid="input-service-price"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <Label htmlFor="service-description">Description</Label>
-                <Textarea
-                  id="service-description"
-                  value={newService.description}
-                  onChange={(e) => setNewService(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="Describe what's included in this service..."
-                  className="min-h-[80px]"
-                  data-testid="textarea-service-description"
-                />
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleAddService}
-                  disabled={addServiceMutation.isPending}
-                  data-testid="button-save-service"
-                >
-                  {addServiceMutation.isPending ? "Adding..." : "Add Service"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsAddingService(false)}
-                  data-testid="button-cancel-add-service"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Edit Service Modal */}
-      {editingService && (
-        <Card className="border-primary">
+      {/* Intelligent Suggestions Based on Business Category */}
+      {!showBulkReview && services.length === 0 && smartSuggestions.length > 0 && (
+        <Card className="bg-gradient-to-br from-violet-50 to-pink-50 border-purple-200">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Edit Service</CardTitle>
+            <div className="flex items-center gap-2">
+              <Brain className="h-5 w-5 text-purple-600" />
+              <CardTitle className="text-base">Smart Suggestions for Your Business</CardTitle>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="edit-service-name">Service Name *</Label>
-                  <Input
-                    id="edit-service-name"
-                    value={editingService.name}
-                    onChange={(e) => setEditingService(prev => prev ? { ...prev, name: e.target.value } : null)}
-                    data-testid="input-edit-service-name"
-                  />
-                </div>
+            <p className="text-sm text-gray-600 mb-3">
+              Based on your business categories, we recommend these popular services
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              {smartSuggestions.slice(0, 8).map((serviceName) => {
+                const suggestion = serviceSuggestions[serviceName];
+                if (!suggestion) return null;
                 
-                <div>
-                  <Label htmlFor="edit-service-category">Category</Label>
-                  <Input
-                    id="edit-service-category"
-                    value={editingService.category}
-                    onChange={(e) => setEditingService(prev => prev ? { ...prev, category: e.target.value } : null)}
-                    data-testid="input-edit-service-category"
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="edit-service-duration">Duration (minutes) *</Label>
-                  <Input
-                    id="edit-service-duration"
-                    type="number"
-                    min="15"
-                    max="480"
-                    value={editingService.duration}
-                    onChange={(e) => setEditingService(prev => prev ? { ...prev, duration: parseInt(e.target.value) } : null)}
-                    data-testid="input-edit-service-duration"
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="edit-service-price">Price (₹) *</Label>
-                  <Input
-                    id="edit-service-price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={editingService.price}
-                    onChange={(e) => setEditingService(prev => prev ? { ...prev, price: parseFloat(e.target.value) } : null)}
-                    data-testid="input-edit-service-price"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <Label htmlFor="edit-service-description">Description</Label>
-                <Textarea
-                  id="edit-service-description"
-                  value={editingService.description}
-                  onChange={(e) => setEditingService(prev => prev ? { ...prev, description: e.target.value } : null)}
-                  className="min-h-[80px]"
-                  data-testid="textarea-edit-service-description"
-                />
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleUpdateService}
-                  disabled={updateServiceMutation.isPending}
-                  data-testid="button-update-service"
-                >
-                  {updateServiceMutation.isPending ? "Updating..." : "Update Service"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setEditingService(null)}
-                  data-testid="button-cancel-edit-service"
-                >
-                  Cancel
-                </Button>
-              </div>
+                return (
+                  <Button
+                    key={serviceName}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const newSet = new Set(selectedServices);
+                      newSet.add(serviceName);
+                      setSelectedServices(newSet);
+                    }}
+                    className="h-auto py-2 px-3 flex flex-col items-start bg-white hover:bg-purple-50 text-left"
+                  >
+                    <div className="font-medium text-xs">{serviceName}</div>
+                    <div className="text-xs text-gray-500">
+                      ₹{suggestion.price} • {suggestion.duration}min
+                    </div>
+                  </Button>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Action Buttons */}
-      <div className="flex items-center justify-between pt-4">
-        <div className="text-sm text-muted-foreground">
-          {isCompleted && (
-            <span className="text-green-600 font-medium">✓ Completed</span>
-          )}
-        </div>
+      {/* Multi-Select Service Browser */}
+      {!showBulkReview && (
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Browse & Select Services</CardTitle>
+            {selectedServices.size > 0 && (
+              <Badge className="bg-gradient-to-r from-purple-600 to-pink-600">
+                {selectedServices.size} Selected
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Category Pills with Intelligent Filtering */}
+          <div className="space-y-2">
+            {businessCategories.length > 0 && !showAllCategories && (
+              <div className="flex items-center gap-2 mb-2">
+                <Badge className="bg-gradient-to-r from-purple-600 to-pink-600">
+                  <Brain className="h-3 w-3 mr-1" />
+                  Recommended for your business
+                </Badge>
+              </div>
+            )}
+            
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {displayedCategories.map((category) => (
+                <button
+                  key={category.id}
+                  onClick={() => setSelectedCategory(category.id)}
+                  className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    selectedCategory === category.id
+                      ? `bg-gradient-to-r ${category.gradient} text-white shadow-md`
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <span className="mr-1">{category.icon}</span>
+                  {category.name}
+                </button>
+              ))}
+              
+              {!showAllCategories && businessCategories.length > 0 && (
+                <button
+                  onClick={() => setShowAllCategories(true)}
+                  className="flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium bg-white border-2 border-dashed border-gray-300 text-gray-600 hover:border-purple-400 hover:text-purple-600 transition-all"
+                >
+                  + Show All Categories
+                </button>
+              )}
+            </div>
+          </div>
 
-        <Button
-          onClick={handleContinue}
-          disabled={services.length === 0}
-          data-testid="button-continue-services"
-        >
-          Continue with {services.length} Service{services.length !== 1 ? 's' : ''}
-        </Button>
-      </div>
+          {/* Service Cards Grid */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-medium text-gray-700">
+                {categoryInfo?.icon} {categoryInfo?.name}
+              </h4>
+              <span className="text-xs text-gray-500">
+                ({currentSubServices.length} services)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {currentSubServices.map((service) => {
+                const isSelected = selectedServices.has(service.name);
+                const suggestion = serviceSuggestions[service.name];
+                const isAlreadyAdded = services.some(s => s.name === service.name);
+
+                return (
+                  <div
+                    key={service.name}
+                    onClick={() => !isAlreadyAdded && toggleServiceSelection(service.name)}
+                    className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                      isAlreadyAdded
+                        ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                        : isSelected
+                        ? `border-purple-500 bg-gradient-to-br from-purple-50 to-pink-50 shadow-md`
+                        : 'border-gray-200 hover:border-purple-300 hover:shadow-sm'
+                    }`}
+                  >
+                    {/* Checkbox */}
+                    <div className="absolute top-2 right-2">
+                      {isAlreadyAdded ? (
+                        <div className="w-5 h-5 rounded bg-green-100 flex items-center justify-center">
+                          <Check className="h-3 w-3 text-green-600" />
+                        </div>
+                      ) : (
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleServiceSelection(service.name)}
+                          className="data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600"
+                        />
+                      )}
+                    </div>
+
+                    <div className="pr-8">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-2xl">{service.icon}</span>
+                        <h5 className="font-medium text-sm">{service.name}</h5>
+                      </div>
+                      
+                      {suggestion && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-3 text-xs text-gray-600">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {suggestion.duration} min
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <IndianRupee className="h-3 w-3" />
+                              {suggestion.price}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {isAlreadyAdded && (
+                        <Badge variant="outline" className="mt-2 text-xs bg-green-50 text-green-700 border-green-200">
+                          Already Added
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Bulk Add Button */}
+          {selectedServices.size > 0 && (
+            <div className="pt-4 border-t">
+              <Button
+                onClick={handleBulkAdd}
+                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                size="lg"
+              >
+                <Plus className="h-5 w-5 mr-2" />
+                Add {selectedServices.size} Selected Service{selectedServices.size > 1 ? 's' : ''}
+                <ChevronRight className="h-5 w-5 ml-2" />
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      )}
+
+      {/* Existing Services List */}
+      {services.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Your Services ({services.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {services.map((service) => (
+                editingService?.id === service.id ? (
+                  // Inline Edit Mode
+                  <Card key={service.id} className="p-4 bg-gradient-to-br from-violet-50 to-pink-50 border-purple-200">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="font-medium">Edit Service</h5>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditingService(null)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      <div>
+                        <Label className="text-sm">Service Name</Label>
+                        <Input
+                          value={editingService.name}
+                          onChange={(e) => setEditingService({ ...editingService, name: e.target.value })}
+                          className="mt-1"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-sm">Duration (minutes)</Label>
+                          <Input
+                            type="number"
+                            value={editingService.duration}
+                            onChange={(e) => setEditingService({ ...editingService, duration: parseInt(e.target.value) || 0 })}
+                            className="mt-1"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm">Price (₹)</Label>
+                          <Input
+                            type="number"
+                            value={editingService.price}
+                            onChange={(e) => setEditingService({ ...editingService, price: parseInt(e.target.value) || 0 })}
+                            className="mt-1"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label className="text-sm">Description</Label>
+                        <Textarea
+                          value={editingService.description}
+                          onChange={(e) => setEditingService({ ...editingService, description: e.target.value })}
+                          className="mt-1"
+                          rows={3}
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-3 pt-2">
+                        <Button variant="outline" onClick={() => setEditingService(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => updateServiceMutation.mutate(editingService)}
+                          className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                        >
+                          <Check className="h-4 w-4 mr-2" />
+                          Save Changes
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ) : (
+                  // Normal Service Card
+                  <div
+                    key={service.id}
+                    className="flex items-center justify-between p-3 bg-gradient-to-br from-violet-50/50 to-pink-50/50 rounded-lg border"
+                  >
+                    <div className="flex-1">
+                      <h5 className="font-medium text-sm">{service.name}</h5>
+                      <div className="flex items-center gap-4 mt-1">
+                        <span className="text-xs text-gray-600 flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {service.duration} min
+                        </span>
+                        <span className="text-xs font-medium text-purple-600 flex items-center gap-1">
+                          <IndianRupee className="h-3 w-3" />
+                          {service.price}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditingService(service)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => service.id && deleteServiceMutation.mutate(service.id)}
+                        disabled={deleteServiceMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {/* Continue Button - Only show when not reviewing */}
+      {!showBulkReview && (
+        <div className="flex justify-end">
+          <Button
+            onClick={handleContinue}
+            disabled={services.length === 0}
+            size="lg"
+            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+          >
+            Continue
+            <ChevronRight className="h-5 w-5 ml-2" />
+          </Button>
+        </div>
+      )}
+
+      {/* Bulk Review Inline Section */}
+      {showBulkReview && (
+        <Card ref={bulkReviewRef} className="mb-6 scroll-mt-20">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Review & Customize Services</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Customize prices and durations before adding these services
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => setShowBulkReview(false)}
+              >
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {bulkServices.map((service, index) => (
+              <Card key={index} className="p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm">Service Name</Label>
+                    <Input
+                      value={service.name}
+                      onChange={(e) => {
+                        const updated = [...bulkServices];
+                        updated[index].name = e.target.value;
+                        setBulkServices(updated);
+                      }}
+                      className="mt-1"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-sm">Duration (min)</Label>
+                      <Input
+                        type="number"
+                        value={service.duration}
+                        onChange={(e) => {
+                          const updated = [...bulkServices];
+                          updated[index].duration = parseInt(e.target.value) || 0;
+                          setBulkServices(updated);
+                        }}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm">Price (₹)</Label>
+                      <Input
+                        type="number"
+                        value={service.price}
+                        onChange={(e) => {
+                          const updated = [...bulkServices];
+                          updated[index].price = parseInt(e.target.value) || 0;
+                          setBulkServices(updated);
+                        }}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <Label className="text-sm">Description</Label>
+                    <Textarea
+                      value={service.description}
+                      onChange={(e) => {
+                        const updated = [...bulkServices];
+                        updated[index].description = e.target.value;
+                        setBulkServices(updated);
+                      }}
+                      className="mt-1"
+                      rows={2}
+                    />
+                  </div>
+                </div>
+              </Card>
+            ))}
+
+            <div className="flex justify-end gap-3 pt-4">
+              <Button
+                onClick={handleSaveBulkServices}
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+              >
+                <Check className="h-4 w-4 mr-2" />
+                Add All Services
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

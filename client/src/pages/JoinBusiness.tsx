@@ -34,7 +34,7 @@ export default function JoinBusiness() {
         setLocation('/dashboard');
       } else {
         // If no salons, go to business setup
-        setLocation('/business-setup');
+        setLocation('/business/setup');
       }
     }
   }, [isAuthenticated, user, setLocation]);
@@ -211,7 +211,7 @@ export default function JoinBusiness() {
 
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-gradient-to-br from-violet-100 via-pink-100 to-rose-50 flex">
       {/* Left Side - Form */}
       <div className="flex-1 flex items-center justify-center p-8 lg:p-16">
         <div className="w-full max-w-md">

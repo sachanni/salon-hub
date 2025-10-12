@@ -35,6 +35,11 @@ import {
   type BulkUpdateBookingInput,
   type RescheduleBookingInput,
   validateStatusTransition,
+  // Package validation schemas
+  createPackageSchema,
+  updatePackageSchema,
+  type CreatePackageInput,
+  type UpdatePackageInput,
   // Customer profile validation schemas
   updateCustomerNotesSchema,
   updateCustomerProfileSchema,
@@ -82,6 +87,9 @@ import {
   type PlacesGeocodeResponse,
   // User saved locations validation schema
   insertUserSavedLocationSchema,
+  // Package/combo validation schemas
+  insertServicePackageSchema,
+  insertPackageServiceSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
 import { communicationService, sendBookingConfirmation, sendBookingReminder } from "./communicationService";
@@ -241,6 +249,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Assign role to user
       await storage.assignUserRole(newUser.id, role.id);
+
+      // Automatically create organization and salon for business owners
+      if (userType === 'owner') {
+        try {
+          // Create organization for the business owner
+          const orgData = {
+            name: `${firstName || 'My'} Business Organization`,
+            description: 'Business organization for salon management',
+            ownerUserId: newUser.id,
+            status: 'active'
+          };
+          const newOrg = await storage.createOrganization(orgData);
+
+          // Add owner as member of organization
+          await storage.addOrganizationMember(newOrg.id, newUser.id, 'owner');
+
+          // Create default salon for the organization
+          const salonData = {
+            name: `${firstName || 'My'} ${lastName || ''} Salon`.trim(),
+            organizationId: newOrg.id,
+            ownerId: newUser.id,
+            address: '',
+            city: '',
+            state: '',
+            postalCode: '',
+            country: 'India',
+            email: email,
+            isActive: true
+          };
+          const newSalon = await storage.createSalon(salonData);
+          
+          console.log(`Auto-created organization ${newOrg.id} and salon ${newSalon.id} for business owner ${newUser.id}`);
+        } catch (orgError) {
+          console.error("Failed to auto-create organization/salon for business owner:", orgError);
+          // Don't fail registration if organization creation fails - they can create it later
+        }
+      }
 
       // Establish session after successful registration
       req.session.userId = newUser.id;
@@ -423,6 +468,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TEST: Alternative endpoint to debug Vite proxy issue
+  app.get('/api/salon-details/:salonId', async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const salon = await storage.getSalon(salonId);
+      
+      if (!salon) {
+        return res.status(404).json({ error: 'Salon not found' });
+      }
+
+      const mediaAssets = await storage.getMediaAssetsBySalonId(salonId);
+      const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image' && asset.isPrimary === 1)?.url || 
+                          mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
+      
+      const salonWithImage = {
+        ...salon,
+        image: primaryImage,
+        openTime: salon.openTime || '09:00',
+        closeTime: salon.closeTime || '18:00'
+      };
+      
+      res.json(salonWithImage);
+    } catch (error) {
+      console.error('Error fetching salon:', error);
+      res.status(500).json({ error: 'Failed to fetch salon' });
+    }
+  });
+
   // PUBLIC: Get salon information for customer viewing (no auth required)
   app.get('/api/salons/:salonId', async (req: any, res) => {
     try {
@@ -433,16 +506,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Salon not found' });
       }
 
-      // Add primary image from media assets (consistent with /api/salons endpoint)
       const mediaAssets = await storage.getMediaAssetsBySalonId(salonId);
       const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image' && asset.isPrimary === 1)?.url || 
                           mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
-      console.log(`Salon ${salon.name}: Found ${mediaAssets?.length || 0} media assets, primary: ${primaryImage || 'none'}`);
       
       const salonWithImage = {
         ...salon,
         image: primaryImage,
-        // Add default business hours if not set
         openTime: salon.openTime || '09:00',
         closeTime: salon.closeTime || '18:00'
       };
@@ -494,6 +564,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error updating salon:', error);
       res.status(500).json({ error: 'Failed to update salon' });
+    }
+  });
+
+  // Get salon setup completion status (validates all 8 required steps)
+  app.get('/api/salons/:salonId/setup-status', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      // Fetch salon and related data
+      const [salon, services, staff, bookingSettings, payoutAccount, mediaAssets] = await Promise.all([
+        storage.getSalon(salonId),
+        storage.getServicesBySalonId(salonId),
+        storage.getStaffBySalonId(salonId),
+        storage.getBookingSettings(salonId),
+        storage.getPayoutAccount(salonId),
+        storage.getMediaAssetsBySalonId(salonId),
+      ]);
+
+      if (!salon) {
+        return res.status(404).json({ error: 'Salon not found' });
+      }
+
+      // Validate each of the 8 setup steps
+      const setupStatus = {
+        businessInfo: {
+          completed: !!(salon.name && salon.description && salon.category && salon.priceRange),
+          requiredFields: ['name', 'description', 'category', 'priceRange'],
+          missingFields: [] as string[],
+        },
+        locationContact: {
+          completed: !!(salon.address && salon.city && salon.state && salon.zipCode && salon.latitude && salon.longitude && salon.phone && salon.email),
+          requiredFields: ['address', 'city', 'state', 'zipCode', 'latitude', 'longitude', 'phone', 'email'],
+          missingFields: [] as string[],
+        },
+        services: {
+          completed: services && services.length > 0,
+          count: services?.length || 0,
+          message: services && services.length > 0 ? `${services.length} service(s) added` : 'No services added yet',
+        },
+        staff: {
+          completed: staff && staff.length > 0,
+          count: staff?.length || 0,
+          message: staff && staff.length > 0 ? `${staff.length} team member(s) added` : 'No staff added yet',
+        },
+        resources: {
+          completed: true, // Optional step
+          optional: true,
+          message: 'Resources are optional',
+        },
+        bookingSettings: {
+          completed: !!bookingSettings,
+          message: bookingSettings ? 'Booking settings configured' : 'Booking settings not configured',
+        },
+        paymentSetup: {
+          completed: !!payoutAccount,
+          optional: true, // Optional - salon can publish and configure payments later
+          message: payoutAccount ? 'Payment account configured' : 'Payment not configured - bookings will work but payments disabled',
+        },
+        media: {
+          completed: mediaAssets && mediaAssets.length > 0,
+          count: mediaAssets?.length || 0,
+          message: mediaAssets && mediaAssets.length > 0 ? `${mediaAssets.length} photo(s) uploaded` : 'No photos uploaded yet',
+        },
+      };
+
+      // Calculate missing fields for businessInfo
+      if (!setupStatus.businessInfo.completed) {
+        setupStatus.businessInfo.missingFields = setupStatus.businessInfo.requiredFields.filter(
+          field => !salon[field as keyof typeof salon]
+        );
+      }
+
+      // Calculate missing fields for locationContact
+      if (!setupStatus.locationContact.completed) {
+        setupStatus.locationContact.missingFields = setupStatus.locationContact.requiredFields.filter(
+          field => !salon[field as keyof typeof salon]
+        );
+      }
+
+      // Calculate overall completion (resources and payment setup are optional)
+      // Payment setup is optional to allow quick launch - salon can configure payments later
+      const requiredSteps = ['businessInfo', 'locationContact', 'services', 'staff', 'bookingSettings', 'media'] as const;
+      const completedSteps = requiredSteps.filter(step => setupStatus[step].completed);
+      const isSetupComplete = completedSteps.length === requiredSteps.length;
+
+      // Update setup_progress in database
+      const progressData = {
+        businessInfo: { completed: setupStatus.businessInfo.completed, timestamp: new Date().toISOString() },
+        locationContact: { completed: setupStatus.locationContact.completed, timestamp: new Date().toISOString() },
+        services: { completed: setupStatus.services.completed, timestamp: new Date().toISOString() },
+        staff: { completed: setupStatus.staff.completed, timestamp: new Date().toISOString() },
+        resources: { completed: setupStatus.resources.completed, timestamp: new Date().toISOString() },
+        bookingSettings: { completed: setupStatus.bookingSettings.completed, timestamp: new Date().toISOString() },
+        paymentSetup: { completed: setupStatus.paymentSetup.completed, timestamp: new Date().toISOString() },
+        media: { completed: setupStatus.media.completed, timestamp: new Date().toISOString() },
+        lastUpdated: new Date().toISOString(),
+        isComplete: isSetupComplete,
+      };
+
+      await storage.updateSalon(salonId, { setupProgress: progressData });
+
+      res.json({
+        salonId,
+        isSetupComplete,
+        completedSteps: completedSteps.length,
+        totalSteps: requiredSteps.length,
+        progress: Math.round((completedSteps.length / requiredSteps.length) * 100),
+        steps: setupStatus,
+      });
+    } catch (error) {
+      console.error('Error fetching salon setup status:', error);
+      res.status(500).json({ error: 'Failed to fetch setup status' });
     }
   });
 
@@ -1310,6 +1492,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   app.get('/api/locations/search', communicationRateLimits.analytics, async (req, res) => {
+    // Prevent HTTP caching - always get fresh results
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
     try {
       const query = req.query.q as string;
       
@@ -1804,6 +1991,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to search locations',
         message: 'Please try again later'
       });
+    }
+  });
+
+  // Reverse geocoding endpoint - convert coordinates to location name
+  app.get('/api/locations/reverse', communicationRateLimits.analytics, async (req, res) => {
+    // Prevent HTTP caching
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    try {
+      const lat = parseFloat(req.query.lat as string);
+      const lng = parseFloat(req.query.lng as string);
+      
+      if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ error: 'Invalid coordinates' });
+      }
+
+      // Check our Delhi NCR database first for instant results
+      const delhiNCRLocations = [
+        { name: 'Connaught Place', area: 'New Delhi', coords: { lat: 28.6315, lng: 77.2167 }, state: 'Delhi' },
+        { name: 'Cyber City', area: 'Gurugram', coords: { lat: 28.4960, lng: 77.0900 }, state: 'Haryana' },
+        { name: 'Sector 18', area: 'Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh' },
+        { name: 'Nirala Estate', area: 'Greater Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh' },
+        { name: 'Saket', area: 'New Delhi', coords: { lat: 28.5245, lng: 77.2069 }, state: 'Delhi' },
+        { name: 'Greater Noida', area: 'Greater Noida', coords: { lat: 28.4744, lng: 77.5040 }, state: 'Uttar Pradesh' },
+        { name: 'Ghaziabad', area: 'Ghaziabad', coords: { lat: 28.6692, lng: 77.4538 }, state: 'Uttar Pradesh' },
+        { name: 'Faridabad', area: 'Faridabad', coords: { lat: 28.4089, lng: 77.3178 }, state: 'Haryana' },
+        { name: 'Gurugram', area: 'Gurugram', coords: { lat: 28.4595, lng: 77.0266 }, state: 'Haryana' },
+        { name: 'Noida', area: 'Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh' },
+        { name: 'Delhi', area: 'New Delhi', coords: { lat: 28.7041, lng: 77.1025 }, state: 'Delhi' }
+      ];
+
+      // Find nearest location from our database
+      const findNearest = (locations: typeof delhiNCRLocations) => {
+        let nearest = null;
+        let minDistance = Infinity;
+
+        for (const loc of locations) {
+          const distance = Math.sqrt(
+            Math.pow(lat - loc.coords.lat, 2) + Math.pow(lng - loc.coords.lng, 2)
+          );
+          
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearest = loc;
+          }
+        }
+
+        // If within ~5km (0.05 degrees), return the nearest location
+        if (minDistance < 0.05 && nearest) {
+          return `${nearest.name}, ${nearest.area}`;
+        }
+        return null;
+      };
+
+      const nearestLocation = findNearest(delhiNCRLocations);
+      if (nearestLocation) {
+        console.log(`✅ Reverse geocoded to nearby location: ${nearestLocation}`);
+        return res.json({ address: nearestLocation });
+      }
+
+      // Fall back to Google Places API for accurate reverse geocoding
+      const googlePlacesKey = process.env.GOOGLE_PLACES_API_KEY;
+      if (googlePlacesKey) {
+        try {
+          const googleUrl = 'https://maps.googleapis.com/maps/api/geocode/json';
+          const googleParams = new URLSearchParams({
+            latlng: `${lat},${lng}`,
+            key: googlePlacesKey,
+            result_type: 'locality|sublocality|neighborhood'
+          });
+
+          const googleResponse = await fetch(`${googleUrl}?${googleParams}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (googleResponse.ok) {
+            const data = await googleResponse.json();
+            if (data.status === 'OK' && data.results && data.results.length > 0) {
+              const result = data.results[0];
+              const address = result.formatted_address || result.address_components?.[0]?.long_name;
+              console.log(`✅ Google reverse geocoded: ${address}`);
+              return res.json({ address });
+            }
+          }
+        } catch (error) {
+          console.error('Google reverse geocoding error:', error);
+        }
+      }
+
+      // Final fallback: simple area name
+      const fallbackAddress = 'Current location';
+      console.log(`⚠️ Reverse geocoding fallback for (${lat}, ${lng})`);
+      res.json({ address: fallbackAddress });
+
+    } catch (error) {
+      console.error('Reverse geocoding error:', error);
+      res.status(500).json({ error: 'Reverse geocoding failed', address: 'Current location' });
     }
   });
 
@@ -3646,6 +3932,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk create services for a specific salon (optimized for performance)
+  app.post('/api/salons/:salonId/services/bulk', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const servicesArray = Array.isArray(req.body) ? req.body : [req.body];
+      
+      // Ensure isActive is always an integer (0 or 1)
+      const normalizeIsActive = (value: any): number => {
+        if (typeof value === 'boolean') return value ? 1 : 0;
+        if (typeof value === 'number') return value ? 1 : 0;
+        if (typeof value === 'string') return value.toLowerCase() === 'true' ? 1 : 0;
+        return 1; // Default to active
+      };
+      
+      const t0 = Date.now();
+      
+      // Process all services in parallel
+      const createdServices = await Promise.all(
+        servicesArray.map((service: any) => 
+          storage.createService({
+            ...service,
+            salonId,
+            isActive: normalizeIsActive(service.isActive)
+          })
+        )
+      );
+      
+      const t1 = Date.now();
+      console.log(`[perf] Bulk createService took ${t1 - t0}ms for ${createdServices.length} services (salonId=${salonId})`);
+      
+      res.json(createdServices);
+    } catch (error) {
+      console.error('Error creating salon services in bulk:', error);
+      res.status(500).json({ error: 'Failed to create salon services' });
+    }
+  });
+
   // Create service for a specific salon
   app.post('/api/salons/:salonId/services', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
     try {
@@ -3720,6 +4043,336 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error deleting salon service:', error);
       res.status(500).json({ error: 'Failed to delete salon service' });
+    }
+  });
+
+  // ========== PACKAGE/COMBO ENDPOINTS ==========
+  
+  // PUBLIC: Get all packages for a salon
+  app.get('/api/salons/:salonId/packages', async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const packages = await storage.getPackagesBySalonId(salonId);
+      res.json(packages || []);
+    } catch (error) {
+      console.error('Error fetching salon packages:', error);
+      res.status(500).json({ error: 'Failed to fetch salon packages' });
+    }
+  });
+
+  // PUBLIC: Get single package with services
+  app.get('/api/salons/:salonId/packages/:packageId', async (req: any, res) => {
+    try {
+      const { salonId, packageId } = req.params;
+      const packageData = await storage.getPackageWithServices(packageId);
+      
+      if (!packageData || packageData.salonId !== salonId) {
+        return res.status(404).json({ error: 'Package not found or does not belong to this salon' });
+      }
+      
+      res.json(packageData);
+    } catch (error) {
+      console.error('Error fetching package:', error);
+      res.status(500).json({ error: 'Failed to fetch package' });
+    }
+  });
+
+  // PROTECTED: Create package for a salon
+  app.post('/api/salons/:salonId/packages', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      // Validate request body
+      const validationResult = createPackageSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid package data', 
+          details: validationResult.error.errors.map(e => ({ field: e.path.join('.'), message: e.message }))
+        });
+      }
+
+      const { serviceIds, name, description, discountedPricePaisa } = validationResult.data;
+      
+      // Fetch all selected services to calculate totals
+      if (!serviceIds || serviceIds.length < 2) {
+        return res.status(400).json({ error: 'Package must include at least 2 services' });
+      }
+      
+      const services = await Promise.all(
+        serviceIds.map((id: string) => storage.getService(id))
+      );
+      
+      // Validate all services exist and belong to this salon
+      const invalidService = services.find(s => !s || s.salonId !== salonId);
+      if (invalidService === undefined && services.some(s => !s)) {
+        return res.status(400).json({ error: 'One or more services not found' });
+      }
+      if (invalidService) {
+        return res.status(400).json({ error: 'All services must belong to this salon' });
+      }
+      
+      // Calculate totals
+      const totalDurationMinutes = services.reduce((sum, s) => sum + (s?.durationMinutes || 0), 0);
+      const regularPricePaisa = services.reduce((sum, s) => sum + (s?.priceInPaisa || 0), 0);
+      
+      // Validate regular price is positive (prevent division by zero)
+      if (regularPricePaisa <= 0) {
+        return res.status(400).json({ error: 'Services must have a total price greater than 0' });
+      }
+      
+      // Validate discounted price is less than regular price
+      if (discountedPricePaisa >= regularPricePaisa) {
+        return res.status(400).json({ 
+          error: 'Discounted price must be less than regular price', 
+          details: { regularPrice: regularPricePaisa / 100, discountedPrice: discountedPricePaisa / 100 } 
+        });
+      }
+      
+      const discountPercentage = Math.round(((regularPricePaisa - discountedPricePaisa) / regularPricePaisa) * 100);
+      
+      // Create the package with services in a single transaction
+      const newPackage = await storage.createPackageWithServices({
+        name,
+        description,
+        salonId,
+        totalDurationMinutes,
+        packagePriceInPaisa: discountedPricePaisa,
+        regularPriceInPaisa: regularPricePaisa,
+        discountPercentage,
+        currency: 'INR',
+        isActive: 1
+      }, serviceIds, salonId);
+      
+      // Return package with services
+      const packageWithServices = await storage.getPackageWithServices(newPackage.id);
+      res.json(packageWithServices);
+    } catch (error) {
+      console.error('Error creating package:', error);
+      res.status(500).json({ error: 'Failed to create package' });
+    }
+  });
+
+  // PROTECTED: Update package
+  app.put('/api/salons/:salonId/packages/:packageId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
+    try {
+      const { salonId, packageId } = req.params;
+      
+      // Validate request body
+      const validationResult = updatePackageSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          error: 'Invalid package data', 
+          details: validationResult.error.errors.map(e => ({ field: e.path.join('.'), message: e.message }))
+        });
+      }
+      
+      // Verify package belongs to this salon
+      const existingPackage = await storage.getPackage(packageId);
+      if (!existingPackage || existingPackage.salonId !== salonId) {
+        return res.status(404).json({ error: 'Package not found or does not belong to this salon' });
+      }
+      
+      const { serviceIds, name, description, discountedPricePaisa } = validationResult.data;
+      
+      // If services are being updated, recalculate totals
+      if (serviceIds && serviceIds.length > 0) {
+        const services = await Promise.all(
+          serviceIds.map((id: string) => storage.getService(id))
+        );
+        
+        // Validate all services exist and belong to this salon
+        const invalidService = services.find(s => !s || s.salonId !== salonId);
+        if (invalidService === undefined && services.some(s => !s)) {
+          return res.status(400).json({ error: 'One or more services not found' });
+        }
+        if (invalidService) {
+          return res.status(400).json({ error: 'All services must belong to this salon' });
+        }
+        
+        // Calculate new totals
+        const totalDurationMinutes = services.reduce((sum, s) => sum + (s?.durationMinutes || 0), 0);
+        const regularPricePaisa = services.reduce((sum, s) => sum + (s?.priceInPaisa || 0), 0);
+        
+        // Validate regular price is positive (prevent division by zero)
+        if (regularPricePaisa <= 0) {
+          return res.status(400).json({ error: 'Services must have a total price greater than 0' });
+        }
+        
+        const finalDiscountedPrice = discountedPricePaisa || existingPackage.packagePriceInPaisa;
+        
+        // Validate discounted price is less than regular price
+        if (finalDiscountedPrice >= regularPricePaisa) {
+          return res.status(400).json({ 
+            error: 'Discounted price must be less than regular price', 
+            details: { regularPrice: regularPricePaisa / 100, discountedPrice: finalDiscountedPrice / 100 } 
+          });
+        }
+        
+        const discountPercentage = Math.round(((regularPricePaisa - finalDiscountedPrice) / regularPricePaisa) * 100);
+        
+        // Update package with services in a single transaction
+        await storage.updatePackageWithServices(packageId, {
+          ...(name && { name }),
+          ...(description !== undefined && { description }),
+          ...(discountedPricePaisa && { packagePriceInPaisa: discountedPricePaisa }),
+          totalDurationMinutes,
+          regularPriceInPaisa: regularPricePaisa,
+          discountPercentage,
+        }, serviceIds, salonId);
+      } else {
+        // Update only basic fields if services aren't changing
+        await storage.updatePackageWithServices(packageId, {
+          ...(name && { name }),
+          ...(description !== undefined && { description }),
+          ...(discountedPricePaisa && { 
+            packagePriceInPaisa: discountedPricePaisa,
+            discountPercentage: Math.round(((existingPackage.regularPriceInPaisa - discountedPricePaisa) / existingPackage.regularPriceInPaisa) * 100)
+          }),
+        }, null, salonId);
+      }
+      
+      // Return updated package with services
+      const updatedPackage = await storage.getPackageWithServices(packageId);
+      res.json(updatedPackage);
+    } catch (error) {
+      console.error('Error updating package:', error);
+      res.status(500).json({ error: 'Failed to update package' });
+    }
+  });
+
+  // PROTECTED: Delete package
+  app.delete('/api/salons/:salonId/packages/:packageId', isAuthenticated, requireSalonAccess(['owner', 'manager']), async (req: any, res) => {
+    try {
+      const { salonId, packageId } = req.params;
+      
+      // Verify package belongs to this salon
+      const existingPackage = await storage.getPackage(packageId);
+      if (!existingPackage || existingPackage.salonId !== salonId) {
+        return res.status(404).json({ error: 'Package not found or does not belong to this salon' });
+      }
+      
+      await storage.deletePackage(packageId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting package:', error);
+      res.status(500).json({ error: 'Failed to delete package' });
+    }
+  });
+
+  // Create booking endpoint - Supports multiple services with SERVER-SIDE PRICE VALIDATION
+  app.post('/api/bookings', async (req, res) => {
+    try {
+      const {
+        salonId,
+        serviceIds,
+        date,
+        time,
+        staffId,
+        customerName,
+        customerEmail,
+        customerPhone,
+        paymentMethod,
+        isGuest,
+        totalPrice,
+        totalDuration
+      } = req.body;
+
+      // Validate required fields
+      if (!salonId || !serviceIds || !Array.isArray(serviceIds) || serviceIds.length === 0) {
+        return res.status(400).json({ error: 'Missing required fields: salonId and serviceIds are required' });
+      }
+
+      if (!date || !time) {
+        return res.status(400).json({ error: 'Missing required fields: date and time are required' });
+      }
+
+      if (!customerEmail) {
+        return res.status(400).json({ error: 'Customer email is required' });
+      }
+
+      // Fetch all services from database for SERVER-SIDE PRICE VALIDATION
+      const services = await Promise.all(
+        serviceIds.map((id: string) => storage.getService(id))
+      );
+
+      // Validate all services exist and belong to the salon
+      for (let i = 0; i < services.length; i++) {
+        const service = services[i];
+        if (!service || !service.isActive) {
+          return res.status(404).json({ error: `Service ${serviceIds[i]} not found or inactive` });
+        }
+        if (service.salonId !== salonId) {
+          return res.status(400).json({ error: `Service ${serviceIds[i]} does not belong to salon ${salonId}` });
+        }
+      }
+
+      // Validate staffId if provided
+      if (staffId) {
+        const staff = await storage.getStaff(staffId);
+        if (!staff) {
+          return res.status(404).json({ error: 'Staff member not found' });
+        }
+        if (staff.salonId !== salonId) {
+          return res.status(400).json({ error: 'Staff member does not belong to this salon' });
+        }
+      }
+
+      // Calculate server-side price (CRITICAL: Never trust client-side prices)
+      const serverTotalPrice = services.reduce((sum, service) => sum + service!.priceInPaisa, 0);
+      const serverTotalDuration = services.reduce((sum, service) => sum + service!.durationMinutes, 0);
+
+      // Validate client sent correct totals (prevent price and duration manipulation)
+      if (totalPrice !== serverTotalPrice) {
+        console.warn(`Price mismatch: client sent ${totalPrice}, server calculated ${serverTotalPrice}`);
+        return res.status(400).json({ 
+          error: 'Price validation failed',
+          details: 'The booking price does not match server calculations'
+        });
+      }
+
+      if (totalDuration !== serverTotalDuration) {
+        console.warn(`Duration mismatch: client sent ${totalDuration}, server calculated ${serverTotalDuration}`);
+        return res.status(400).json({ 
+          error: 'Duration validation failed',
+          details: 'The booking duration does not match server calculations'
+        });
+      }
+
+      // Create booking record
+      // Note: Currently storing primary service only. Multiple services stored in notes.
+      // TODO: Create booking_services join table for proper multi-service support
+      const bookingId = crypto.randomUUID();
+      
+      const booking = await storage.createBooking({
+        salonId,
+        serviceId: serviceIds[0], // Primary service (for backward compatibility)
+        customerName: customerName || '',
+        customerEmail,
+        customerPhone: customerPhone || null,
+        staffId: staffId || null,
+        bookingDate: date,
+        bookingTime: time,
+        status: 'pending',
+        totalAmountPaisa: serverTotalPrice,
+        paymentStatus: paymentMethod === 'pay_at_salon' ? 'pending' : 'pending',
+        paymentMethod: paymentMethod || 'pay_at_salon',
+        notes: serviceIds.length > 1 ? `Multiple services: ${services.map(s => s!.name).join(', ')}` : null,
+        guestSessionId: isGuest ? bookingId : null
+      });
+
+      console.log(`✅ Booking created: ${booking.id} with ${serviceIds.length} services`);
+
+      res.json({
+        success: true,
+        bookingId: booking.id,
+        totalPrice: serverTotalPrice,
+        totalDuration: serverTotalDuration,
+        message: 'Booking created successfully'
+      });
+
+    } catch (error) {
+      console.error('Error creating booking:', error);
+      res.status(500).json({ error: 'Failed to create booking' });
     }
   });
 

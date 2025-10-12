@@ -17,9 +17,10 @@ interface BookingModalProps {
   salonName: string;
   salonId?: string;
   staffId?: string; // NEW: Add this prop for staff pre-selection
+  preSelectedServiceIds?: string[]; // NEW: Add this prop for multi-service pre-selection
 }
 
-export default function BookingModal({ isOpen, onClose, salonName, salonId, staffId }: BookingModalProps) {
+export default function BookingModal({ isOpen, onClose, salonName, salonId, staffId, preSelectedServiceIds }: BookingModalProps) {
   // Handle empty staffId prop by treating empty strings as undefined
   const validStaffId = staffId && staffId.trim() !== '' ? staffId : undefined;
   const [selectedService, setSelectedService] = useState("");
@@ -138,6 +139,18 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
       setSelectedStaff("");
     }
   }, [validStaffId, staff]);
+
+  // Handle service pre-selection when preSelectedServiceIds prop changes
+  // NOTE: Currently only pre-selects the first service
+  // TODO: Implement full multi-service booking support
+  useEffect(() => {
+    if (preSelectedServiceIds && preSelectedServiceIds.length > 0 && services.length > 0) {
+      const firstServiceId = preSelectedServiceIds[0];
+      if (services.some(s => s.id === firstServiceId)) {
+        setSelectedService(firstServiceId);
+      }
+    }
+  }, [preSelectedServiceIds, services]);
 
   // Display staff error in toast
   useEffect(() => {

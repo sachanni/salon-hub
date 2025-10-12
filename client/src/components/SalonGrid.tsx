@@ -34,6 +34,8 @@ interface SearchParams {
   service?: string;
   category?: string;
   sortBy?: string;
+  time?: string;
+  date?: string;
   filters?: {
     priceRange?: [number, number];
     minRating?: number;

@@ -28,12 +28,10 @@ export const db = drizzle({ client: pool, schema });
 // Best-effort creation of performance indexes. Runs once per boot, fast no-ops on subsequent boots
 (async () => {
   try {
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS services_salon_active_idx ON services (salon_id, is_active);
-      CREATE INDEX IF NOT EXISTS bookings_salon_time_idx ON bookings (salon_id, booking_date, booking_time);
-      CREATE INDEX IF NOT EXISTS payments_order_id_idx ON payments (razorpay_order_id);
-      CREATE INDEX IF NOT EXISTS bookings_service_idx ON bookings (service_id);
-    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS services_salon_active_idx ON services (salon_id, is_active)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS bookings_salon_time_idx ON bookings (salon_id, booking_date, booking_time)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS payments_order_id_idx ON payments (razorpay_order_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS bookings_service_idx ON bookings (service_id)`);
   } catch (e) {
     // Non-fatal; continue without blocking startup
     console.warn('Index ensure failed (non-fatal):', e);

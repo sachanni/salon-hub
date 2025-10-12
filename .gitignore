@@ -11,6 +11,7 @@ cookies*.txt
 *.cookies
 
 # Other security-sensitive files
+.env
 .env.local
 .env.production
 *.key

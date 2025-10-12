@@ -8,14 +8,14 @@ import professionalImage from "@assets/stock_images/professional_hair_st_a560646
 
 export default function Join() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted/30">
+    <div className="min-h-screen bg-gradient-to-br from-violet-100 via-pink-100 to-rose-50">
       {/* Header */}
       <div className="container mx-auto px-4 py-12">
         <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">
+          <h1 className="text-4xl md:text-5xl font-bold mb-4 text-gray-900">
             Join SalonHub
           </h1>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-xl text-gray-700 max-w-2xl mx-auto">
             Choose how you want to experience our beauty and wellness marketplace
           </p>
         </div>
@@ -123,9 +123,9 @@ export default function Join() {
 
         {/* Additional Info */}
         <div className="text-center mt-12">
-          <p className="text-muted-foreground">
+          <p className="text-gray-700">
             Already have an account?{" "}
-            <Button variant="ghost" className="p-0 h-auto" data-testid="link-login">
+            <Button variant="ghost" className="p-0 h-auto text-purple-600 hover:text-purple-700" data-testid="link-login">
               Sign in here
             </Button>
           </p>

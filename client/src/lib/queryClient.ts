@@ -1,7 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 async function throwIfResNotOk(res: Response) {
-  if (!res.ok) {
+  if (!res.ok && res.status !== 304) {
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
@@ -29,34 +29,57 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
-      credentials: "include",
-    });
-
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
-
-    await throwIfResNotOk(res);
+    const url = queryKey.join("/") as string;
+    console.log('QueryClient fetching:', url);
     
     try {
-      // Check if response has content and is JSON
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        // If not JSON, return null or empty object based on response
-        return res.status === 204 ? null : {};
-      }
-      
-      const text = await res.text();
-      if (!text) {
+      const res = await fetch(url, {
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+
+      console.log('QueryClient response:', url, 'status:', res.status, 'ok:', res.ok);
+
+      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        console.log('QueryClient 401 - returning null');
         return null;
       }
+
+      await throwIfResNotOk(res);
       
-      return JSON.parse(text);
+      // Check if response is JSON
+      const contentType = res.headers.get('content-type');
+      console.log('QueryClient content-type:', contentType);
+      
+      if (!contentType || !contentType.includes('application/json')) {
+        console.log('QueryClient no JSON content-type - returning {}');
+        return {} as T;
+      }
+      
+      // Parse JSON response
+      const text = await res.text();
+      console.log('QueryClient text length:', text?.length || 0);
+      
+      if (!text || text.trim() === '') {
+        console.log('QueryClient empty text - returning null');
+        return null as T;
+      }
+      
+      try {
+        const data = JSON.parse(text) as T;
+        console.log('QueryClient parsed successfully:', url);
+        return data;
+      } catch (error) {
+        console.error('JSON parsing error in queryClient:', error, 'Response:', text.substring(0, 200));
+        throw new Error(`Failed to parse JSON response: ${error}`);
+      }
     } catch (error) {
-      console.error('JSON parsing error in queryClient:', error);
-      // Return null for parsing errors to prevent crashes
-      return null;
+      console.error('QueryClient fetch error for', url, ':', error);
+      throw error;
     }
   };
 

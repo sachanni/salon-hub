@@ -203,6 +203,7 @@ export const salons = pgTable("salons", {
   openTime: text("open_time"), // e.g., "9:00 AM"
   closeTime: text("close_time"), // e.g., "8:00 PM"
   isActive: integer("is_active").notNull().default(1),
+  setupProgress: jsonb("setup_progress"), // Tracks completion of 8 setup steps: businessInfo, locationContact, services, staff, resources, bookingSettings, paymentSetup, media
   ownerId: varchar("owner_id").references(() => users.id), // Keep for backward compatibility
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "set null" }), // New organization link
   createdAt: timestamp("created_at").defaultNow(),
@@ -243,6 +244,7 @@ export const salonsRelations = relations(salons, ({ one, many }) => ({
     references: [organizations.id],
   }),
   services: many(services),
+  servicePackages: many(servicePackages),
   bookings: many(bookings),
   staff: many(staff),
   availabilityPatterns: many(availabilityPatterns),
@@ -280,6 +282,7 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
     references: [salons.id],
   }),
   bookings: many(bookings),
+  packageServices: many(packageServices),
 }));
 
 // Staff table - salon staff members who provide services
@@ -291,6 +294,8 @@ export const staff = pgTable("staff", {
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
+  role: varchar("role", { length: 100 }), // Staff role (Stylist, Colorist, Nail Technician, etc.)
+  photoUrl: text("photo_url"), // Staff photo URL
   specialties: text("specialties").array(), // Array of service categories they specialize in
   isActive: integer("is_active").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
@@ -376,6 +381,89 @@ export const insertTimeSlotSchema = createInsertSchema(timeSlots).omit({
 export type InsertTimeSlot = z.infer<typeof insertTimeSlotSchema>;
 export type TimeSlot = typeof timeSlots.$inferSelect;
 
+// Service Packages table - allows salons to create combo/package deals
+export const servicePackages = pgTable("service_packages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: text("name").notNull(), // e.g., "Bridal Package", "Spa Day Special"
+  description: text("description"), // Package details
+  totalDurationMinutes: integer("total_duration_minutes").notNull(), // Sum of all services or custom
+  packagePriceInPaisa: integer("package_price_in_paisa").notNull(), // Discounted package price
+  regularPriceInPaisa: integer("regular_price_in_paisa").notNull(), // Total if booked separately
+  discountPercentage: integer("discount_percentage"), // Calculated discount percentage
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("service_packages_id_salon_id_unique").on(table.id, table.salonId),
+]);
+
+export const insertServicePackageSchema = createInsertSchema(servicePackages).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertServicePackage = z.infer<typeof insertServicePackageSchema>;
+export type ServicePackage = typeof servicePackages.$inferSelect;
+
+// Package Services junction table - links services to packages (many-to-many)
+export const packageServices = pgTable("package_services", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  packageId: varchar("package_id").notNull().references(() => servicePackages.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  sequenceOrder: integer("sequence_order").notNull().default(1), // Order in which services are performed
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // Ensure same package doesn't have duplicate services
+  unique("package_services_package_service_unique").on(table.packageId, table.serviceId),
+  // Foreign key constraints to enforce same-salon membership
+  foreignKey({
+    columns: [table.packageId, table.salonId],
+    foreignColumns: [servicePackages.id, servicePackages.salonId],
+    name: "package_services_package_salon_fk"
+  }),
+  foreignKey({
+    columns: [table.serviceId, table.salonId],
+    foreignColumns: [services.id, services.salonId],
+    name: "package_services_service_salon_fk"
+  }),
+]);
+
+export const insertPackageServiceSchema = createInsertSchema(packageServices).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPackageService = z.infer<typeof insertPackageServiceSchema>;
+export type PackageService = typeof packageServices.$inferSelect;
+
+// Package relations
+export const servicePackagesRelations = relations(servicePackages, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [servicePackages.salonId],
+    references: [salons.id],
+  }),
+  packageServices: many(packageServices),
+}));
+
+export const packageServicesRelations = relations(packageServices, ({ one }) => ({
+  package: one(servicePackages, {
+    fields: [packageServices.packageId],
+    references: [servicePackages.id],
+  }),
+  service: one(services, {
+    fields: [packageServices.serviceId],
+    references: [services.id],
+  }),
+  salon: one(salons, {
+    fields: [packageServices.salonId],
+    references: [salons.id],
+  }),
+}));
+
 // Bookings table - stores booking information before payment
 export const bookings = pgTable("bookings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -397,6 +485,8 @@ export const bookings = pgTable("bookings", {
   guestSessionId: text("guest_session_id"), // For tracking guest user sessions
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
+  // Unique index to enable composite FKs from booking_services
+  uniqueIndex("bookings_id_salon_id_unique").on(table.id, table.salonId),
   // Composite foreign keys to enforce same-salon membership
   foreignKey({
     columns: [table.serviceId, table.salonId],
@@ -425,8 +515,59 @@ export const insertBookingSchema = createInsertSchema(bookings).omit({
 export type InsertBooking = z.infer<typeof insertBookingSchema>;
 export type Booking = typeof bookings.$inferSelect;
 
+// Booking Services Join Table - supports multiple services per booking
+// MUST be defined BEFORE bookingsRelations to avoid initialization errors
+export const bookingServices = pgTable("booking_services", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull(),
+  serviceId: varchar("service_id").notNull(),
+  salonId: varchar("salon_id").notNull(),
+  priceInPaisa: integer("price_in_paisa").notNull(), // Captured at time of booking
+  durationMinutes: integer("duration_minutes").notNull(), // Captured at time of booking
+  sequence: integer("sequence").notNull(), // Order of services in the booking (required, no default)
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // Composite foreign keys to enforce same-salon membership
+  foreignKey({
+    columns: [table.bookingId, table.salonId],
+    foreignColumns: [bookings.id, bookings.salonId],
+    name: "booking_services_booking_salon_fk"
+  }),
+  foreignKey({
+    columns: [table.serviceId, table.salonId],
+    foreignColumns: [services.id, services.salonId],
+    name: "booking_services_service_salon_fk"
+  }),
+  // Unique constraint: booking can't have duplicate sequence numbers
+  unique().on(table.bookingId, table.sequence),
+]);
+
+export const insertBookingServiceSchema = createInsertSchema(bookingServices).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertBookingService = z.infer<typeof insertBookingServiceSchema>;
+export type BookingService = typeof bookingServices.$inferSelect;
+
+// Booking Services relations
+export const bookingServicesRelations = relations(bookingServices, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [bookingServices.bookingId],
+    references: [bookings.id],
+  }),
+  service: one(services, {
+    fields: [bookingServices.serviceId],
+    references: [services.id],
+  }),
+  salon: one(salons, {
+    fields: [bookingServices.salonId],
+    references: [salons.id],
+  }),
+}));
+
 // Booking relations
-export const bookingsRelations = relations(bookings, ({ one }) => ({
+export const bookingsRelations = relations(bookings, ({ one, many }) => ({
   salon: one(salons, {
     fields: [bookings.salonId],
     references: [salons.id],
@@ -447,6 +588,7 @@ export const bookingsRelations = relations(bookings, ({ one }) => ({
     fields: [bookings.id],
     references: [payments.bookingId],
   }),
+  bookingServices: many(bookingServices),
 }));
 
 // Payments table - tracks payment information
@@ -614,6 +756,33 @@ export const rescheduleBookingInputSchema = z.object({
   staffId: z.string().uuid().optional(),
 });
 
+// Package/Combo validation schemas
+export const createPackageSchema = z.object({
+  name: z.string().min(1, "Package name is required").max(100, "Package name must be under 100 characters"),
+  description: z.string().max(500, "Description must be under 500 characters").optional(),
+  serviceIds: z.array(z.string().uuid())
+    .min(2, "Package must include at least 2 services")
+    .max(10, "Package cannot have more than 10 services"),
+  discountedPricePaisa: z.number()
+    .int("Price must be a whole number")
+    .positive("Price must be greater than 0")
+    .max(10000000, "Price cannot exceed ₹100,000"), // Max ₹1 lakh
+});
+
+export const updatePackageSchema = z.object({
+  name: z.string().min(1, "Package name is required").max(100, "Package name must be under 100 characters").optional(),
+  description: z.string().max(500, "Description must be under 500 characters").optional(),
+  serviceIds: z.array(z.string().uuid())
+    .min(2, "Package must include at least 2 services")
+    .max(10, "Package cannot have more than 10 services")
+    .optional(),
+  discountedPricePaisa: z.number()
+    .int("Price must be a whole number")
+    .positive("Price must be greater than 0")
+    .max(10000000, "Price cannot exceed ₹100,000")
+    .optional(),
+});
+
 // Status transition validation function
 export const validateStatusTransition = (currentStatus: string, newStatus: string): { isValid: boolean, error?: string } => {
   const validTransitions: Record<string, string[]> = {
@@ -643,6 +812,8 @@ export type CreateSalonInput = z.infer<typeof createSalonSchema>;
 export type UpdateBookingInput = z.infer<typeof updateBookingSchema>;
 export type BulkUpdateBookingInput = z.infer<typeof bulkUpdateBookingSchema>;
 export type RescheduleBookingInput = z.infer<typeof rescheduleBookingInputSchema>;
+export type CreatePackageInput = z.infer<typeof createPackageSchema>;
+export type UpdatePackageInput = z.infer<typeof updatePackageSchema>;
 
 // Staff relations
 export const staffRelations = relations(staff, ({ one, many }) => ({
@@ -706,10 +877,17 @@ export const bookingSettings = pgTable("booking_settings", {
   cancelWindowMinutes: integer("cancel_window_minutes").notNull().default(1440),
   bufferMinutes: integer("buffer_minutes").notNull().default(15),
   depositPercentage: integer("deposit_percentage").notNull().default(0),
+  depositType: varchar("deposit_type", { length: 20 }).default('percentage'),
+  depositAmountFixed: integer("deposit_amount_fixed").default(0),
   autoConfirm: integer("auto_confirm").notNull().default(1),
   allowCancellation: integer("allow_cancellation").notNull().default(1),
   allowRescheduling: integer("allow_reschedule").notNull().default(1),
   maxAdvanceBookingDays: integer("max_advance_booking_days").notNull().default(90),
+  maxConcurrentBookings: integer("max_concurrent_bookings").default(1),
+  allowGroupBookings: integer("allow_group_bookings").default(0),
+  maxGroupSize: integer("max_group_size").default(1),
+  sendAutomatedReminders: integer("send_automated_reminders").default(1),
+  reminderHoursBefore: integer("reminder_hours_before").default(24),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -718,10 +896,17 @@ export const bookingSettings = pgTable("booking_settings", {
   check("cancel_window_positive", sql`cancel_window_minutes > 0`),
   check("buffer_minutes_valid", sql`buffer_minutes >= 0`),
   check("deposit_percentage_valid", sql`deposit_percentage >= 0 AND deposit_percentage <= 100`),
+  check("deposit_type_valid", sql`deposit_type IN ('fixed', 'percentage')`),
+  check("deposit_amount_fixed_valid", sql`deposit_amount_fixed >= 0`),
   check("auto_confirm_valid", sql`auto_confirm IN (0,1)`),
   check("allow_cancellation_valid", sql`allow_cancellation IN (0,1)`),
   check("allow_reschedule_valid", sql`allow_reschedule IN (0,1)`),
   check("max_advance_days_positive", sql`max_advance_booking_days > 0`),
+  check("max_concurrent_positive", sql`max_concurrent_bookings >= 1`),
+  check("allow_group_bookings_valid", sql`allow_group_bookings IN (0,1)`),
+  check("max_group_size_valid", sql`max_group_size >= 1 AND max_group_size <= 20`),
+  check("send_reminders_valid", sql`send_automated_reminders IN (0,1)`),
+  check("reminder_hours_valid", sql`reminder_hours_before >= 1`),
 ]);
 
 // Staff-service mappings with custom pricing and duration overrides

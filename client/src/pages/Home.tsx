@@ -154,66 +154,136 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-violet-100 via-pink-100 to-rose-50">
       <main>
-        {/* Hero Section with Fresha-style Search */}
-        <div className="relative bg-gradient-to-br from-purple-600 via-pink-600 to-blue-600 min-h-screen flex items-center justify-center overflow-hidden">
-          {/* Background Image */}
-          <div 
-            className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-20"
-            style={{
-              backgroundImage: "url('https://images.unsplash.com/photo-1560066984-138dadb4c035?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1974&q=80')"
-            }}
-          />
-          
-          {/* Content */}
-          <div className="relative z-10 w-full max-w-6xl mx-auto px-4 py-16">
-            {/* Hero Text */}
-            <div className="text-center mb-12">
-              <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 leading-tight">
-                Book local beauty and<br />
-                <span className="text-yellow-300">wellness services</span>
-              </h1>
-              <p className="text-xl md:text-2xl text-white/90 max-w-3xl mx-auto leading-relaxed">
-                Discover and book appointments at top-rated salons, spas, and wellness centers near you
-              </p>
+        {showMapView ? (
+          /* Map View with Search Bar at Top - Fresha Style */
+          <div className="min-h-screen">
+            {/* Compact Search Bar at Top - Sticky */}
+            <div className="sticky top-0 z-50 bg-gradient-to-r from-indigo-900 via-purple-900 to-pink-800 shadow-lg overflow-visible">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 overflow-visible">
+                <FreshaSearchBar
+                  onSearch={(params) => {
+                    console.log('Home: Received search params from FreshaSearchBar:', params);
+                    console.log('Home: Coordinates received:', params.coords);
+                    const searchParams: SearchParams = {
+                      service: params.service,
+                      coordinates: params.coords,
+                      radius: params.radius,
+                      category: params.service,
+                    };
+                    console.log('Home: Setting search params:', searchParams);
+                    setSearchParams(searchParams);
+                    setSearchLocationName(params.locationName || "Current Location");
+                    setIsSearchActive(true);
+                    setShowMapView(true);
+                  }}
+                  currentLocationCoords={currentLocationCoords}
+                  locationAccuracy={locationAccuracy}
+                  savedLocations={[]}
+                />
+              </div>
             </div>
             
-            {/* Fresha Search Bar */}
-            <FreshaSearchBar
-              onSearch={(params) => {
-                console.log('Home: Received search params from FreshaSearchBar:', params);
-                console.log('Home: Coordinates received:', params.coords);
-                const searchParams: SearchParams = {
-                  service: params.service,
-                  coordinates: params.coords,
-                  radius: params.radius,
-                  category: params.service, // Map service to category
-                };
-                console.log('Home: Setting search params:', searchParams);
-                setSearchParams(searchParams);
-                setSearchLocationName(params.locationName || "Current Location"); // Set the actual location name
-                setIsSearchActive(true);
-                setShowMapView(true); // Show map view when search is performed
+            {/* Map View Component */}
+            <SalonMapView
+              searchParams={searchParams}
+              onBackToSearch={() => {
+                setShowMapView(false);
+                setIsSearchActive(false);
+                setSearchParams({});
               }}
-              currentLocationCoords={currentLocationCoords}
-              locationAccuracy={locationAccuracy}
-              savedLocations={[]}
+              searchLocationName={searchLocationName}
             />
           </div>
-        </div>
-            {showMapView ? (
-              <SalonMapView
-                searchParams={searchParams}
-                onBackToSearch={() => {
-                  setShowMapView(false);
-                  setIsSearchActive(false);
-                  setSearchParams({});
-                }}
-                searchLocationName={searchLocationName}
-              />
-            ) : (
+        ) : (
           <>
+            {/* Hero Section with Professional Design - Only shown when not in map view */}
+            <div className="relative min-h-screen flex items-center justify-center overflow-visible">
+              {/* Layered Gradient Overlays for Visual Depth - No duplicate background */}
+              <div className="absolute inset-0">
+                <div className="absolute inset-0 bg-gradient-to-tl from-purple-100/60 via-transparent to-indigo-50/60"></div>
+                <div className="absolute inset-0 bg-gradient-to-br from-transparent via-pink-50/40 to-transparent"></div>
+              </div>
+              
+              {/* Animated Gradient Orbs - Light & Soft */}
+              <div className="absolute top-0 left-0 w-full h-full">
+                <div className="absolute -top-20 -left-20 w-96 h-96 bg-gradient-to-br from-violet-200/40 to-purple-300/40 rounded-full blur-3xl animate-float"></div>
+                <div className="absolute top-1/3 right-10 w-80 h-80 bg-gradient-to-br from-fuchsia-200/40 to-pink-300/40 rounded-full blur-3xl animate-float-delayed"></div>
+                <div className="absolute -bottom-32 left-1/3 w-[500px] h-[500px] bg-gradient-to-br from-rose-200/40 to-purple-200/40 rounded-full blur-3xl animate-float-slow"></div>
+              </div>
+              
+              {/* Subtle Mesh Pattern Overlay */}
+              <div className="absolute inset-0 opacity-[0.02]" style={{
+                backgroundImage: `radial-gradient(circle at 1px 1px, rgb(139, 92, 246) 1px, transparent 0)`,
+                backgroundSize: '40px 40px'
+              }}></div>
+              
+              {/* Content */}
+              <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
+                {/* Hero Text */}
+                <div className="text-center mb-8 sm:mb-12">
+                  <div className="inline-block mb-4 px-4 py-2 bg-violet-100/60 backdrop-blur-sm rounded-full border border-violet-200">
+                    <p className="text-sm sm:text-base text-violet-900 font-medium">✨ Your Beauty & Wellness Journey Starts Here</p>
+                  </div>
+                  
+                  <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-gray-900 mb-4 sm:mb-6 leading-tight px-4">
+                    Book local beauty and
+                    <br className="hidden sm:block" />
+                    <span className="bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 bg-clip-text text-transparent animate-gradient">
+                      {" "}wellness services
+                    </span>
+                  </h1>
+                  
+                  <p className="text-lg sm:text-xl md:text-2xl text-gray-700 max-w-3xl mx-auto leading-relaxed px-4">
+                    Discover and book appointments at top-rated salons, spas, and wellness centers near you
+                  </p>
+                </div>
+                
+                {/* Search Bar with Enhanced Styling */}
+                <div className="max-w-5xl mx-auto">
+                  <FreshaSearchBar
+                    onSearch={(params) => {
+                      console.log('Home: Received search params from FreshaSearchBar:', params);
+                      console.log('Home: Coordinates received:', params.coords);
+                      const searchParams: SearchParams = {
+                        service: params.service,
+                        coordinates: params.coords,
+                        radius: params.radius,
+                        category: params.service,
+                      };
+                      console.log('Home: Setting search params:', searchParams);
+                      setSearchParams(searchParams);
+                      setSearchLocationName(params.locationName || "Current Location");
+                      setIsSearchActive(true);
+                      setShowMapView(true);
+                    }}
+                    currentLocationCoords={currentLocationCoords}
+                    locationAccuracy={locationAccuracy}
+                    savedLocations={[]}
+                  />
+                </div>
+                
+                {/* Trust Indicators */}
+                <div className="mt-12 sm:mt-16 flex flex-wrap items-center justify-center gap-6 sm:gap-12 text-gray-600">
+                  <div className="text-center px-4">
+                    <p className="text-2xl sm:text-3xl font-bold text-gray-900">455K+</p>
+                    <p className="text-xs sm:text-sm">Bookings Today</p>
+                  </div>
+                  <div className="hidden sm:block h-8 w-px bg-gray-300"></div>
+                  <div className="text-center px-4">
+                    <p className="text-2xl sm:text-3xl font-bold text-gray-900">10K+</p>
+                    <p className="text-xs sm:text-sm">Partner Salons</p>
+                  </div>
+                  <div className="hidden sm:block h-8 w-px bg-gray-300"></div>
+                  <div className="text-center px-4">
+                    <p className="text-2xl sm:text-3xl font-bold text-gray-900">4.8★</p>
+                    <p className="text-xs sm:text-sm">Average Rating</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
             <RecentlyViewed onBookingClick={handleBookingClick} />
             {isSearchActive ? (
               <SalonGrid 
