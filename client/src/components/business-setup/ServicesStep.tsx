@@ -11,12 +11,16 @@ import { apiRequest } from "@/lib/queryClient";
 import { Scissors, Plus, Trash2, Edit, Sparkles, Clock, IndianRupee, Check, X, ChevronRight, Package, Brain } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getRelevantServiceCategories, getSmartServiceSuggestions } from "@/lib/serviceCategoryMapping";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface ServicesStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 interface Service {
@@ -36,6 +40,8 @@ const mainCategories = [
   { id: 'massage', name: 'Massage & Spa', icon: '💆', gradient: 'from-indigo-500 to-purple-500' },
   { id: 'eyes', name: 'Eyebrows & Lashes', icon: '👁️', gradient: 'from-fuchsia-500 to-pink-500' },
   { id: 'hair-removal', name: 'Hair Removal', icon: '🪶', gradient: 'from-rose-500 to-pink-500' },
+  { id: 'piercing', name: 'Piercing', icon: '💎', gradient: 'from-amber-500 to-orange-500' },
+  { id: 'tattoo', name: 'Tattoo', icon: '🎨', gradient: 'from-slate-700 to-gray-800' },
   { id: 'makeup', name: 'Makeup', icon: '💄', gradient: 'from-pink-500 to-fuchsia-500' },
   { id: 'body', name: 'Body Treatments', icon: '🧖', gradient: 'from-purple-500 to-violet-500' },
   { id: 'mens', name: "Men's Grooming", icon: '💈', gradient: 'from-slate-600 to-gray-600' },
@@ -50,6 +56,9 @@ const subServices: Record<string, { name: string; icon: string }[]> = {
     { name: 'Balayage & Highlights', icon: '🌈' },
     { name: 'Keratin Treatment', icon: '✨' },
     { name: 'Hair Extensions', icon: '💁' },
+    { name: 'Hair Patch', icon: '🩹' },
+    { name: 'Hair Weaving', icon: '🧵' },
+    { name: 'Hair Bonding', icon: '🔗' },
   ],
   nails: [
     { name: 'Manicure', icon: '🤲' },
@@ -90,6 +99,23 @@ const subServices: Record<string, { name: string; icon: string }[]> = {
     { name: 'Bikini Wax', icon: '👙' },
     { name: 'Brazilian Wax', icon: '💫' },
   ],
+  piercing: [
+    { name: 'Ear Piercing', icon: '👂' },
+    { name: 'Nose Piercing', icon: '👃' },
+    { name: 'Belly Piercing', icon: '💫' },
+    { name: 'Lip Piercing', icon: '💋' },
+    { name: 'Eyebrow Piercing', icon: '👁️' },
+    { name: 'Cartilage Piercing', icon: '✨' },
+  ],
+  tattoo: [
+    { name: 'Small Tattoo', icon: '✨' },
+    { name: 'Medium Tattoo', icon: '🎨' },
+    { name: 'Large Tattoo', icon: '🖼️' },
+    { name: 'Cover-up Tattoo', icon: '🔄' },
+    { name: 'Tattoo Removal', icon: '🔥' },
+    { name: 'Permanent Makeup Tattoo', icon: '💄' },
+    { name: 'Henna/Mehndi Tattoo', icon: '🌿' },
+  ],
   makeup: [
     { name: 'Bridal Makeup', icon: '👰' },
     { name: 'Party Makeup', icon: '🎉' },
@@ -126,6 +152,9 @@ const serviceSuggestions: Record<string, { duration: number; price: number; desc
   'Balayage & Highlights': { duration: 150, price: 4000, description: 'Balayage or highlights color treatment' },
   'Keratin Treatment': { duration: 120, price: 3500, description: 'Keratin smoothing treatment' },
   'Hair Extensions': { duration: 120, price: 5000, description: 'Hair extension application' },
+  'Hair Patch': { duration: 90, price: 3000, description: 'Hair patch application for baldness' },
+  'Hair Weaving': { duration: 120, price: 4500, description: 'Hair weaving for volume and coverage' },
+  'Hair Bonding': { duration: 90, price: 4000, description: 'Hair bonding with adhesive' },
   
   // Nails
   'Manicure': { duration: 30, price: 400, description: 'Classic manicure with polish' },
@@ -166,6 +195,23 @@ const serviceSuggestions: Record<string, { duration: number; price: number; desc
   'Bikini Wax': { duration: 30, price: 800, description: 'Bikini waxing service' },
   'Brazilian Wax': { duration: 45, price: 1200, description: 'Brazilian wax service' },
   
+  // Piercing
+  'Ear Piercing': { duration: 15, price: 500, description: 'Professional ear piercing with sterile equipment' },
+  'Nose Piercing': { duration: 15, price: 800, description: 'Nose piercing with quality jewelry' },
+  'Belly Piercing': { duration: 20, price: 1200, description: 'Belly button piercing service' },
+  'Lip Piercing': { duration: 20, price: 1000, description: 'Lip piercing with aftercare guidance' },
+  'Eyebrow Piercing': { duration: 15, price: 900, description: 'Eyebrow piercing service' },
+  'Cartilage Piercing': { duration: 20, price: 1000, description: 'Cartilage piercing with premium jewelry' },
+  
+  // Tattoo
+  'Small Tattoo': { duration: 60, price: 2500, description: 'Small custom tattoo design (up to 2 inches)' },
+  'Medium Tattoo': { duration: 120, price: 5000, description: 'Medium sized tattoo design (2-5 inches)' },
+  'Large Tattoo': { duration: 180, price: 10000, description: 'Large tattoo design (5+ inches)' },
+  'Cover-up Tattoo': { duration: 150, price: 7500, description: 'Cover existing tattoo with new design' },
+  'Tattoo Removal': { duration: 45, price: 3500, description: 'Laser tattoo removal session' },
+  'Permanent Makeup Tattoo': { duration: 120, price: 8000, description: 'Permanent makeup (eyebrows, eyeliner, lips)' },
+  'Henna/Mehndi Tattoo': { duration: 60, price: 800, description: 'Traditional henna/mehndi art' },
+  
   // Makeup
   'Bridal Makeup': { duration: 120, price: 8000, description: 'Complete bridal makeup package' },
   'Party Makeup': { duration: 60, price: 3000, description: 'Party and event makeup' },
@@ -202,10 +248,15 @@ const businessTemplates = {
 
 export default function ServicesStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: ServicesStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
+  
   const [services, setServices] = useState<Service[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('hair');
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
@@ -417,7 +468,9 @@ export default function ServicesStep({
       await apiRequest('POST', `/api/salons/${salonId}/services/bulk`, servicesForApi);
       
       // Invalidate query cache to refresh the services list
-      queryClient.invalidateQueries({ queryKey: [`/api/salons/${salonId}/services`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'services'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'dashboard-completion'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
       
       toast({
         title: "Services Added Successfully!",
@@ -446,7 +499,7 @@ export default function ServicesStep({
     });
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (services.length === 0) {
       toast({
         title: "No Services Added",
@@ -456,7 +509,12 @@ export default function ServicesStep({
       return;
     }
 
-    onComplete({ services });
+    // Invalidate completion status cache
+    await queryClient.invalidateQueries({ 
+      queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+    });
+    
+    handleNext();
   };
 
   const currentSubServices = subServices[selectedCategory] || [];
@@ -544,16 +602,17 @@ export default function ServicesStep({
               </div>
             )}
             
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            <div className="flex flex-wrap gap-2">
               {displayedCategories.map((category) => (
                 <button
                   key={category.id}
                   onClick={() => setSelectedCategory(category.id)}
-                  className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all hover:scale-105 ${
                     selectedCategory === category.id
-                      ? `bg-gradient-to-r ${category.gradient} text-white shadow-md`
+                      ? `bg-gradient-to-r ${category.gradient} text-white shadow-lg`
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
+                  data-testid={`category-pill-${category.id}`}
                 >
                   <span className="mr-1">{category.icon}</span>
                   {category.name}
@@ -563,7 +622,8 @@ export default function ServicesStep({
               {!showAllCategories && businessCategories.length > 0 && (
                 <button
                   onClick={() => setShowAllCategories(true)}
-                  className="flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium bg-white border-2 border-dashed border-gray-300 text-gray-600 hover:border-purple-400 hover:text-purple-600 transition-all"
+                  className="px-4 py-2 rounded-full text-sm font-medium bg-white border-2 border-dashed border-gray-300 text-gray-600 hover:border-purple-400 hover:text-purple-600 transition-all"
+                  data-testid="button-show-all-categories"
                 >
                   + Show All Categories
                 </button>
@@ -582,7 +642,7 @@ export default function ServicesStep({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-w-full">
               {currentSubServices.map((service) => {
                 const isSelected = selectedServices.has(service.name);
                 const suggestion = serviceSuggestions[service.name];
@@ -592,16 +652,17 @@ export default function ServicesStep({
                   <div
                     key={service.name}
                     onClick={() => !isAlreadyAdded && toggleServiceSelection(service.name)}
-                    className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                    className={`relative p-3 border-2 rounded-lg cursor-pointer transition-all hover:scale-[1.02] ${
                       isAlreadyAdded
                         ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
                         : isSelected
-                        ? `border-purple-500 bg-gradient-to-br from-purple-50 to-pink-50 shadow-md`
-                        : 'border-gray-200 hover:border-purple-300 hover:shadow-sm'
+                        ? 'border-purple-500 bg-gradient-to-br from-purple-50 to-pink-50 shadow-lg'
+                        : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
                     }`}
+                    data-testid={`service-card-${service.name.toLowerCase().replace(/\s+/g, '-')}`}
                   >
                     {/* Checkbox */}
-                    <div className="absolute top-2 right-2">
+                    <div className="absolute top-2 right-2 z-10">
                       {isAlreadyAdded ? (
                         <div className="w-5 h-5 rounded bg-green-100 flex items-center justify-center">
                           <Check className="h-3 w-3 text-green-600" />
@@ -615,10 +676,10 @@ export default function ServicesStep({
                       )}
                     </div>
 
-                    <div className="pr-8">
+                    <div className="pr-7">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-2xl">{service.icon}</span>
-                        <h5 className="font-medium text-sm">{service.name}</h5>
+                        <span className="text-xl">{service.icon}</span>
+                        <h5 className="font-medium text-sm leading-tight">{service.name}</h5>
                       </div>
                       
                       {suggestion && (
@@ -626,7 +687,7 @@ export default function ServicesStep({
                           <div className="flex items-center gap-3 text-xs text-gray-600">
                             <span className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
-                              {suggestion.duration} min
+                              {suggestion.duration}min
                             </span>
                             <span className="flex items-center gap-1">
                               <IndianRupee className="h-3 w-3" />
@@ -638,7 +699,7 @@ export default function ServicesStep({
 
                       {isAlreadyAdded && (
                         <Badge variant="outline" className="mt-2 text-xs bg-green-50 text-green-700 border-green-200">
-                          Already Added
+                          Added
                         </Badge>
                       )}
                     </div>

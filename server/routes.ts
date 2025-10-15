@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
 import session from "express-session";
-import connectPg from "connect-pg-simple";
+import MemoryStore from "memorystore";
 import { requireSalonAccess, requireStaffAccess, type AuthenticatedRequest } from "./middleware/auth";
 import Razorpay from "razorpay";
 import crypto from "crypto";
@@ -104,12 +104,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Setup session-based authentication
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  const pgStore = connectPg(session);
-  const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: true,
-    ttl: sessionTtl,
-    tableName: "sessions",
+  const MemoryStoreSession = MemoryStore(session);
+  const sessionStore = new MemoryStoreSession({
+    checkPeriod: 86400000, // Prune expired entries every 24h
   });
   
   if (!process.env.SESSION_SECRET) {
@@ -402,6 +399,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/salons - Create a new salon for the current user
+  app.post('/api/salons', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const {
+        name,
+        category,
+        description,
+        address,
+        city,
+        state,
+        zipCode,
+        phone,
+        email,
+        priceRange
+      } = req.body;
+
+      // Validate required fields
+      if (!name) {
+        return res.status(400).json({ error: "Salon name is required" });
+      }
+
+      // Get user's first organization (or create one if needed)
+      const userOrgs = await storage.getUserOrganizations(userId);
+      let orgId = userOrgs[0]?.organization?.id;
+
+      if (!orgId) {
+        // Create organization if user doesn't have one
+        const newOrg = await storage.createOrganization({
+          name: `${req.user.firstName || 'Business'} Organization`,
+          description: 'Business organization for salon management',
+          ownerUserId: userId,
+          status: 'active'
+        });
+        await storage.addUserToOrganization(newOrg.id, userId, 'owner');
+        orgId = newOrg.id;
+      }
+
+      // Create salon
+      const salonData = {
+        name,
+        description: description || '',
+        address: address || 'To be configured',
+        city: city || 'To be configured',
+        state: state || 'To be configured',
+        zipCode: zipCode || '00000',
+        phone: phone || '0000000000',
+        email: email || req.user.email || 'configure@salonhub.com',
+        category: category || 'hair_salon',
+        priceRange: priceRange || '$$',
+        orgId,
+        ownerId: userId,
+        isActive: 1
+      };
+
+      const newSalon = await storage.createSalon(salonData);
+
+      res.status(201).json(newSalon);
+
+    } catch (error) {
+      console.error("Error creating salon:", error);
+      res.status(500).json({ error: "Failed to create salon. Please try again." });
+    }
+  });
+
   // Manual login endpoint (email/password)
   app.post('/api/auth/login', async (req: any, res) => {
     try {
@@ -564,6 +626,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error updating salon:', error);
       res.status(500).json({ error: 'Failed to update salon' });
+    }
+  });
+
+  // Delete salon (with validation to prevent deleting last salon)
+  app.delete('/api/salons/:salonId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const userId = req.user.id;
+      
+      // Get all user's salons using the same logic as /api/my/salons
+      const orgMemberships = await storage.getUserOrganizations(userId);
+      const allSalons = await storage.getSalons();
+      const accessibleSalons = allSalons.filter(salon => {
+        if (salon.ownerId === userId) return true;
+        if (salon.orgId) {
+          return orgMemberships.some((membership: any) => 
+            membership.orgId === salon.orgId && 
+            ['owner', 'manager'].includes(membership.orgRole)
+          );
+        }
+        return false;
+      });
+      
+      if (accessibleSalons.length <= 1) {
+        return res.status(400).json({ 
+          error: 'Cannot delete your only salon. You must have at least one salon.' 
+        });
+      }
+      
+      // Delete the salon
+      await storage.deleteSalon(salonId);
+      
+      res.json({ 
+        success: true, 
+        message: 'Salon deleted successfully',
+        remainingSalons: accessibleSalons.length - 1
+      });
+    } catch (error) {
+      console.error('Error deleting salon:', error);
+      res.status(500).json({ error: 'Failed to delete salon' });
     }
   });
 
@@ -3057,8 +3159,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sort: req.query.sort as string || 'distance',
         page: parseInt(req.query.page as string) || 1,
         pageSize: parseInt(req.query.pageSize as string) || 20,
-        time: req.query.time as string, // Add time parameter
-        date: req.query.date as string, // Add date parameter
+        time: req.query.time as string,
+        date: req.query.date as string,
+        maxPrice: parseInt(req.query.maxPrice as string) || undefined,
+        venueType: req.query.venueType as string || undefined,
+        availableToday: req.query.availableToday === 'true' || undefined,
+        instantBooking: req.query.instantBooking === 'true' || undefined,
+        offerDeals: req.query.offerDeals === 'true' || undefined,
+        acceptGroup: req.query.acceptGroup === 'true' || undefined,
       };
 
       console.log('📍 PROXIMITY SEARCH PARAMS:', rawParams);
@@ -3172,13 +3280,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Filter by max price if specified
+      if (rawParams.maxPrice) {
+        filteredResults = filteredResults.filter(salon => {
+          // Parse priceRange ($, $$, $$$, $$$$) to numeric value
+          const priceRangeMap: { [key: string]: number } = {
+            '$': 1000,
+            '$$': 3000,
+            '$$$': 6000,
+            '$$$$': 10000,
+          };
+          const salonMaxPrice = priceRangeMap[salon.priceRange] || 5000;
+          return salonMaxPrice <= rawParams.maxPrice!;
+        });
+      }
+
+      // Filter by venue type if specified
+      if (rawParams.venueType && rawParams.venueType !== 'everyone') {
+        filteredResults = filteredResults.filter(salon => 
+          (salon as any).venueType === rawParams.venueType || 
+          (salon as any).venueType === 'everyone' || 
+          !(salon as any).venueType
+        );
+      }
+
+      // Filter by instant booking if specified
+      if (rawParams.instantBooking) {
+        filteredResults = filteredResults.filter(salon => 
+          (salon as any).instantBooking === 1
+        );
+      }
+
+      // Filter by offer deals if specified
+      if (rawParams.offerDeals) {
+        filteredResults = filteredResults.filter(salon => 
+          (salon as any).offerDeals === 1
+        );
+      }
+
+      // Filter by accept group if specified
+      if (rawParams.acceptGroup) {
+        filteredResults = filteredResults.filter(salon => 
+          (salon as any).acceptGroup === 1
+        );
+      }
+
       // Apply time-based filtering if time parameter is provided
       if (params.time) {
         console.log(`⏰ Filtering by time availability: ${params.time}`);
         
-        // Parse time range (e.g., "12:00 PM - 6:00 PM")
+        // Map semantic time tokens to hour ranges
         const timeRange = params.time;
-        if (timeRange.includes(' - ')) {
+        let startHour: number;
+        let endHour: number;
+        
+        // Check if it's a semantic token (morning, afternoon, evening) or actual time range
+        if (timeRange === 'morning') {
+          startHour = 6; // 6 AM
+          endHour = 12; // 12 PM
+        } else if (timeRange === 'afternoon') {
+          startHour = 12; // 12 PM
+          endHour = 18; // 6 PM
+        } else if (timeRange === 'evening') {
+          startHour = 18; // 6 PM
+          endHour = 23; // 11 PM
+        } else if (timeRange.includes(' - ')) {
+          // Parse actual time range (e.g., "12:00 PM - 6:00 PM")
           const [startTimeStr, endTimeStr] = timeRange.split(' - ');
           
           const parseTime = (timeStr: string) => {
@@ -3190,60 +3357,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return hour24 + (minutes / 60);
           };
           
-          const startHour = parseTime(startTimeStr);
-          const endHour = parseTime(endTimeStr);
-          
-          console.log(`⏰ Looking for salons available between ${startHour}:00 and ${endHour}:00`);
-          
-          // Filter salons that have availability during the requested time
-          filteredResults = await Promise.all(
-            filteredResults.map(async (salon) => {
-              try {
-                // Get available time slots for the salon
-                const today = new Date();
-                const tomorrow = new Date(today);
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                
-                // Use tomorrow's date if date parameter is "tomorrow" or similar
-                const searchDate = params.date === 'tomorrow' ? tomorrow : today;
-                const dateStr = searchDate.toISOString().split('T')[0];
-                
-                const timeSlots = await storage.getAvailableTimeSlots(salon.id, dateStr);
-                
-                // Check if any time slots overlap with the requested time range
-                const hasAvailability = timeSlots.some((slot: any) => {
-                  const slotStart = new Date(slot.startDateTime);
-                  const slotEnd = new Date(slot.endDateTime);
-                  const slotStartHour = slotStart.getHours() + (slotStart.getMinutes() / 60);
-                  const slotEndHour = slotEnd.getHours() + (slotEnd.getMinutes() / 60);
-                  
-                  // Check if slot overlaps with requested time range
-                  return slotStartHour < endHour && slotEndHour > startHour;
-                });
-                
-                return hasAvailability ? salon : null;
-              } catch (error) {
-                console.log(`Error checking availability for salon ${salon.id}:`, error.message);
-                return null; // Exclude salon if we can't check availability
-              }
-            })
-          );
-          
-          // Remove null results
-          filteredResults = filteredResults.filter(salon => salon !== null);
-          console.log(`⏰ Time filtering complete: ${filteredResults.length} salons available during requested time`);
+          startHour = parseTime(startTimeStr);
+          endHour = parseTime(endTimeStr);
+        } else {
+          // Invalid format, skip time filtering
+          startHour = 0;
+          endHour = 24;
         }
+        
+        console.log(`⏰ Looking for salons available between ${startHour}:00 and ${endHour}:00`);
+        
+        // Filter salons that have availability during the requested time
+        filteredResults = await Promise.all(
+          filteredResults.map(async (salon) => {
+            try {
+              // Get available time slots for the salon
+              let dateStr: string;
+              if (params.date) {
+                if (params.date === 'tomorrow') {
+                  const tomorrow = new Date();
+                  tomorrow.setDate(tomorrow.getDate() + 1);
+                  dateStr = tomorrow.toISOString().split('T')[0];
+                } else if (params.date === 'today') {
+                  dateStr = new Date().toISOString().split('T')[0];
+                } else {
+                  // Assume params.date is in YYYY-MM-DD format
+                  dateStr = params.date;
+                }
+              } else {
+                // Default to today if no date specified
+                dateStr = new Date().toISOString().split('T')[0];
+              }
+              
+              const timeSlots = await storage.getAvailableTimeSlots(salon.id, dateStr);
+              
+              // If no time slots available (e.g., no business hours set), include salon anyway
+              if (!timeSlots || timeSlots.length === 0) {
+                console.log(`⏰ Salon ${salon.name} has no time slots, including in results`);
+                return salon;
+              }
+              
+              // Check if any time slots overlap with the requested time range
+              const hasAvailability = timeSlots.some((slot: any) => {
+                const slotStart = new Date(slot.startDateTime);
+                const slotEnd = new Date(slot.endDateTime);
+                const slotStartHour = slotStart.getHours() + (slotStart.getMinutes() / 60);
+                const slotEndHour = slotEnd.getHours() + (slotEnd.getMinutes() / 60);
+                
+                // Check if slot overlaps with requested time range (any overlap counts)
+                return slotStartHour < endHour && slotEndHour > startHour;
+              });
+              
+              return hasAvailability ? salon : null;
+            } catch (error) {
+              console.log(`Error checking availability for salon ${salon.id}:`, error.message);
+              // Include salon even if error - don't eliminate due to technical issues
+              return salon;
+            }
+          })
+        );
+        
+        // Remove null results
+        filteredResults = filteredResults.filter(salon => salon !== null);
+        console.log(`⏰ Time filtering complete: ${filteredResults.length} salons available during requested time`);
       }
 
       // Apply sorting
       switch (params.sort) {
+        case 'recommended':
+          // Sort by combination of rating and review count for recommendations
+          filteredResults.sort((a, b) => {
+            const scoreA = parseFloat(a.rating || '0') * Math.log10((a.reviewCount || 1) + 1);
+            const scoreB = parseFloat(b.rating || '0') * Math.log10((b.reviewCount || 1) + 1);
+            return scoreB - scoreA;
+          });
+          break;
+        case 'top-rated':
         case 'rating':
-          filteredResults.sort((a, b) => parseFloat(b.rating || '0') - parseFloat(a.rating || '0'));
+          // Sort by rating first, then by review count as tiebreaker
+          filteredResults.sort((a, b) => {
+            const ratingDiff = parseFloat(b.rating || '0') - parseFloat(a.rating || '0');
+            if (Math.abs(ratingDiff) < 0.1) {
+              return (b.reviewCount || 0) - (a.reviewCount || 0);
+            }
+            return ratingDiff;
+          });
+          break;
+        case 'nearest':
+        case 'distance':
+          filteredResults.sort((a, b) => a.distance - b.distance);
           break;
         case 'name':
           filteredResults.sort((a, b) => a.name.localeCompare(b.name));
           break;
-        case 'distance':
         default:
           filteredResults.sort((a, b) => a.distance - b.distance);
           break;
@@ -3257,12 +3463,199 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const endIndex = startIndex + params.pageSize;
       const paginatedResults = filteredResults.slice(startIndex, endIndex);
 
-      // Format response with images
+      // Format response with images, services, and time slots
       const response: SalonSearchResult = {
         salons: await Promise.all(paginatedResults.map(async salon => {
           // Fetch media assets for each salon
           const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
-          const primaryImage = mediaAssets?.find((asset: any) => asset.type === 'image')?.url || '';
+          const primaryImage = mediaAssets?.find((asset: any) => asset.isPrimary)?.url || 
+                               mediaAssets?.find((asset: any) => asset.assetType === 'cover')?.url || '';
+          
+          // Get all image URLs for gallery preview
+          let imageUrls = mediaAssets
+            ?.filter((asset: any) => asset.assetType === 'cover')
+            ?.map((asset: any) => asset.url)
+            ?.slice(0, 4) || []; // Limit to 4 images for performance
+          
+          // Fallback to salon.imageUrls if no media assets
+          if (imageUrls.length === 0 && salon.imageUrls && Array.isArray(salon.imageUrls)) {
+            imageUrls = salon.imageUrls.slice(0, 4);
+          }
+          
+          // Fetch services offered by this salon
+          const services = await storage.getServicesBySalonId(salon.id);
+          const serviceNames = services.map((service: any) => service.name).slice(0, 3); // Top 3 services
+          
+          // Generate time slots for the requested date with real-time availability
+          let availableTimeSlots: any[] = [];
+          try {
+            // Determine search date based on params
+            let searchDate: string;
+            if (params.date) {
+              if (params.date === 'tomorrow') {
+                searchDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+              } else if (params.date === 'today') {
+                searchDate = new Date().toISOString().split('T')[0];
+              } else {
+                // Assume params.date is in YYYY-MM-DD format
+                searchDate = params.date;
+              }
+            } else {
+              // Default to today if no date specified
+              searchDate = new Date().toISOString().split('T')[0];
+            }
+            
+            // Try to get slots from database first
+            let timeSlots = await storage.getAvailableTimeSlots(salon.id, searchDate);
+            
+            // If no database slots, generate from businessHours (production fallback)
+            if (timeSlots.length === 0 && salon.businessHours) {
+              const businessHours = typeof salon.businessHours === 'string' 
+                ? JSON.parse(salon.businessHours) 
+                : salon.businessHours;
+              
+              const searchDateObj = new Date(searchDate + 'T00:00:00');
+              const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+              const dayName = dayNames[searchDateObj.getDay()];
+              const dayHours = businessHours[dayName];
+              
+              if (dayHours && dayHours.open && dayHours.start && dayHours.end) {
+                // Generate slots from business hours (30-min intervals)
+                const [startHour, startMin] = dayHours.start.split(':').map(Number);
+                const [endHour, endMin] = dayHours.end.split(':').map(Number);
+                
+                const slots = [];
+                let currentHour = startHour;
+                let currentMin = startMin;
+                
+                while (currentHour < endHour || (currentHour === endHour && currentMin < endMin)) {
+                  const slotDateTime = new Date(searchDateObj);
+                  slotDateTime.setHours(currentHour, currentMin, 0, 0);
+                  
+                  slots.push({
+                    startDateTime: slotDateTime.toISOString(),
+                    staffName: null
+                  });
+                  
+                  currentMin += 30;
+                  if (currentMin >= 60) {
+                    currentMin = 0;
+                    currentHour++;
+                  }
+                }
+                
+                timeSlots = slots;
+              }
+            }
+            
+            // Get existing bookings for this date to check availability
+            // Fetch confirmed and pending bookings separately
+            const confirmedBookings = await storage.getBookingsBySalonId(salon.id, {
+              status: 'confirmed',
+              startDate: searchDate,
+              endDate: searchDate
+            });
+            const pendingBookings = await storage.getBookingsBySalonId(salon.id, {
+              status: 'pending',
+              startDate: searchDate,
+              endDate: searchDate
+            });
+            const bookings = [...confirmedBookings, ...pendingBookings];
+            
+            // Get current time for past slot detection
+            const now = new Date();
+            const isToday = searchDate === now.toISOString().split('T')[0];
+            
+            // Helper function to check if a slot is booked
+            const isSlotBooked = (slotTime: Date): boolean => {
+              const slotStartMinutes = slotTime.getHours() * 60 + slotTime.getMinutes();
+              const slotEndMinutes = slotStartMinutes + 30; // Assuming 30-min slots
+              
+              for (const booking of bookings) {
+                const [bookingHours, bookingMinutes] = booking.bookingTime.split(':').map(Number);
+                const bookingStartMinutes = bookingHours * 60 + bookingMinutes;
+                const bookingDuration = booking.serviceDuration || 30;
+                const bookingEndMinutes = bookingStartMinutes + bookingDuration;
+                
+                // Check for overlap
+                if (slotStartMinutes < bookingEndMinutes && slotEndMinutes > bookingStartMinutes) {
+                  return true;
+                }
+              }
+              return false;
+            };
+            
+            // Helper function to check if slot is in the past
+            const isSlotPast = (slotTime: Date): boolean => {
+              if (!isToday) return false;
+              return slotTime < now;
+            };
+              
+            // Process all time slots and add availability status
+            let processedSlots = timeSlots.map((slot: any) => {
+              const slotTime = new Date(slot.startDateTime);
+              const isBooked = isSlotBooked(slotTime);
+              const isPast = isSlotPast(slotTime);
+              
+              return {
+                time: slotTime.toLocaleTimeString('en-US', { 
+                  hour: 'numeric', 
+                  minute: '2-digit',
+                  hour12: true 
+                }),
+                staffName: slot.staffName,
+                available: !isBooked && !isPast, // Only available if not booked AND not past
+                booked: isBooked,
+                past: isPast,
+                dateTime: slot.startDateTime
+              };
+            });
+            
+            // Filter by time range if specified
+            if (params.time) {
+              let startHour: number;
+              let endHour: number;
+              
+              if (params.time === 'morning') {
+                startHour = 6;
+                endHour = 12;
+              } else if (params.time === 'afternoon') {
+                startHour = 12;
+                endHour = 18;
+              } else if (params.time === 'evening') {
+                startHour = 18;
+                endHour = 23;
+              } else if (params.time.includes(' - ')) {
+                const [startTimeStr, endTimeStr] = params.time.split(' - ');
+                const parseTime = (timeStr: string) => {
+                  const [time, period] = timeStr.trim().split(' ');
+                  const [hours, minutes] = time.split(':').map(Number);
+                  let hour24 = hours;
+                  if (period === 'PM' && hours !== 12) hour24 += 12;
+                  if (period === 'AM' && hours === 12) hour24 = 0;
+                  return hour24 + (minutes / 60);
+                };
+                startHour = parseTime(startTimeStr);
+                endHour = parseTime(endTimeStr);
+              } else {
+                startHour = 0;
+                endHour = 24;
+              }
+              
+              processedSlots = processedSlots.filter((slot: any) => {
+                const slotDateTime = new Date(slot.dateTime);
+                const slotHour = slotDateTime.getHours() + (slotDateTime.getMinutes() / 60);
+                return slotHour >= startHour && slotHour < endHour;
+              });
+            }
+            
+            // Return only available slots first, then show up to 3 booked/past for reference
+            const availableSlots = processedSlots.filter((s: any) => s.available).slice(0, 6);
+            const unavailableSlots = processedSlots.filter((s: any) => !s.available).slice(0, 3);
+            availableTimeSlots = [...availableSlots, ...unavailableSlots];
+          } catch (error) {
+            console.log(`Error fetching time slots for salon ${salon.id}:`, error.message);
+          }
           
           return {
             id: salon.id,
@@ -3282,6 +3675,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             rating: salon.rating || '0.00',
             reviewCount: salon.reviewCount,
             imageUrl: primaryImage,
+            imageUrls: imageUrls, // Multiple images for gallery
+            services: serviceNames, // Top services offered
+            availableTimeSlots: availableTimeSlots, // Available time slots for filtered time
             openTime: salon.openTime,
             closeTime: salon.closeTime,
             distance_km: Math.max(0.01, Number(salon.distance.toFixed(2))),
@@ -3435,9 +3831,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/my/salons', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const orgMemberships = req.user.orgMemberships || [];
       
-      const allSalons = await storage.getAllSalons();
+      // Fetch fresh organization memberships to avoid stale data
+      const orgMemberships = await storage.getUserOrganizations(userId);
+      
+      // Get ALL salons (not just published ones) because business owners need to manage unpublished salons
+      const allSalons = await storage.getSalons();  // This gets ALL salons without publish filter
       
       const accessibleSalons = allSalons.filter(salon => {
         if (salon.ownerId === userId) return true;
@@ -4719,6 +5118,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PROTECTED: Get intelligent role suggestions based on salon's services
+  app.get('/api/salons/:salonId/suggested-roles', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      // Get all active services for this salon
+      const services = await storage.getServicesBySalonId(salonId);
+      const activeServices = services.filter(s => s.isActive === 1);
+      
+      // Use the intelligent mapping to get suggested roles
+      const { getSuggestedRolesFromServices } = await import('../shared/service-role-mapping.js');
+      const suggestedRoles = getSuggestedRolesFromServices(activeServices);
+      
+      res.json({
+        suggestedRoles,
+        totalServices: activeServices.length,
+        message: activeServices.length === 0 
+          ? 'Add services first to get intelligent role suggestions' 
+          : `Found ${suggestedRoles.length} suggested role${suggestedRoles.length !== 1 ? 's' : ''} based on your ${activeServices.length} service${activeServices.length !== 1 ? 's' : ''}`
+      });
+    } catch (error) {
+      console.error('Error getting suggested roles:', error);
+      res.status(500).json({ error: 'Failed to get suggested roles' });
+    }
+  });
+
   app.post('/api/salons/:salonId/staff', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
@@ -4728,6 +5153,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error creating staff:', error);
       res.status(500).json({ error: 'Failed to create staff member' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/staff/:staffId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { staffId, salonId } = req.params;
+      
+      // Verify the staff member belongs to this salon
+      const existingStaff = await storage.getStaff(staffId);
+      if (!existingStaff) {
+        return res.status(404).json({ error: 'Staff member not found' });
+      }
+      if (existingStaff.salonId !== salonId) {
+        return res.status(403).json({ error: 'Staff member does not belong to this salon' });
+      }
+      
+      // Filter out fields that shouldn't be updated
+      const { id, createdAt, salonId: _, orgId, ...updateData } = req.body;
+      
+      // Update the staff member with filtered data
+      await storage.updateStaff(staffId, updateData);
+      
+      // Fetch and return the updated staff member
+      const updatedStaff = await storage.getStaff(staffId);
+      res.json(updatedStaff);
+    } catch (error) {
+      console.error('Error updating staff:', error);
+      res.status(500).json({ error: 'Failed to update staff member' });
     }
   });
 
@@ -5606,6 +6059,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { salonId } = req.params;
       const completion = await storage.checkDashboardCompletion(salonId);
+      console.log('📊 Dashboard Completion Debug:', JSON.stringify(completion, null, 2));
       res.json(completion);
     } catch (error) {
       console.error('Error fetching dashboard completion:', error);

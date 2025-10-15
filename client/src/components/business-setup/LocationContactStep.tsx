@@ -60,21 +60,23 @@ const DEFAULT_HOURS = {
 
 interface LocationContactStepProps {
   salonId: string;
-  initialData?: any;
   onNext?: () => void;
+  onComplete?: () => void;
   onBack?: () => void;
   onSkip?: () => void;
-  onComplete?: (data?: any) => void;
   isCompleted?: boolean;
 }
 
 export default function LocationContactStep({ 
   salonId, 
-  initialData, 
   onNext,
-  onComplete, 
-  isCompleted 
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: LocationContactStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
   const [formData, setFormData] = useState({
     address: "",
     city: "",
@@ -84,8 +86,7 @@ export default function LocationContactStep({
     email: "",
     businessHours: "",
     latitude: null as number | null,
-    longitude: null as number | null,
-    ...initialData
+    longitude: null as number | null
   });
   
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -106,12 +107,10 @@ export default function LocationContactStep({
     }
   };
   
-  const [businessHours, setBusinessHours] = useState(parseBusinessHours(initialData?.businessHours));
+  const [businessHours, setBusinessHours] = useState(parseBusinessHours(null));
   
   // Detect if initial city is custom (not in predefined list)
-  const isInitialCityCustom = initialData?.city && initialData?.state 
-    ? !(CITIES_BY_STATE[initialData.state] || []).includes(initialData.city)
-    : false;
+  const isInitialCityCustom = false;
     
   const [showCustomCity, setShowCustomCity] = useState(isInitialCityCustom);
   const [isLoading, setIsLoading] = useState(false);
@@ -182,17 +181,20 @@ export default function LocationContactStep({
       const response = await apiRequest('PUT', `/api/salons/${salonId}`, data);
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
-      if (onComplete) {
-        onComplete(formData);
-      } else if (onNext) {
-        onNext();
-      }
+    onSuccess: async () => {
+      // Invalidate both salon data and completion status
+      await queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
+      await queryClient.invalidateQueries({ 
+        queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+      });
+      
       toast({
         title: "Location & Contact Saved",
         description: "Your location and contact details have been updated successfully.",
       });
+      
+      // Call handleNext after successful save
+      handleNext();
     },
     onError: () => {
       toast({
@@ -813,9 +815,6 @@ export default function LocationContactStep({
         {/* Action Buttons */}
         <div className="flex items-center justify-between pt-4">
           <div className="text-sm text-muted-foreground">
-            {isCompleted && (
-              <span className="text-green-600 font-medium">✓ Completed</span>
-            )}
           </div>
 
           <Button

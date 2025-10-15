@@ -17,9 +17,11 @@ import {
 
 interface BookingSettingsStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 interface BookingFormData {
@@ -38,6 +40,39 @@ interface BookingFormData {
   sendAutomatedReminders: boolean;
   reminderHoursBefore: number;
 }
+
+// Service Category to Preset Mapping
+const SERVICE_CATEGORY_TO_PRESET: { [key: string]: string } = {
+  // Spa & Wellness categories
+  'Massage': 'spa',
+  'Facial': 'spa',
+  'Body Treatment': 'spa',
+  'Spa Package': 'spa',
+  'Ayurvedic Treatment': 'spa',
+  'Aromatherapy': 'spa',
+  
+  // Express/Quick categories
+  'Threading': 'express',
+  'Waxing': 'express',
+  'Bleach': 'express',
+  'Beard Grooming': 'express',
+  'Makeup': 'express',
+  
+  // Premium/VIP categories
+  'Bridal Services': 'premium',
+  'Hair Extensions': 'premium',
+  'Hair Treatment': 'premium',
+  'Keratin Treatment': 'premium',
+  
+  // Hair Salon (default) categories
+  'Haircut': 'salon',
+  'Hair Color': 'salon',
+  'Hair Styling': 'salon',
+  'Nail Care': 'salon',
+  'Pedicure & Manicure': 'salon',
+  'Piercing': 'salon',
+  'Tattoo': 'salon',
+};
 
 // Smart Presets for Different Business Types
 const BOOKING_PRESETS = [
@@ -125,10 +160,15 @@ const BOOKING_PRESETS = [
 
 export default function BookingSettingsStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: BookingSettingsStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
+  
   const [formData, setFormData] = useState<BookingFormData>({
     advanceBookingDays: 30,
     cancellationHours: 24,
@@ -143,17 +183,25 @@ export default function BookingSettingsStep({
     allowGroupBookings: false,
     maxGroupSize: 1,
     sendAutomatedReminders: true,
-    reminderHoursBefore: 24,
-    ...initialData
+    reminderHoursBefore: 24
   });
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(true);
+  const [suggestedPreset, setSuggestedPreset] = useState<{
+    preset: typeof BOOKING_PRESETS[0];
+    reason: string;
+  } | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const { data: bookingSettings, isLoading: isLoadingSettings } = useQuery({
     queryKey: ['/api/salons', salonId, 'booking-settings'],
+    enabled: !!salonId,
+  });
+
+  const { data: services, isLoading: isLoadingServices } = useQuery({
+    queryKey: ['/api/salons', salonId, 'services'],
     enabled: !!salonId,
   });
 
@@ -222,6 +270,22 @@ export default function BookingSettingsStep({
     }
   }, [bookingSettings]);
 
+  // Auto-suggest preset based on services
+  useEffect(() => {
+    if (services && Array.isArray(services) && services.length > 0 && !bookingSettings && showPresets) {
+      const suggestion = analyzeServicesAndSuggestPreset(services);
+      if (suggestion) {
+        setSuggestedPreset(suggestion);
+        // Auto-apply the suggested preset
+        setFormData((prev) => ({
+          ...prev,
+          ...suggestion.preset.settings
+        }));
+        setSelectedPreset(suggestion.preset.id);
+      }
+    }
+  }, [services, bookingSettings, showPresets]);
+
   const saveSettingsMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
       const dbFormatData = mapFormToDatabase(data);
@@ -237,7 +301,7 @@ export default function BookingSettingsStep({
       });
       const mappedSavedData = mapDatabaseToForm(savedData);
       setFormData((prev: BookingFormData) => ({ ...prev, ...mappedSavedData }));
-      onComplete(savedData);
+      handleNext();
       toast({
         title: "Booking Settings Saved!",
         description: "Your intelligent booking policies are now active.",
@@ -279,6 +343,60 @@ export default function BookingSettingsStep({
       title: `${preset.name} Preset Applied!`,
       description: preset.description,
     });
+  };
+
+  // Analyze services and suggest the best preset
+  const analyzeServicesAndSuggestPreset = (services: any[]) => {
+    if (!services || services.length === 0) {
+      return null;
+    }
+
+    // Count services by preset recommendation
+    const presetCounts: { [key: string]: { count: number; categories: string[] } } = {
+      spa: { count: 0, categories: [] },
+      express: { count: 0, categories: [] },
+      premium: { count: 0, categories: [] },
+      salon: { count: 0, categories: [] },
+    };
+
+    services.forEach(service => {
+      const category = service.category;
+      const recommendedPreset = SERVICE_CATEGORY_TO_PRESET[category] || 'salon';
+      presetCounts[recommendedPreset].count++;
+      if (!presetCounts[recommendedPreset].categories.includes(category)) {
+        presetCounts[recommendedPreset].categories.push(category);
+      }
+    });
+
+    // Find the preset with the most services
+    let maxCount = 0;
+    let suggestedPresetId = 'salon'; // Default
+    let suggestedCategories: string[] = [];
+
+    Object.entries(presetCounts).forEach(([presetId, data]) => {
+      if (data.count > maxCount) {
+        maxCount = data.count;
+        suggestedPresetId = presetId;
+        suggestedCategories = data.categories;
+      }
+    });
+
+    const preset = BOOKING_PRESETS.find(p => p.id === suggestedPresetId);
+    if (!preset) return null;
+
+    // Generate reasoning based on detected categories
+    let reason = '';
+    if (suggestedPresetId === 'spa') {
+      reason = `Based on your ${suggestedCategories.slice(0, 2).join(' & ')} services, we recommend longer appointments with relaxation time`;
+    } else if (suggestedPresetId === 'express') {
+      reason = `Based on your ${suggestedCategories.slice(0, 2).join(' & ')} services, we recommend quick turnover settings`;
+    } else if (suggestedPresetId === 'premium') {
+      reason = `Based on your ${suggestedCategories.slice(0, 2).join(' & ')} services, we recommend strict policies for high-end services`;
+    } else {
+      reason = `Based on your ${suggestedCategories.slice(0, 2).join(' & ')} services, we recommend standard salon settings`;
+    }
+
+    return { preset, reason };
   };
 
   // Smart Recommendations
@@ -365,6 +483,29 @@ export default function BookingSettingsStep({
         </CardContent>
       </Card>
 
+      {/* Smart Preset Suggestion Banner */}
+      {suggestedPreset && showPresets && (
+        <Card className="border-green-300 bg-gradient-to-br from-green-50/80 to-emerald-50/80">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
+                  <Sparkles className="h-5 w-5 text-white" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-green-900 mb-1">
+                  ✨ Smart Suggestion: {suggestedPreset.preset.name} Preset
+                </p>
+                <p className="text-sm text-green-700">
+                  {suggestedPreset.reason}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Smart Presets */}
       {showPresets && (
         <Card className="border-purple-300 bg-gradient-to-br from-violet-50/50 to-pink-50/50">
@@ -374,7 +515,9 @@ export default function BookingSettingsStep({
               Quick Start Presets
             </CardTitle>
             <CardDescription>
-              Choose a preset optimized for your business type
+              {suggestedPreset 
+                ? `We've pre-selected ${suggestedPreset.preset.name} for you, or choose another`
+                : 'Choose a preset optimized for your business type'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -802,12 +945,6 @@ export default function BookingSettingsStep({
         {/* Action Buttons */}
         <div className="flex items-center justify-between pt-4">
           <div className="flex items-center gap-2">
-            {isCompleted && (
-              <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
-                <CheckCircle2 className="h-3 w-3 mr-1" />
-                Completed
-              </Badge>
-            )}
             {showPresets && (
               <Badge variant="outline" className="text-purple-600 border-purple-300">
                 Choose a preset to get started quickly

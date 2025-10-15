@@ -120,7 +120,7 @@ const ServicesSelection: React.FC = () => {
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {serviceCategories.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide">
+          <div className="flex gap-2 overflow-x-auto pb-4 mb-6" style={{ scrollbarWidth: 'thin', scrollbarColor: '#a855f7 #f3f4f6' }}>
             <button
               onClick={() => setSelectedCategory(null)}
               className={cn(

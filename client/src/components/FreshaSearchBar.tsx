@@ -51,6 +51,8 @@ const mainCategories: ServiceCategory[] = [
   { id: 'massage', name: 'Massage & Spa', icon: '💆', isCategory: true, subServices: [] },
   { id: 'eyes', name: 'Eyebrows & Lashes', icon: '👁️', isCategory: true, subServices: [] },
   { id: 'hair-removal', name: 'Hair Removal', icon: '🪶', isCategory: true, subServices: [] },
+  { id: 'piercing', name: 'Piercing', icon: '💎', isCategory: true, subServices: [] },
+  { id: 'tattoo', name: 'Tattoo', icon: '🎨', isCategory: true, subServices: [] },
   { id: 'makeup', name: 'Makeup', icon: '💄', isCategory: true, subServices: [] },
   { id: 'body', name: 'Body Treatments', icon: '🧖', isCategory: true, subServices: [] },
   { id: 'mens', name: "Men's Grooming", icon: '💈', isCategory: true, subServices: [] },
@@ -66,6 +68,9 @@ const subServices: Service[] = [
   { id: 'balayage', name: 'Balayage & Highlights', icon: '🌈', categoryId: 'hair', isCategory: false },
   { id: 'keratin', name: 'Keratin Treatment', icon: '✨', categoryId: 'hair', isCategory: false },
   { id: 'hair-extensions', name: 'Hair Extensions', icon: '💁', categoryId: 'hair', isCategory: false },
+  { id: 'hair-patch', name: 'Hair Patch', icon: '🩹', categoryId: 'hair', isCategory: false },
+  { id: 'hair-weaving', name: 'Hair Weaving', icon: '🧵', categoryId: 'hair', isCategory: false },
+  { id: 'hair-bonding', name: 'Hair Bonding', icon: '🔗', categoryId: 'hair', isCategory: false },
   
   // Nails sub-services
   { id: 'manicure', name: 'Manicure', icon: '🤲', categoryId: 'nails', isCategory: false },
@@ -105,6 +110,23 @@ const subServices: Service[] = [
   { id: 'full-body-wax', name: 'Full Body Waxing', icon: '✨', categoryId: 'hair-removal', isCategory: false },
   { id: 'bikini-wax', name: 'Bikini Wax', icon: '👙', categoryId: 'hair-removal', isCategory: false },
   { id: 'brazilian-wax', name: 'Brazilian Wax', icon: '💫', categoryId: 'hair-removal', isCategory: false },
+  
+  // Piercing sub-services
+  { id: 'ear-piercing', name: 'Ear Piercing', icon: '👂', categoryId: 'piercing', isCategory: false },
+  { id: 'nose-piercing', name: 'Nose Piercing', icon: '👃', categoryId: 'piercing', isCategory: false },
+  { id: 'belly-piercing', name: 'Belly Piercing', icon: '💫', categoryId: 'piercing', isCategory: false },
+  { id: 'lip-piercing', name: 'Lip Piercing', icon: '💋', categoryId: 'piercing', isCategory: false },
+  { id: 'eyebrow-piercing', name: 'Eyebrow Piercing', icon: '👁️', categoryId: 'piercing', isCategory: false },
+  { id: 'cartilage-piercing', name: 'Cartilage Piercing', icon: '✨', categoryId: 'piercing', isCategory: false },
+  
+  // Tattoo sub-services
+  { id: 'small-tattoo', name: 'Small Tattoo', icon: '✨', categoryId: 'tattoo', isCategory: false },
+  { id: 'medium-tattoo', name: 'Medium Tattoo', icon: '🎨', categoryId: 'tattoo', isCategory: false },
+  { id: 'large-tattoo', name: 'Large Tattoo', icon: '🖼️', categoryId: 'tattoo', isCategory: false },
+  { id: 'coverup-tattoo', name: 'Cover-up Tattoo', icon: '🔄', categoryId: 'tattoo', isCategory: false },
+  { id: 'tattoo-removal', name: 'Tattoo Removal', icon: '🔥', categoryId: 'tattoo', isCategory: false },
+  { id: 'permanent-makeup', name: 'Permanent Makeup Tattoo', icon: '💄', categoryId: 'tattoo', isCategory: false },
+  { id: 'henna-tattoo', name: 'Henna/Mehndi Tattoo', icon: '🌿', categoryId: 'tattoo', isCategory: false },
   
   // Makeup sub-services
   { id: 'bridal-makeup', name: 'Bridal Makeup', icon: '👰', categoryId: 'makeup', isCategory: false },
@@ -320,6 +342,28 @@ export default function FreshaSearchBar({
         setRecentSearches(JSON.parse(savedRecentSearches));
       } catch (error) {
         console.error('Error loading recent searches:', error);
+      }
+    }
+
+    // Load last search parameters from localStorage
+    const savedLastSearch = localStorage.getItem('fresha-last-search');
+    if (savedLastSearch) {
+      try {
+        const lastSearch = JSON.parse(savedLastSearch);
+        if (lastSearch.service) setSelectedService(lastSearch.service);
+        if (lastSearch.category) setSelectedCategory(lastSearch.category);
+        if (lastSearch.location) {
+          setSelectedLocation(lastSearch.location);
+          setLocationQuery(lastSearch.location.name || '');
+        }
+        if (lastSearch.radius) setSelectedRadius(lastSearch.radius);
+        if (lastSearch.dateType) setSelectedDateType(lastSearch.dateType);
+        if (lastSearch.date) setSelectedDate(lastSearch.date);
+        if (lastSearch.timeType) setSelectedTimeType(lastSearch.timeType);
+        if (lastSearch.customTimeRange) setCustomTimeRange(lastSearch.customTimeRange);
+        console.log('Restored last search:', lastSearch);
+      } catch (error) {
+        console.error('Error loading last search:', error);
       }
     }
 
@@ -629,6 +673,20 @@ export default function FreshaSearchBar({
       }
     }
     
+    // Save search parameters to localStorage for persistence
+    const searchParams = {
+      service: selectedService,
+      category: selectedCategory,
+      location: selectedLocation,
+      radius: selectedRadius,
+      dateType: selectedDateType,
+      date: selectedDate,
+      timeType: selectedTimeType,
+      customTimeRange: customTimeRange
+    };
+    localStorage.setItem('fresha-last-search', JSON.stringify(searchParams));
+    console.log('Saved last search to localStorage:', searchParams);
+    
     onSearch({
       service: selectedService || selectedCategory || '',
       coords: selectedLocation.coords,
@@ -795,14 +853,14 @@ export default function FreshaSearchBar({
             </button>
             
             {showServiceDropdown && (
-              <div className="absolute top-full left-0 right-0 md:left-auto md:w-96 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-[9999] max-h-96 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 md:left-0 md:right-auto md:w-96 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-[9999] max-h-[70vh] overflow-y-auto">
                 {!showSubServices ? (
                   // Show main categories
                   <>
                     <div className="px-4 py-3 border-b border-gray-100">
                       <h3 className="text-sm font-semibold text-gray-900">Treatments</h3>
                     </div>
-                    {mainCategories.map((category) => (
+                    {mainCategories.map((category, index) => (
                       <button
                         key={category.id}
                         onClick={() => {
@@ -811,8 +869,8 @@ export default function FreshaSearchBar({
                           setShowSubServices(true);
                         }}
                         className={cn(
-                          "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors",
-                          selectedCategory === category.id && !selectedService && "bg-purple-50"
+                          "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-100 transition-colors border-b border-gray-100 last:border-b-0",
+                          selectedCategory === category.id && !selectedService && "bg-purple-50 hover:bg-purple-100"
                         )}
                       >
                         <span className="text-xl">{category.icon}</span>
@@ -839,7 +897,7 @@ export default function FreshaSearchBar({
                     </div>
                     {subServices
                       .filter(service => service.categoryId === selectedCategory)
-                      .map((service) => (
+                      .map((service, index, array) => (
                         <button
                           key={service.id}
                           onClick={() => {
@@ -848,8 +906,8 @@ export default function FreshaSearchBar({
                             setShowSubServices(false);
                           }}
                           className={cn(
-                            "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors",
-                            selectedService === service.id && "bg-purple-50"
+                            "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-100 transition-colors border-b border-gray-100 last:border-b-0",
+                            selectedService === service.id && "bg-purple-50 hover:bg-purple-100"
                           )}
                         >
                           <span className="text-lg">{service.icon}</span>
@@ -892,7 +950,7 @@ export default function FreshaSearchBar({
             </div>
             
             {showLocationDropdown && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] max-h-60 overflow-y-auto">
+              <div className="absolute top-full left-0 right-0 md:left-0 md:right-auto md:w-96 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] max-h-[70vh] overflow-y-auto">
                 {/* Current Location */}
                 <button
                   onClick={handleCurrentLocation}
@@ -1051,7 +1109,7 @@ export default function FreshaSearchBar({
             </button>
             
             {showDatePicker && (
-              <div className="fixed md:absolute top-auto md:top-full left-4 md:left-0 mt-2 bg-white rounded-2xl shadow-2xl z-[99999] w-[calc(100%-2rem)] md:w-[420px] border border-gray-100 max-h-[85vh] overflow-y-auto">
+              <div className="fixed md:absolute top-auto md:top-full left-4 md:left-0 md:right-auto mt-2 bg-white rounded-2xl shadow-2xl z-[99999] w-[calc(100%-2rem)] md:w-[420px] border border-gray-100 max-h-[85vh] overflow-y-auto">
                 {/* Quick Date Selection Pills */}
                 <div className="p-4 flex gap-2 flex-wrap border-b border-gray-100 bg-white sticky top-0 z-10">
                   <button
@@ -1116,7 +1174,7 @@ export default function FreshaSearchBar({
             </button>
             
             {showTimePicker && (
-              <div className="fixed md:absolute top-auto md:top-full left-4 md:left-0 mt-2 bg-white rounded-2xl shadow-2xl z-[99999] w-[calc(100%-2rem)] md:w-auto md:min-w-[280px] border border-gray-100 max-h-[85vh] overflow-y-auto">
+              <div className="fixed md:absolute top-auto md:top-full left-4 md:left-0 md:right-auto mt-2 bg-white rounded-2xl shadow-2xl z-[99999] w-[calc(100%-2rem)] md:w-[320px] border border-gray-100 max-h-[85vh] overflow-y-auto">
                 {/* Quick Time Selection Pills */}
                 <div className="p-4 space-y-2 bg-white sticky top-0 z-10 border-b border-gray-100">
                   <div className="flex flex-wrap gap-2">

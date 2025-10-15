@@ -66,6 +66,8 @@ export default function BusinessSetup() {
   const [templateSelected, setTemplateSelected] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [isCreatingOrganization, setIsCreatingOrganization] = useState(false);
+  const [newSalonId, setNewSalonId] = useState<string | null>(null);
+  const [isCreatingSalon, setIsCreatingSalon] = useState(false);
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuth();
@@ -80,6 +82,46 @@ export default function BusinessSetup() {
   });
 
   const currentSalon = Array.isArray(userSalons) && userSalons.length > 0 ? userSalons[0] : null;
+
+  // Create a new salon based on template selection
+  const createSalonMutation = useMutation({
+    mutationFn: async (templateId: string) => {
+      const templateName = BUSINESS_TEMPLATES.find(t => t.id === templateId)?.name || 'My Salon';
+      const response = await apiRequest('POST', '/api/salons', {
+        name: templateName,
+        category: templateId === 'custom' ? 'hair_salon' : templateId.replace('-', '_'),
+        description: '',
+        // Required fields - will be filled in during setup wizard
+        address: 'To be configured',
+        city: 'To be configured',
+        state: 'To be configured',
+        zipCode: '00000',
+        phone: '0000000000',
+        email: user?.email || 'configure@salonhub.com',
+        priceRange: '$$',
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setNewSalonId(data.id);
+      setIsCreatingSalon(false);
+      setTemplateSelected(true);
+      queryClient.invalidateQueries({ queryKey: ['/api/my/salons'] });
+      toast({
+        title: "Salon Created",
+        description: "Your new salon has been created. Let's set it up!",
+      });
+    },
+    onError: (error) => {
+      console.error('Error creating salon:', error);
+      setIsCreatingSalon(false);
+      toast({
+        title: "Creation Error",
+        description: "Failed to create salon. Please try again.",
+        variant: "destructive",
+      });
+    }
+  });
 
   // Create organization and salon for new business owners
   const createOrganizationMutation = useMutation({
@@ -142,19 +184,11 @@ export default function BusinessSetup() {
     }
   }, [isAuthenticated, user, userSalons]);
 
-  // Handle template selection
+  // Handle template selection - Create a new salon
   const handleTemplateSelect = (templateId: string) => {
-    if (!currentSalon || !currentSalon.id) {
-      toast({
-        title: "Setup Not Ready",
-        description: "Please wait for your salon to be created before continuing.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setSelectedTemplate(templateId);
-    setTemplateSelected(true);
+    setIsCreatingSalon(true);
+    createSalonMutation.mutate(templateId);
   };
 
   // Handle setup completion
@@ -167,23 +201,25 @@ export default function BusinessSetup() {
   };
 
   // Show loading state while organization is being created or salons are loading
-  if (salonsLoading || isCreatingOrganization || createOrganizationMutation.isPending) {
+  if (salonsLoading || isCreatingOrganization || createOrganizationMutation.isPending || isCreatingSalon) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-violet-50 via-pink-50 to-rose-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Setting up your business</h2>
-          <p className="text-gray-600">Creating your salon profile...</p>
+          <p className="text-gray-600">
+            {isCreatingSalon ? 'Creating your new salon...' : 'Creating your salon profile...'}
+          </p>
         </div>
       </div>
     );
   }
 
-  // If template selected, show the unified 8-step wizard
-  if (templateSelected && currentSalon?.id) {
+  // If template selected, show the unified 8-step wizard with the NEW salon
+  if (templateSelected && newSalonId) {
     return (
       <SetupWizard
-        salonId={currentSalon.id}
+        salonId={newSalonId}
         initialStep={1}
         onComplete={handleSetupComplete}
       />

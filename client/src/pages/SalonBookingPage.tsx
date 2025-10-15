@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, ChevronLeft, MapPin, Clock, Star } from "lucide-react";
+import { Loader2, ChevronLeft, MapPin, Clock, Star, Calendar as CalendarIcon } from "lucide-react";
 import { Link } from "wouter";
 
 interface Service {
@@ -28,6 +28,17 @@ interface Salon {
   imageUrl?: string | null;
 }
 
+interface MediaAsset {
+  id: string;
+  salonId: string;
+  assetType: string;
+  url: string;
+  altText?: string;
+  displayOrder: number;
+  isPrimary: number;
+  isActive: number;
+}
+
 interface Staff {
   id: string;
   name: string;
@@ -42,6 +53,15 @@ interface SelectedService extends Service {
   sequence: number;
 }
 
+interface Booking {
+  id: string;
+  bookingDate: string;
+  bookingTime: string;
+  status: string;
+  staffId?: string | null;
+  serviceDuration?: number;
+}
+
 type BookingStep = 'services' | 'datetime' | 'confirm';
 
 export default function SalonBookingPage() {
@@ -52,11 +72,35 @@ export default function SalonBookingPage() {
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [viewingMonth, setViewingMonth] = useState<Date>(new Date()); // Separate state for calendar navigation
+
+  // Helper function to check if two dates are the same day (timezone-safe)
+  const isSameDay = (date1: Date, date2: Date): boolean => {
+    return date1.getFullYear() === date2.getFullYear() &&
+           date1.getMonth() === date2.getMonth() &&
+           date1.getDate() === date2.getDate();
+  };
+
+  // Calculate total price and duration from selected services
+  const totalPrice = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
+  const totalDuration = selectedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
 
   // Fetch salon details
   const { data: salon, isLoading: isSalonLoading, error: salonError } = useQuery<Salon>({
     queryKey: [`/api/salons/${salonId}`],
   });
+
+  // Fetch media assets
+  const { data: mediaAssets = [] } = useQuery<MediaAsset[]>({
+    queryKey: [`/api/salons/${salonId}/media-assets`],
+    enabled: !!salonId,
+  });
+
+  // Get primary image from media assets
+  const primaryImage = mediaAssets.find(asset => asset.isPrimary === 1 && asset.isActive === 1)?.url 
+    || mediaAssets.find(asset => asset.isActive === 1)?.url 
+    || salon?.imageUrl
+    || null;
 
   // Fetch services
   const { data: services = [], isLoading: isServicesLoading, error: servicesError } = useQuery<Service[]>({
@@ -67,6 +111,98 @@ export default function SalonBookingPage() {
   const { data: staff = [], isLoading: isStaffLoading, error: staffError } = useQuery<Staff[]>({
     queryKey: [`/api/salons/${salonId}/staff`],
   });
+
+  // Fetch bookings for the selected date to check availability
+  const { data: dayBookings = [], refetch: refetchBookings } = useQuery<Booking[]>({
+    queryKey: [`/api/salons/${salonId}/bookings`, selectedDate?.toLocaleDateString('en-CA')],
+    queryFn: async () => {
+      if (!selectedDate) return [];
+      
+      const dateStr = selectedDate.toLocaleDateString('en-CA');
+      const params = new URLSearchParams({
+        startDate: dateStr,
+        endDate: dateStr,
+        status: 'confirmed,pending' // Only check confirmed and pending bookings
+      });
+      
+      const response = await fetch(`/api/salons/${salonId}/bookings?${params}`);
+      if (!response.ok) return [];
+      
+      return response.json();
+    },
+    enabled: !!selectedDate && !!salonId,
+    refetchInterval: 15000, // Refresh every 15 seconds for real-time updates
+  });
+
+  // Helper function to check if a time slot is booked
+  const isTimeSlotBooked = (time: string): boolean => {
+    if (!selectedDate || dayBookings.length === 0) return false;
+
+    const [slotHours, slotMinutes] = time.split(':').map(Number);
+    const slotStartMinutes = slotHours * 60 + slotMinutes;
+    
+    // Calculate end time of proposed appointment (use conservative default of 30 min if no services selected)
+    const proposedDuration = totalDuration || 30;
+    const slotEndMinutes = slotStartMinutes + proposedDuration;
+    
+    // Check each booking for overlap
+    for (const booking of dayBookings) {
+      // Skip if booking is for a different staff member
+      if (selectedStaff && booking.staffId && booking.staffId !== selectedStaff.id) {
+        continue;
+      }
+      
+      const [bookingHours, bookingMinutes] = booking.bookingTime.split(':').map(Number);
+      const bookingStartMinutes = bookingHours * 60 + bookingMinutes;
+      
+      // Use fixed 30-minute default for bookings without duration info
+      const bookingDuration = booking.serviceDuration || 30;
+      const bookingEndMinutes = bookingStartMinutes + bookingDuration;
+      
+      // Check for any overlap: slot overlaps if it starts before booking ends AND ends after booking starts
+      if (slotStartMinutes < bookingEndMinutes && slotEndMinutes > bookingStartMinutes) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Clear selected time if date changes and selected time becomes invalid (past or booked)
+  useEffect(() => {
+    if (selectedDate && selectedTime) {
+      const now = new Date();
+      const isToday = isSameDay(selectedDate, now);
+      if (isToday) {
+        const [hours, minutes] = selectedTime.split(':').map(Number);
+        const timeSlotDate = new Date();
+        timeSlotDate.setHours(hours, minutes, 0, 0);
+        if (timeSlotDate < now) {
+          setSelectedTime(null);
+        }
+      }
+      
+      // Clear if slot is now booked or duration/staff change makes it invalid
+      if (isTimeSlotBooked(selectedTime)) {
+        setSelectedTime(null);
+      }
+    }
+  }, [selectedDate, selectedTime, dayBookings, totalDuration, selectedStaff]);
+
+  // Safety check: Clear selected date if it's in the past
+  useEffect(() => {
+    if (selectedDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const checkDate = new Date(selectedDate);
+      checkDate.setHours(0, 0, 0, 0);
+      
+      if (checkDate < today) {
+        setSelectedDate(null);
+        setSelectedTime(null);
+      }
+    }
+  }, [selectedDate]);
 
   // Debug logging
   useEffect(() => {
@@ -114,9 +250,6 @@ export default function SalonBookingPage() {
       setSelectedServices(selectedServices.filter((s) => s.id !== service.id));
     }
   };
-
-  const totalPrice = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
-  const totalDuration = selectedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
 
   if (isSalonLoading || isServicesLoading || isStaffLoading) {
     return (
@@ -252,8 +385,8 @@ export default function SalonBookingPage() {
                 {/* Salon Info - Always Visible */}
                 <div className="flex gap-3 mb-6 pb-6 border-b border-gray-100">
                   <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                    {salon.imageUrl ? (
-                      <img src={salon.imageUrl} alt={salon.name} className="w-full h-full object-cover" />
+                    {primaryImage ? (
+                      <img src={primaryImage} alt={salon.name} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-gradient-to-br from-violet-100 to-purple-100" />
                     )}
@@ -302,13 +435,142 @@ export default function SalonBookingPage() {
                       <label className="text-sm font-medium text-gray-700 mb-2 block">
                         Select Date
                       </label>
-                      <input
-                        type="date"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                        min={new Date().toISOString().split('T')[0]}
-                        value={selectedDate ? selectedDate.toISOString().split('T')[0] : ''}
-                        onChange={(e) => setSelectedDate(e.target.value ? new Date(e.target.value) : null)}
-                      />
+                      
+                      {/* Quick Date Buttons */}
+                      <div className="flex gap-2 mb-3">
+                        <button
+                          onClick={() => {
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0); // Normalize to local midnight
+                            setSelectedDate(today);
+                          }}
+                          className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors ${
+                            selectedDate && isSameDay(selectedDate, new Date())
+                              ? 'bg-violet-600 text-white border-violet-600'
+                              : 'border-gray-300 hover:border-violet-400 text-gray-700'
+                          }`}
+                        >
+                          Today
+                        </button>
+                        <button
+                          onClick={() => {
+                            const tomorrow = new Date();
+                            tomorrow.setDate(tomorrow.getDate() + 1);
+                            tomorrow.setHours(0, 0, 0, 0); // Normalize to local midnight
+                            setSelectedDate(tomorrow);
+                          }}
+                          className={`flex-1 py-2 px-3 text-sm rounded-lg border transition-colors ${
+                            selectedDate && isSameDay(selectedDate, (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d; })())
+                              ? 'bg-violet-600 text-white border-violet-600'
+                              : 'border-gray-300 hover:border-violet-400 text-gray-700'
+                          }`}
+                        >
+                          Tomorrow
+                        </button>
+                      </div>
+
+                      {/* Calendar Grid */}
+                      <div className="border border-gray-300 rounded-lg p-3">
+                        {/* Month Header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <button
+                            onClick={() => {
+                              const newMonth = new Date(viewingMonth);
+                              newMonth.setMonth(newMonth.getMonth() - 1);
+                              // Don't allow going to past months
+                              const today = new Date();
+                              const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                              const newMonthStart = new Date(newMonth.getFullYear(), newMonth.getMonth(), 1);
+                              
+                              if (newMonthStart >= currentMonthStart) {
+                                setViewingMonth(newMonth);
+                              }
+                            }}
+                            disabled={(() => {
+                              const newMonth = new Date(viewingMonth);
+                              newMonth.setMonth(newMonth.getMonth() - 1);
+                              const today = new Date();
+                              const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                              const newMonthStart = new Date(newMonth.getFullYear(), newMonth.getMonth(), 1);
+                              return newMonthStart < currentMonthStart;
+                            })()}
+                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ChevronLeft className="w-5 h-5 text-gray-600" />
+                          </button>
+                          <div className="text-sm font-semibold text-gray-900">
+                            {viewingMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                          </div>
+                          <button
+                            onClick={() => {
+                              const newMonth = new Date(viewingMonth);
+                              newMonth.setMonth(newMonth.getMonth() + 1);
+                              setViewingMonth(newMonth);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded"
+                          >
+                            <ChevronLeft className="w-5 h-5 text-gray-600 rotate-180" />
+                          </button>
+                        </div>
+
+                        {/* Calendar Days */}
+                        <div className="grid grid-cols-7 gap-1 text-center">
+                          {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => (
+                            <div key={day} className="text-xs font-medium text-gray-500 py-1">
+                              {day}
+                            </div>
+                          ))}
+                          {(() => {
+                            const year = viewingMonth.getFullYear();
+                            const month = viewingMonth.getMonth();
+                            const firstDay = new Date(year, month, 1).getDay();
+                            const daysInMonth = new Date(year, month + 1, 0).getDate();
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            
+                            const days = [];
+                            // Empty cells for days before month starts
+                            for (let i = 0; i < firstDay; i++) {
+                              days.push(<div key={`empty-${i}`} className="py-1" />);
+                            }
+                            
+                            // Actual days
+                            for (let day = 1; day <= daysInMonth; day++) {
+                              const date = new Date(year, month, day);
+                              date.setHours(0, 0, 0, 0);
+                              const isPast = date < today;
+                              const isSelected = selectedDate && isSameDay(date, selectedDate);
+                              const isToday = isSameDay(date, new Date());
+                              
+                              days.push(
+                                <button
+                                  key={day}
+                                  onClick={() => {
+                                    if (!isPast) {
+                                      const normalizedDate = new Date(year, month, day);
+                                      normalizedDate.setHours(0, 0, 0, 0); // Ensure midnight normalization
+                                      setSelectedDate(normalizedDate);
+                                    }
+                                  }}
+                                  disabled={isPast}
+                                  className={`py-1.5 text-sm rounded-lg transition-colors ${
+                                    isPast
+                                      ? 'text-gray-300 cursor-not-allowed'
+                                      : isSelected
+                                      ? 'bg-violet-600 text-white font-semibold'
+                                      : isToday
+                                      ? 'bg-violet-50 text-violet-600 font-semibold'
+                                      : 'hover:bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {day}
+                                </button>
+                              );
+                            }
+                            return days;
+                          })()}
+                        </div>
+                      </div>
                     </div>
 
                     {/* Time Picker */}
@@ -318,19 +580,35 @@ export default function SalonBookingPage() {
                       </label>
                       <div className="grid grid-cols-2 gap-2">
                         {['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', 
-                          '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'].map((time) => (
-                          <button
-                            key={time}
-                            onClick={() => setSelectedTime(time)}
-                            className={`py-2 px-3 text-sm border rounded-lg transition-colors ${
-                              selectedTime === time
-                                ? 'bg-violet-600 text-white border-violet-600'
-                                : 'border-gray-300 hover:border-violet-400'
-                            }`}
-                          >
-                            {time}
-                          </button>
-                        ))}
+                          '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'].map((time) => {
+                          const now = new Date();
+                          const isToday = selectedDate && isSameDay(selectedDate, now);
+                          const [hours, minutes] = time.split(':').map(Number);
+                          const timeSlotDate = new Date();
+                          timeSlotDate.setHours(hours, minutes, 0, 0);
+                          const isPastTime = !!(isToday && timeSlotDate < now);
+                          const isBooked = isTimeSlotBooked(time);
+                          const isDisabled = isPastTime || isBooked;
+                          
+                          return (
+                            <button
+                              key={time}
+                              onClick={() => !isDisabled && setSelectedTime(time)}
+                              disabled={isDisabled}
+                              className={`py-2 px-3 text-sm border rounded-lg transition-colors ${
+                                isDisabled
+                                  ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                  : selectedTime === time
+                                  ? 'bg-violet-600 text-white border-violet-600'
+                                  : 'border-gray-300 hover:border-violet-400'
+                              }`}
+                              data-testid={`button-time-${time}`}
+                              title={isBooked ? 'Already booked' : isPastTime ? 'Past time' : ''}
+                            >
+                              {time}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -383,23 +661,53 @@ export default function SalonBookingPage() {
 
                 {/* Booking Summary - DateTime & Confirm Steps */}
                 {(bookingStep === 'datetime' || bookingStep === 'confirm') && (
-                  <div className="space-y-2 mb-4 text-sm">
-                    <div className="font-medium text-gray-700">{selectedServices.length} service(s) selected</div>
-                    <div className="text-xs text-gray-500">
-                      {selectedServices.map(s => s.name).join(', ')}
+                  <div className="space-y-3 mb-4">
+                    {/* Header with Total Duration */}
+                    <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                      <div className="text-sm font-medium text-gray-900">
+                        {selectedServices.length} service(s) selected
+                      </div>
+                      <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                        <Clock className="w-4 h-4" />
+                        <span>
+                          {Math.floor(totalDuration / 60) > 0 && `${Math.floor(totalDuration / 60)} hr `}{totalDuration % 60 > 0 && `${totalDuration % 60} min`}
+                        </span>
+                      </div>
                     </div>
+
+                    {/* Date & Time Info - Confirm Step Only */}
                     {bookingStep === 'confirm' && selectedDate && selectedTime && (
-                      <>
-                        <div className="text-xs text-gray-500 mt-2">
-                          📅 {selectedDate.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' })} at {selectedTime}
+                      <div className="pb-3 border-b border-gray-200">
+                        <div className="flex items-center gap-2 text-sm text-gray-700 mb-1">
+                          <CalendarIcon className="w-4 h-4" />
+                          <span className="font-medium">
+                            {selectedDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+                          </span>
                         </div>
-                        {selectedStaff && (
-                          <div className="text-xs text-gray-500">
-                            👤 with {selectedStaff.name}
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Clock className="w-4 h-4" />
+                          <span>{selectedTime}</span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Individual Services */}
+                    {selectedServices.map((service, index) => (
+                      <div key={service.id} className={index > 0 ? "pt-3 border-t border-gray-100" : ""}>
+                        <div className="flex justify-between items-start mb-1">
+                          <div className="font-medium text-gray-900 text-sm">{service.name}</div>
+                          <div className="font-semibold text-gray-900 text-sm">₹{(service.priceInPaisa / 100).toFixed(0)}</div>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {service.durationMinutes} mins with {selectedStaff?.name || 'any professional'}
+                        </div>
+                        {service.subCategory && (
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {service.subCategory}
                           </div>
                         )}
-                      </>
-                    )}
+                      </div>
+                    ))}
                   </div>
                 )}
 

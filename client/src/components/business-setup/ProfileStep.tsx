@@ -11,8 +11,11 @@ import { Building, CheckCircle } from "lucide-react";
 
 interface ProfileStepProps {
   salonId: string;
-  onComplete: () => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 const CATEGORIES = [
@@ -24,7 +27,10 @@ const CATEGORIES = [
   { value: "massage", label: "Massage Therapy" }
 ];
 
-export default function ProfileStep({ salonId, onComplete, isCompleted }: ProfileStepProps) {
+export default function ProfileStep({ salonId, onNext, onComplete, onBack, onSkip, isCompleted }: ProfileStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
+  
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -74,7 +80,10 @@ export default function ProfileStep({ salonId, onComplete, isCompleted }: Profil
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
-      onComplete();
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+      });
+      handleNext();
       toast({
         title: "Profile Saved",
         description: "Your business profile has been updated successfully.",

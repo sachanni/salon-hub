@@ -142,8 +142,10 @@ export interface IStorage {
   // Salon operations
   getSalon(id: string): Promise<Salon | undefined>;
   getAllSalons(): Promise<Salon[]>;
+  getSalons(): Promise<Salon[]>;  // Get ALL salons regardless of publish state
   createSalon(salon: InsertSalon): Promise<Salon>;
   updateSalon(id: string, updates: Partial<InsertSalon>): Promise<void>;
+  deleteSalon(id: string): Promise<void>;
   
   // Service operations
   getService(id: string): Promise<Service | undefined>;
@@ -1218,10 +1220,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSalonsByOrgId(orgId: string): Promise<Salon[]> {
-    return await db.select().from(salons).where(and(
+    const result = await db.select().from(salons).where(and(
       eq(salons.orgId, orgId),
       eq(salons.isActive, 1)
     ));
+    return result || [];
   }
 
   async isUserStaffOfSalon(userId: string, salonId: string): Promise<boolean> {
@@ -1239,7 +1242,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllSalons(): Promise<Salon[]> {
-    return await db.select().from(salons).where(eq(salons.isActive, 1));
+    // Only return published salons (those that have gone live)
+    const results = await db
+      .select({ salons })
+      .from(salons)
+      .innerJoin(publishState, eq(salons.id, publishState.salonId))
+      .where(
+        and(
+          eq(salons.isActive, 1),
+          eq(publishState.isPublished, 1) // Only show published salons
+        )
+      );
+    
+    return results.map(r => r.salons) || [];
+  }
+
+  async getSalons(): Promise<Salon[]> {
+    // Get ALL salons (including unpublished) - used for business dashboard
+    const results = await db.select().from(salons).where(eq(salons.isActive, 1));
+    return results || [];
   }
 
   async createSalon(salon: InsertSalon): Promise<Salon> {
@@ -1249,6 +1270,12 @@ export class DatabaseStorage implements IStorage {
 
   async updateSalon(id: string, updates: Partial<InsertSalon>): Promise<void> {
     await db.update(salons).set(updates).where(eq(salons.id, id));
+  }
+
+  async deleteSalon(id: string): Promise<void> {
+    // Delete the salon - related data will cascade if configured, 
+    // or remain orphaned (to be cleaned up separately if needed)
+    await db.delete(salons).where(eq(salons.id, id));
   }
 
   // Proximity search operations
@@ -1299,6 +1326,11 @@ export class DatabaseStorage implements IStorage {
           )
         )
         .limit(searchLimit);
+
+      // Handle empty results
+      if (!results || results.length === 0) {
+        return [];
+      }
 
       // Calculate Haversine distance in JavaScript and filter by actual distance
       const earthRadiusKm = 6371;
@@ -1372,14 +1404,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllServices(): Promise<Service[]> {
-    return await db.select().from(services).where(eq(services.isActive, 1));
+    const result = await db.select().from(services).where(eq(services.isActive, 1));
+    return result || [];
   }
 
   async getServicesBySalonId(salonId: string): Promise<Service[]> {
-    return await db.select().from(services).where(and(
+    const result = await db.select().from(services).where(and(
       eq(services.salonId, salonId),
       eq(services.isActive, 1)
     ));
+    return result || [];
   }
 
   async createService(service: InsertService): Promise<Service> {
@@ -1402,10 +1436,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPackagesBySalonId(salonId: string) {
-    return await db.select().from(servicePackages).where(and(
+    const packages = await db.select().from(servicePackages).where(and(
       eq(servicePackages.salonId, salonId),
       eq(servicePackages.isActive, 1)
     ));
+    
+    // Fetch services for each package
+    const packagesWithServices = await Promise.all(
+      packages.map(async (pkg) => {
+        const packageSvcs = await db.select({
+          packageService: packageServices,
+          service: services
+        })
+        .from(packageServices)
+        .innerJoin(services, eq(packageServices.serviceId, services.id))
+        .where(eq(packageServices.packageId, pkg.id))
+        .orderBy(packageServices.sequenceOrder);
+
+        return {
+          ...pkg,
+          services: packageSvcs.map(ps => ({
+            ...ps.service,
+            sequenceOrder: ps.packageService.sequenceOrder
+          }))
+        };
+      })
+    );
+    
+    return packagesWithServices || [];
   }
 
   async getPackageWithServices(packageId: string) {
@@ -3257,13 +3315,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMediaAssetsBySalonId(salonId: string): Promise<MediaAsset[]> {
-    return await db.select().from(mediaAssets).where(eq(mediaAssets.salonId, salonId));
+    const result = await db.select().from(mediaAssets).where(eq(mediaAssets.salonId, salonId));
+    return result || [];
   }
 
   async getMediaAssetsByType(salonId: string, assetType: string): Promise<MediaAsset[]> {
-    return await db.select().from(mediaAssets).where(
+    const result = await db.select().from(mediaAssets).where(
       and(eq(mediaAssets.salonId, salonId), eq(mediaAssets.assetType, assetType))
     );
+    return result || [];
   }
 
   async createMediaAsset(asset: InsertMediaAsset): Promise<MediaAsset> {
@@ -3465,13 +3525,22 @@ export class DatabaseStorage implements IStorage {
     const bookingSettings = await this.getBookingSettings(salonId);
     const mediaAssets = await this.getMediaAssetsBySalonId(salonId);
 
-    // Check Profile completion
+    // Check Profile completion - match setup-status requirements
     const profileMissingFields: string[] = [];
+    // Business Info fields
     if (!salon?.name) profileMissingFields.push('name');
+    if (!salon?.description) profileMissingFields.push('description');
+    if (!salon?.category) profileMissingFields.push('category');
+    if (!salon?.priceRange) profileMissingFields.push('priceRange');
+    // Location Contact fields
     if (!salon?.address) profileMissingFields.push('address');
+    if (!salon?.city) profileMissingFields.push('city');
+    if (!salon?.state) profileMissingFields.push('state');
+    if (!salon?.zipCode) profileMissingFields.push('zipCode');
+    if (!salon?.latitude) profileMissingFields.push('latitude');
+    if (!salon?.longitude) profileMissingFields.push('longitude');
     if (!salon?.phone) profileMissingFields.push('phone');
     if (!salon?.email) profileMissingFields.push('email');
-    if (!salon?.description) profileMissingFields.push('description');
     
     const profileComplete = profileMissingFields.length === 0;
 
@@ -3481,24 +3550,8 @@ export class DatabaseStorage implements IStorage {
     // Check Staff completion
     const staffComplete = staff.length > 0;
 
-    // Check Settings completion - settings are complete if they exist and have required fields
-    const settingsMissingFields: string[] = [];
-    if (!bookingSettings) {
-      settingsMissingFields.push('bookingSettings');
-    } else {
-      // Only check for essential fields, not specific values
-      if (!bookingSettings.timezone) {
-        settingsMissingFields.push('timezone');
-      }
-      if (bookingSettings.leadTimeMinutes === null || bookingSettings.leadTimeMinutes === undefined) {
-        settingsMissingFields.push('leadTimeMinutes');
-      }
-      if (bookingSettings.cancelWindowMinutes === null || bookingSettings.cancelWindowMinutes === undefined) {
-        settingsMissingFields.push('cancelWindowMinutes');
-      }
-    }
-    
-    const settingsComplete = settingsMissingFields.length === 0;
+    // Check Settings completion - match setup-status requirements (just check existence)
+    const settingsComplete = !!bookingSettings;
 
     // Check Media completion
     const mediaComplete = mediaAssets.length > 0;
@@ -3545,8 +3598,7 @@ export class DatabaseStorage implements IStorage {
         count: staff.length 
       },
       settings: { 
-        isComplete: settingsComplete, 
-        missingFields: settingsComplete ? undefined : settingsMissingFields 
+        isComplete: settingsComplete
       },
       media: { 
         isComplete: mediaComplete, 
@@ -5099,13 +5151,14 @@ export class DatabaseStorage implements IStorage {
       conditions.push(lte(scheduledMessages.scheduledFor, filters.scheduledBefore));
     }
     
-    return await db.select().from(scheduledMessages).where(and(...conditions));
+    const result = await db.select().from(scheduledMessages).where(and(...conditions));
+    return result || [];
   }
 
   async getScheduledMessagesDue(beforeTime?: Date): Promise<ScheduledMessage[]> {
     const cutoffTime = beforeTime || new Date();
     
-    return await db.select()
+    const result = await db.select()
       .from(scheduledMessages)
       .where(
         and(
@@ -5114,6 +5167,8 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(asc(scheduledMessages.scheduledFor));
+    
+    return result || [];
   }
 
   async createScheduledMessage(message: InsertScheduledMessage): Promise<ScheduledMessage> {
@@ -6311,7 +6366,8 @@ async function initializeSalonsAndServices() {
   try {
     // Check if salons already exist
     const existingSalons = await db.select().from(salons);
-    if (existingSalons.length === 0) {
+    const salonsArray = existingSalons || [];
+    if (salonsArray.length === 0) {
       // Create sample salons for demonstration
       const mockSalons: InsertSalon[] = [
         {

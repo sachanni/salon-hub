@@ -16,6 +16,8 @@ interface SearchParams {
   service?: string;
   category?: string;
   sortBy?: string;
+  time?: string;
+  date?: string;
   filters?: {
     priceRange?: [number, number];
     minRating?: number;
@@ -160,7 +162,7 @@ export default function Home() {
           /* Map View with Search Bar at Top - Fresha Style */
           <div className="min-h-screen">
             {/* Compact Search Bar at Top - Sticky */}
-            <div className="sticky top-0 z-50 bg-gradient-to-r from-indigo-900 via-purple-900 to-pink-800 shadow-lg overflow-visible">
+            <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-violet-200/50 shadow-lg overflow-visible">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 overflow-visible">
                 <FreshaSearchBar
                   onSearch={(params) => {
@@ -171,6 +173,8 @@ export default function Home() {
                       coordinates: params.coords,
                       radius: params.radius,
                       category: params.service,
+                      time: params.time,
+                      date: params.date,
                     };
                     console.log('Home: Setting search params:', searchParams);
                     setSearchParams(searchParams);

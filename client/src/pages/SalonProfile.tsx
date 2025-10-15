@@ -26,10 +26,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import BookingModal from '@/components/BookingModal';
 import { cn } from '@/lib/utils';
+import { Map } from '@/components/ui/map';
 
 interface Salon {
   id: string;
@@ -63,8 +62,8 @@ interface Service {
   id: string;
   name: string;
   description: string;
-  duration: number;
-  price: number;
+  durationMinutes: number;
+  priceInPaisa: number;
   category: string;
 }
 
@@ -430,16 +429,17 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
                     {index === 1 && mediaAssets && mediaAssets.length > 3 && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-sm">
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-sm z-10">
                         <button 
                           onClick={() => setIsGalleryOpen(true)}
+                          data-testid="button-see-all-images"
                           className="text-white font-medium text-sm hover:scale-105 transition-transform"
                         >
                           See all images
                         </button>
                       </div>
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
                   </div>
                 ))}
               </div>
@@ -505,7 +505,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
 
               {/* Service Category Pills */}
               {serviceCategories.length > 0 && (
-                <div className="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide">
+                <div className="flex gap-2 overflow-x-auto pb-4 mb-6" style={{ scrollbarWidth: 'thin', scrollbarColor: '#a855f7 #f3f4f6' }}>
                   <button
                     onClick={() => setSelectedServiceCategory(null)}
                     className={cn(
@@ -550,7 +550,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                               <div className="flex items-center gap-3 mt-3">
                                 <div className="flex items-center text-sm text-gray-500">
                                   <Clock className="w-4 h-4 mr-1" />
-                                  {service.duration} min
+                                  {service.durationMinutes} min
                                 </div>
                                 <Badge variant="outline" className="text-xs">
                                   {service.category}
@@ -559,7 +559,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                             </div>
                             <div className="text-right ml-6">
                               <div className="text-2xl font-bold text-gray-900 mb-2">
-                                ₹{service.price}
+                                ₹{(service.priceInPaisa / 100).toFixed(0)}
                               </div>
                               <Button 
                                 size="sm" 
@@ -716,18 +716,85 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                     </div>
                   </div>
                   
+                  {/* Interactive Map */}
+                  {salon.latitude && salon.longitude && (
+                    <>
+                      <Separator />
+                      <div>
+                        <h3 className="font-semibold text-gray-900 mb-4">Location on Map</h3>
+                        <div className="rounded-xl overflow-hidden shadow-md border border-gray-200">
+                          <Map
+                            latitude={parseFloat(salon.latitude)}
+                            longitude={parseFloat(salon.longitude)}
+                            zoom={15}
+                            className="w-full h-96"
+                            markerTitle={salon.name}
+                          />
+                        </div>
+                        <p className="text-sm text-gray-500 mt-2 flex items-center gap-1">
+                          <MapPin className="w-4 h-4" />
+                          {salon.address}, {salon.city}, {salon.state} {salon.zipCode}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  
                   <Separator />
                   
                   <div>
-                    <h3 className="font-semibold text-gray-900 mb-3">Business Hours</h3>
-                    <div className="flex items-center gap-3">
-                      <Clock className="w-5 h-5 text-purple-600" />
-                      <span className="text-gray-700">
-                        {salon.openTime && salon.closeTime 
-                          ? `${salon.openTime} - ${salon.closeTime}` 
-                          : 'Hours not specified'}
-                      </span>
-                    </div>
+                    <h3 className="font-semibold text-gray-900 mb-4">Opening times</h3>
+                    {(() => {
+                      // Parse business hours from JSONB
+                      const businessHours = (salon as any).businessHours;
+                      
+                      if (!businessHours) {
+                        // Fallback to legacy openTime/closeTime
+                        return (
+                          <div className="flex items-center gap-3">
+                            <Clock className="w-5 h-5 text-purple-600" />
+                            <span className="text-gray-700">
+                              {salon.openTime && salon.closeTime 
+                                ? `${salon.openTime} - ${salon.closeTime}` 
+                                : 'Hours not specified'}
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      // Format time from 24h to 12h format
+                      const formatTime = (time24: string) => {
+                        if (!time24) return '';
+                        const [hours, minutes] = time24.split(':');
+                        const hour = parseInt(hours);
+                        const ampm = hour >= 12 ? 'pm' : 'am';
+                        const hour12 = hour % 12 || 12;
+                        return `${hour12}:${minutes}${ampm}`;
+                      };
+
+                      const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+                      const dayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+                      return (
+                        <div className="space-y-2.5">
+                          {days.map((day, index) => {
+                            const dayHours = businessHours[day];
+                            const isOpen = dayHours?.open;
+                            const startTime = isOpen ? formatTime(dayHours.start) : '';
+                            const endTime = isOpen ? formatTime(dayHours.end) : '';
+
+                            return (
+                              <div key={day} className="flex items-center gap-3" data-testid={`hours-${day}`}>
+                                <div className={`w-2 h-2 rounded-full ${isOpen ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                <span className="w-24 text-gray-900 font-medium">{dayLabels[index]}</span>
+                                <span className="text-gray-700 font-medium">
+                                  {isOpen ? `${startTime} - ${endTime}` : 'Closed'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -807,69 +874,90 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                   </div>
                 </CardContent>
               </Card>
-
-              {/* Location Map Placeholder */}
-              <Card>
-                <CardContent className="p-0">
-                  <div className="h-48 bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center rounded-lg">
-                    <div className="text-center text-purple-600">
-                      <MapPin className="w-10 h-10 mx-auto mb-2" />
-                      <p className="text-sm font-medium">{salon.city}, {salon.state}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           </div>
         </div>
       </div>
       
-      {/* Gallery Modal */}
-      <Dialog open={isGalleryOpen} onOpenChange={setIsGalleryOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh]">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">Gallery - {salon?.name}</DialogTitle>
-          </DialogHeader>
-          <ScrollArea className="h-[70vh] pr-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {mediaAssets && mediaAssets.length > 0 ? (
-                mediaAssets.map((asset: any, index: number) => (
-                  <div 
-                    key={asset.id || index} 
-                    className="relative group aspect-square rounded-xl overflow-hidden"
-                  >
-                    <img
-                      src={asset.url}
-                      alt={asset.caption || `Gallery ${index + 1}`}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="absolute bottom-4 left-4 right-4">
-                        {asset.caption && (
-                          <p className="text-white text-sm font-medium truncate">{asset.caption}</p>
-                        )}
-                      </div>
-                    </div>
-                    {asset.isPrimary === 1 && (
-                      <div className="absolute top-3 right-3">
-                        <Badge className="bg-amber-500 text-white border-none">
-                          <Star className="w-3 h-3 mr-1 fill-current" />
-                          Featured
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div className="col-span-full text-center py-16 text-gray-500">
-                  <Camera className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-lg font-medium">No images available</p>
+      {/* Full-Page Gallery View (Fresha-style) */}
+      {isGalleryOpen && (
+        <div className="fixed inset-0 z-50 bg-white">
+          {/* Header with close button */}
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-16">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Gallery</h2>
+                  <p className="text-sm text-gray-500">{salon?.name}</p>
                 </div>
-              )}
+                <button
+                  onClick={() => setIsGalleryOpen(false)}
+                  data-testid="button-close-gallery"
+                  className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+                  aria-label="Close gallery"
+                >
+                  <svg
+                    className="w-6 h-6 text-gray-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
+          </div>
+
+          {/* Gallery grid */}
+          <div className="h-[calc(100vh-4rem)] overflow-y-auto">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {mediaAssets && mediaAssets.length > 0 ? (
+                  mediaAssets.map((asset: any, index: number) => (
+                    <div 
+                      key={asset.id || index} 
+                      className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100"
+                      data-testid={`gallery-image-${index}`}
+                    >
+                      <img
+                        src={asset.url}
+                        alt={asset.caption || `Gallery ${index + 1}`}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <div className="absolute bottom-4 left-4 right-4">
+                          {asset.caption && (
+                            <p className="text-white text-sm font-medium truncate">{asset.caption}</p>
+                          )}
+                        </div>
+                      </div>
+                      {asset.isPrimary === 1 && (
+                        <div className="absolute top-3 right-3">
+                          <Badge className="bg-amber-500 text-white border-none">
+                            <Star className="w-3 h-3 mr-1 fill-current" />
+                            Featured
+                          </Badge>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full text-center py-16 text-gray-500">
+                    <Camera className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-lg font-medium">No images available</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Booking Modal */}
       <BookingModal

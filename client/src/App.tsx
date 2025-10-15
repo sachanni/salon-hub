@@ -14,6 +14,7 @@ import LoginBusiness from "@/pages/LoginBusiness";
 import BusinessSetup from "@/pages/BusinessSetup";
 import CalendarManagement from "@/pages/CalendarManagement";
 import BusinessDashboard from "@/pages/BusinessDashboard";
+import BusinessSettings from "@/pages/BusinessSettings";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import SalonProfile from "@/pages/SalonProfile";
 import SalonBookingPage from "@/pages/SalonBookingPage";
@@ -35,6 +36,9 @@ function Router() {
         <Route path="/business/setup" component={BusinessSetup} />
         <Route path="/dashboard" component={BusinessDashboard} />
         <Route path="/business/dashboard" component={BusinessDashboard} />
+        <Route path="/business/settings/:salonId">
+          {(params) => <BusinessSettings key={params.salonId} salonId={params.salonId!} />}
+        </Route>
         <Route path="/customer/dashboard" component={CustomerDashboard} />
         <Route path="/calendar">
           {() => <CalendarManagement />}

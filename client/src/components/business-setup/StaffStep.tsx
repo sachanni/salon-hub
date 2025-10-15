@@ -4,19 +4,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { 
   Users, Plus, Trash2, Edit, User, Camera, Mail, Phone, 
-  Sparkles, Briefcase, Scissors, PaintBucket, Smile, Star
+  Sparkles, Briefcase, Scissors, PaintBucket, Smile, Star, CheckCircle2,
+  Lightbulb, Zap, Eye, Circle, Palette
 } from "lucide-react";
 
 interface StaffStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 interface StaffMember {
@@ -24,7 +29,8 @@ interface StaffMember {
   name: string;
   email: string;
   phone: string;
-  role: string;
+  roles: string[];
+  gender?: string;
   photoUrl?: string;
   specialties: string[];
 }
@@ -34,12 +40,19 @@ interface StaffFormData {
   name: string;
   email: string;
   phone: string;
-  role: string;
+  roles: string[];
+  gender?: string;
   photoUrl?: string;
   specialties: string;
 }
 
-// Predefined role templates
+interface SuggestedRole {
+  role: string;
+  reason: string;
+  matchedServices: string[];
+}
+
+// Extended role templates with all available roles
 const ROLE_TEMPLATES = [
   { value: "Stylist", icon: Scissors, color: "from-purple-500 to-pink-500" },
   { value: "Colorist", icon: PaintBucket, color: "from-pink-500 to-rose-500" },
@@ -47,14 +60,24 @@ const ROLE_TEMPLATES = [
   { value: "Makeup Artist", icon: Smile, color: "from-rose-500 to-pink-500" },
   { value: "Esthetician", icon: Star, color: "from-purple-500 to-violet-500" },
   { value: "Massage Therapist", icon: Briefcase, color: "from-pink-500 to-purple-500" },
+  { value: "Piercing Specialist", icon: Circle, color: "from-indigo-500 to-purple-500" },
+  { value: "Tattoo Artist", icon: Palette, color: "from-purple-500 to-indigo-500" },
+  { value: "Barber", icon: Scissors, color: "from-blue-500 to-indigo-500" },
+  { value: "Lash Technician", icon: Eye, color: "from-pink-500 to-rose-500" },
+  { value: "Waxing Specialist", icon: Zap, color: "from-orange-500 to-pink-500" },
 ];
 
 export default function StaffStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: StaffStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
+  
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [isAddingStaff, setIsAddingStaff] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffFormData | null>(null);
@@ -62,7 +85,8 @@ export default function StaffStep({
     name: "",
     email: "",
     phone: "",
-    role: "",
+    roles: [],
+    gender: "",
     photoUrl: "",
     specialties: ""
   });
@@ -91,11 +115,30 @@ export default function StaffStep({
     enabled: !!salonId
   });
 
+  // Fetch intelligent role suggestions based on salon's services
+  const { data: roleSuggestions } = useQuery<{
+    suggestedRoles: SuggestedRole[];
+    totalServices: number;
+    message: string;
+  }>({
+    queryKey: ['/api/salons', salonId, 'suggested-roles'],
+    enabled: !!salonId
+  });
+
   useEffect(() => {
     if (existingStaff) {
       setStaff(Array.isArray(existingStaff) ? existingStaff : []);
     }
   }, [existingStaff]);
+
+  // Auto-suggest roles when form is opened and suggestions are available
+  useEffect(() => {
+    if (isAddingStaff && roleSuggestions?.suggestedRoles && roleSuggestions.suggestedRoles.length > 0 && newStaff.roles.length === 0) {
+      // Auto-select suggested roles when opening the add staff form
+      const suggestedRoleNames = roleSuggestions.suggestedRoles.map(sr => sr.role);
+      setNewStaff(prev => ({ ...prev, roles: suggestedRoleNames }));
+    }
+  }, [isAddingStaff, roleSuggestions]);
 
   // Handle photo upload
   const handlePhotoUpload = async (file: File, isEdit = false) => {
@@ -162,7 +205,7 @@ export default function StaffStep({
     },
     onSuccess: (data) => {
       setStaff(prev => [...prev, data]);
-      setNewStaff({ name: "", email: "", phone: "", role: "", photoUrl: "", specialties: "" });
+      setNewStaff({ name: "", email: "", phone: "", roles: [], gender: "", photoUrl: "", specialties: "" });
       setPhotoPreview("");
       setIsAddingStaff(false);
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'staff'] });
@@ -260,8 +303,13 @@ export default function StaffStep({
     await updateStaffMutation.mutateAsync(editingStaff);
   };
 
-  const handleContinue = () => {
-    onComplete({ staff });
+  const handleContinue = async () => {
+    // Invalidate completion status cache
+    await queryClient.invalidateQueries({ 
+      queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+    });
+    
+    handleNext();
   };
 
   return (
@@ -313,13 +361,23 @@ export default function StaffStep({
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <h5 className="font-semibold text-lg truncate">{member.name}</h5>
-                      {member.role && (
-                        <Badge className="mb-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0">
-                          {member.role}
-                        </Badge>
+                      {member.roles && member.roles.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {member.roles.map((role, idx) => (
+                            <Badge key={idx} className="bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0 text-xs">
+                              {role}
+                            </Badge>
+                          ))}
+                        </div>
                       )}
                       
                       <div className="space-y-1 text-sm text-muted-foreground">
+                        {member.gender && (
+                          <div className="flex items-center gap-1">
+                            <User className="h-3 w-3 flex-shrink-0" />
+                            <span>{member.gender}</span>
+                          </div>
+                        )}
                         {member.email && (
                           <div className="flex items-center gap-1 truncate">
                             <Mail className="h-3 w-3 flex-shrink-0" />
@@ -446,31 +504,79 @@ export default function StaffStep({
                 </p>
               </div>
 
-              {/* Role Templates */}
+              {/* Intelligent Role Suggestions Banner */}
+              {roleSuggestions && roleSuggestions.suggestedRoles.length > 0 && (
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center shrink-0">
+                      <Lightbulb className="h-5 w-5 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-amber-900 mb-1">Smart Role Suggestions</h4>
+                      <p className="text-sm text-amber-800 mb-3">
+                        Based on your {roleSuggestions.totalServices} service{roleSuggestions.totalServices !== 1 ? 's' : ''}, we recommend these roles:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {roleSuggestions.suggestedRoles.map((suggested) => (
+                          <Badge key={suggested.role} className="bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            {suggested.role}
+                          </Badge>
+                        ))}
+                      </div>
+                      <p className="text-xs text-amber-700 mt-2">
+                        ✨ Roles auto-selected below. Click any role to remove it.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Role Templates - Multiple Selection */}
               <div>
-                <Label className="mb-3 block">Quick Select Role</Label>
+                <Label className="mb-3 block">Select Roles (Multiple)</Label>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {ROLE_TEMPLATES.map((roleTemplate) => {
                     const Icon = roleTemplate.icon;
-                    const isSelected = newStaff.role === roleTemplate.value;
+                    const isSelected = newStaff.roles.includes(roleTemplate.value);
+                    const isSuggested = roleSuggestions?.suggestedRoles.some(sr => sr.role === roleTemplate.value);
                     return (
                       <button
                         key={roleTemplate.value}
-                        onClick={() => setNewStaff(prev => ({ ...prev, role: roleTemplate.value }))}
-                        className={`p-3 rounded-lg border-2 transition-all flex items-center gap-2 ${
+                        type="button"
+                        onClick={() => {
+                          setNewStaff(prev => ({
+                            ...prev,
+                            roles: isSelected
+                              ? prev.roles.filter(r => r !== roleTemplate.value)
+                              : [...prev.roles, roleTemplate.value]
+                          }));
+                        }}
+                        className={`p-3 rounded-lg border-2 transition-all flex items-center gap-2 relative ${
                           isSelected
                             ? `border-purple-400 bg-gradient-to-r ${roleTemplate.color} text-white shadow-md`
                             : 'border-gray-200 hover:border-purple-300 bg-white'
                         }`}
                       >
+                        {isSuggested && !isSelected && (
+                          <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-gradient-to-br from-amber-400 to-orange-400 flex items-center justify-center">
+                            <Sparkles className="h-3 w-3 text-white" />
+                          </div>
+                        )}
                         <Icon className={`h-4 w-4 ${isSelected ? 'text-white' : 'text-purple-500'}`} />
                         <span className={`text-sm font-medium ${isSelected ? 'text-white' : 'text-gray-700'}`}>
                           {roleTemplate.value}
                         </span>
+                        {isSelected && <CheckCircle2 className="h-4 w-4 ml-auto text-white" />}
                       </button>
                     );
                   })}
                 </div>
+                {newStaff.roles.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {newStaff.roles.length} role{newStaff.roles.length > 1 ? 's' : ''} selected
+                  </p>
+                )}
               </div>
 
               {/* Form Fields */}
@@ -491,18 +597,22 @@ export default function StaffStep({
                 </div>
                 
                 <div>
-                  <Label htmlFor="staff-role" className="flex items-center gap-2">
-                    <Briefcase className="h-4 w-4 text-purple-500" />
-                    Role / Custom Title
+                  <Label htmlFor="staff-gender" className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-purple-500" />
+                    Gender
                   </Label>
-                  <Input
-                    id="staff-role"
-                    value={newStaff.role}
-                    onChange={(e) => setNewStaff(prev => ({ ...prev, role: e.target.value }))}
-                    placeholder="e.g., Senior Stylist"
-                    className="mt-1"
-                    data-testid="input-staff-role"
-                  />
+                  <Select
+                    value={newStaff.gender || ""}
+                    onValueChange={(value) => setNewStaff(prev => ({ ...prev, gender: value }))}
+                  >
+                    <SelectTrigger id="staff-gender" className="mt-1" data-testid="select-staff-gender">
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Male">Male</SelectItem>
+                      <SelectItem value="Female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 
                 <div>
@@ -638,17 +748,25 @@ export default function StaffStep({
                 </div>
               </div>
 
-              {/* Role Templates for Edit */}
+              {/* Role Templates for Edit - Multiple Selection */}
               <div>
-                <Label className="mb-3 block">Quick Select Role</Label>
+                <Label className="mb-3 block">Select Roles (Multiple)</Label>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {ROLE_TEMPLATES.map((roleTemplate) => {
                     const Icon = roleTemplate.icon;
-                    const isSelected = editingStaff.role === roleTemplate.value;
+                    const isSelected = editingStaff.roles.includes(roleTemplate.value);
                     return (
                       <button
                         key={roleTemplate.value}
-                        onClick={() => setEditingStaff(prev => prev ? { ...prev, role: roleTemplate.value } : null)}
+                        type="button"
+                        onClick={() => {
+                          setEditingStaff(prev => prev ? {
+                            ...prev,
+                            roles: isSelected
+                              ? prev.roles.filter(r => r !== roleTemplate.value)
+                              : [...prev.roles, roleTemplate.value]
+                          } : null);
+                        }}
                         className={`p-3 rounded-lg border-2 transition-all flex items-center gap-2 ${
                           isSelected
                             ? `border-purple-400 bg-gradient-to-r ${roleTemplate.color} text-white shadow-md`
@@ -659,10 +777,16 @@ export default function StaffStep({
                         <span className={`text-sm font-medium ${isSelected ? 'text-white' : 'text-gray-700'}`}>
                           {roleTemplate.value}
                         </span>
+                        {isSelected && <CheckCircle2 className="h-4 w-4 ml-auto text-white" />}
                       </button>
                     );
                   })}
                 </div>
+                {editingStaff.roles.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {editingStaff.roles.length} role{editingStaff.roles.length > 1 ? 's' : ''} selected
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -678,14 +802,19 @@ export default function StaffStep({
                 </div>
                 
                 <div>
-                  <Label htmlFor="edit-staff-role">Role / Custom Title</Label>
-                  <Input
-                    id="edit-staff-role"
-                    value={editingStaff.role}
-                    onChange={(e) => setEditingStaff(prev => prev ? { ...prev, role: e.target.value } : null)}
-                    className="mt-1"
-                    data-testid="input-edit-staff-role"
-                  />
+                  <Label htmlFor="edit-staff-gender">Gender</Label>
+                  <Select
+                    value={editingStaff.gender || ""}
+                    onValueChange={(value) => setEditingStaff(prev => prev ? { ...prev, gender: value } : null)}
+                  >
+                    <SelectTrigger id="edit-staff-gender" className="mt-1" data-testid="select-edit-staff-gender">
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Male">Male</SelectItem>
+                      <SelectItem value="Female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 
                 <div>
@@ -749,9 +878,6 @@ export default function StaffStep({
       {/* Action Buttons */}
       <div className="flex items-center justify-between pt-4">
         <div className="text-sm text-muted-foreground">
-          {isCompleted && (
-            <span className="text-green-600 font-medium">✓ Completed</span>
-          )}
           {staff.length === 0 && (
             <span className="text-amber-600">
               You can add team members later if needed

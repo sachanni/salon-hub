@@ -9,23 +9,22 @@ import { CreditCard, Shield, CheckCircle, AlertCircle, ExternalLink } from "luci
 
 interface PaymentSetupStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
 }
 
 export default function PaymentSetupStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onSkip
 }: PaymentSetupStepProps) {
   const [isSettingUp, setIsSettingUp] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   // Load existing payout accounts
-  const { data: payoutAccounts } = useQuery({
+  const { data: payoutAccounts = [] } = useQuery<any[]>({
     queryKey: ['/api/salons', salonId, 'payout-accounts'],
     enabled: !!salonId,
   });
@@ -47,7 +46,7 @@ export default function PaymentSetupStep({
         title: "Payment Setup Initiated",
         description: "Your payment processing setup has been started. You can complete KYC verification later.",
       });
-      onComplete({ paymentSetupStarted: true });
+      onNext?.();
     },
     onError: () => {
       toast({
@@ -65,15 +64,15 @@ export default function PaymentSetupStep({
   };
 
   const handleSkipForNow = () => {
-    onComplete({ paymentSetupSkipped: true });
+    onSkip?.();
     toast({
       title: "Payment Setup Skipped",
       description: "You can set up payment processing later from your dashboard.",
     });
   };
 
-  const razorpayAccount = payoutAccounts?.find((account: any) => account.provider === 'razorpay');
-  const hasPaymentSetup = payoutAccounts && payoutAccounts.length > 0;
+  const razorpayAccount = payoutAccounts.find((account: any) => account.provider === 'razorpay');
+  const hasPaymentSetup = payoutAccounts.length > 0;
 
   return (
     <div className="space-y-6">
@@ -289,8 +288,8 @@ export default function PaymentSetupStep({
       {/* Action Buttons */}
       <div className="flex items-center justify-between pt-4">
         <div className="text-sm text-muted-foreground">
-          {isCompleted && (
-            <span className="text-green-600 font-medium">✓ Completed</span>
+          {hasPaymentSetup && (
+            <span className="text-green-600 font-medium">✓ Payment setup complete</span>
           )}
         </div>
 
@@ -306,7 +305,7 @@ export default function PaymentSetupStep({
           )}
 
           <Button
-            onClick={() => onComplete({ paymentSetup: hasPaymentSetup })}
+            onClick={onNext}
             data-testid="button-continue-payment"
           >
             Continue

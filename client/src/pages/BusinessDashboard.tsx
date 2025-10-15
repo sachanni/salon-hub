@@ -7,7 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useSalonSetupStatus } from "@/hooks/useSalonSetupStatus";
 import {
   SidebarProvider,
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/sidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { 
   Building, 
@@ -55,10 +57,13 @@ import {
   Crown,
   UserCircle,
   LogOut,
-  ChevronRight
+  ChevronRight,
+  Plus,
+  Check,
+  Trash2
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import type { Salon } from "@/../../shared/schema";
 import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
 import FinancialReportingDashboard from "@/components/FinancialReportingDashboard";
@@ -141,9 +146,18 @@ import ReviewPublishStep from "@/components/business-setup/ReviewPublishStep";
 export default function BusinessDashboard() {
   const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("overview");
-  const [salonId, setSalonId] = useState<string | null>(null);
+  const [salonId, setSalonId] = useState<string | null>(() => {
+    // Try to get salon ID from localStorage
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('selectedSalonId');
+    }
+    return null;
+  });
   const [selectedPeriod, setSelectedPeriod] = useState("monthly");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [salonToDelete, setSalonToDelete] = useState<Salon | null>(null);
   const isMobile = useIsMobile();
 
   // Fetch user's salons
@@ -153,12 +167,74 @@ export default function BusinessDashboard() {
     staleTime: 60000
   });
 
-  // Set salon ID
+  // Delete salon mutation
+  const deleteSalonMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest('DELETE', `/api/salons/${id}`);
+    },
+    onSuccess: (data, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/my/salons'] });
+      
+      // If we deleted the currently selected salon, switch to another one
+      if (deletedId === salonId && Array.isArray(salons)) {
+        const remainingSalons = salons.filter((s: Salon) => s.id !== deletedId);
+        if (remainingSalons.length > 0) {
+          handleSalonSwitch(remainingSalons[0].id);
+        }
+      }
+      
+      toast({
+        title: "Salon Deleted",
+        description: "The salon has been successfully deleted.",
+      });
+      
+      setDeleteDialogOpen(false);
+      setSalonToDelete(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete salon. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Set salon ID with localStorage persistence
   useEffect(() => {
-    if (Array.isArray(salons) && salons.length > 0 && !salonId) {
-      setSalonId(salons[0].id);
+    if (Array.isArray(salons) && salons.length > 0) {
+      // Check if stored salon ID is valid
+      const storedId = localStorage.getItem('selectedSalonId');
+      const isValidStoredId = storedId && salons.some(s => s.id === storedId);
+      
+      if (!salonId) {
+        // Use stored ID if valid, otherwise use first salon
+        const idToUse = isValidStoredId ? storedId : salons[0].id;
+        setSalonId(idToUse);
+        localStorage.setItem('selectedSalonId', idToUse);
+      } else if (!isValidStoredId && salonId !== salons[0].id) {
+        // If current salon is not in the list, switch to first salon
+        setSalonId(salons[0].id);
+        localStorage.setItem('selectedSalonId', salons[0].id);
+      }
     }
   }, [salons, salonId]);
+
+  // Handler for salon switching
+  const handleSalonSwitch = (value: string) => {
+    if (value === '__create_new__') {
+      // Redirect to business setup to create new salon
+      setLocation('/business/setup');
+      return;
+    }
+    
+    setSalonId(value);
+    localStorage.setItem('selectedSalonId', value);
+    toast({
+      title: "Salon Switched",
+      description: "You're now viewing a different salon location",
+    });
+  };
 
   // Use centralized completion service
   const { data: completionData } = useQuery<CompletionData>({
@@ -297,19 +373,22 @@ export default function BusinessDashboard() {
     );
   }
 
+  // Auto-redirect to setup if no business found
   if (!Array.isArray(salons) || salons.length === 0) {
+    setLocation('/business/setup');
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h1 className="text-2xl font-bold mb-4">No Business Found</h1>
-          <Link href="/business/setup"><Button>Create Business Profile</Button></Link>
-        </div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     );
   }
 
-  const handleStepComplete = (data?: any) => {
+  const handleStepComplete = async (data?: any) => {
+    // Invalidate completion cache to refresh indicators
+    await queryClient.invalidateQueries({ 
+      queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+    });
+    
     // No automatic redirect - let user control navigation
     toast({
       title: "Step Completed",
@@ -1372,6 +1451,54 @@ export default function BusinessDashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Salon Selector Dropdown */}
+            {Array.isArray(salons) && salons.length > 1 && (
+              <div className="flex items-center gap-2">
+                <Select value={salonId || undefined} onValueChange={handleSalonSwitch}>
+                  <SelectTrigger className="w-[200px] md:w-[280px] bg-white border-violet-200 hover:border-violet-300 focus:ring-violet-500" data-testid="dropdown-salon-selector">
+                    <div className="flex items-center gap-2">
+                      <Building className="h-4 w-4 text-violet-500" />
+                      <SelectValue placeholder="Select salon location">
+                        {salonData?.name || 'Select salon...'}
+                      </SelectValue>
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {salons.map((salon: Salon) => (
+                      <SelectItem 
+                        key={salon.id} 
+                        value={salon.id}
+                        data-testid={`salon-option-${salon.id}`}
+                      >
+                        <div className="flex items-center justify-between gap-3 w-full">
+                          <div className="flex items-center gap-2">
+                            <Building className="h-4 w-4 text-violet-500" />
+                            <span className="font-medium">{salon.name}</span>
+                          </div>
+                          {salon.id === salonId && (
+                            <Check className="h-4 w-4 text-violet-600" />
+                          )}
+                        </div>
+                        {salon.city && (
+                          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {salon.city}
+                          </p>
+                        )}
+                      </SelectItem>
+                    ))}
+                    <div className="border-t my-1" />
+                    <SelectItem value="__create_new__" data-testid="button-create-new-salon">
+                      <div className="flex items-center gap-2 text-violet-600 font-medium">
+                        <Plus className="h-4 w-4" />
+                        <span>Create New Salon</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             
             <div className="flex items-center gap-3">
               {completionPercentage === 100 && (
@@ -1389,9 +1516,13 @@ export default function BusinessDashboard() {
               <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-violet-100">
                 <Bell className="h-4 w-4 text-slate-600" />
               </Button>
-              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-violet-100">
-                <Settings className="h-4 w-4 text-slate-600" />
-              </Button>
+              
+              {/* Settings Link */}
+              <Link href={`/business/settings/${salonId}`}>
+                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-violet-100" data-testid="button-settings">
+                  <Settings className="h-4 w-4 text-slate-600" />
+                </Button>
+              </Link>
             </div>
           </header>
 
@@ -1401,6 +1532,42 @@ export default function BusinessDashboard() {
           </main>
         </SidebarInset>
       </div>
+
+      {/* Delete Salon Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Salon</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{salonToDelete?.name}"? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setSalonToDelete(null);
+              }}
+              data-testid="button-cancel-delete"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (salonToDelete) {
+                  deleteSalonMutation.mutate(salonToDelete.id);
+                }
+              }}
+              disabled={deleteSalonMutation.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {deleteSalonMutation.isPending ? "Deleting..." : "Delete Salon"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </SidebarProvider>
   );
 }

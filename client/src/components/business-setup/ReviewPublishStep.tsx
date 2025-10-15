@@ -24,9 +24,11 @@ import {
 
 interface ReviewPublishStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 const SETUP_SECTIONS = [
@@ -76,10 +78,15 @@ const SETUP_SECTIONS = [
 
 export default function ReviewPublishStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: ReviewPublishStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
+  
   const [publishStatus, setPublishStatus] = useState({
     canPublish: false,
     completedSections: 0,
@@ -113,12 +120,12 @@ export default function ReviewPublishStep({
     enabled: !!salonId,
   });
 
-  const { data: services } = useQuery({
+  const { data: services } = useQuery<any[]>({
     queryKey: ['/api/salons', salonId, 'services'],
     enabled: !!salonId,
   });
 
-  const { data: staff } = useQuery({
+  const { data: staff } = useQuery<any[]>({
     queryKey: ['/api/salons', salonId, 'staff'],
     enabled: !!salonId,
   });
@@ -138,7 +145,7 @@ export default function ReviewPublishStep({
     enabled: !!salonId,
   });
 
-  const { data: publishState } = useQuery({
+  const { data: publishState } = useQuery<{ isPublished?: boolean | number }>({
     queryKey: ['/api/salons', salonId, 'publish-state'],
     enabled: !!salonId,
   });
@@ -174,7 +181,10 @@ export default function ReviewPublishStep({
       queryClient.invalidateQueries({ 
         queryKey: ['/api/salons', salonId, 'publish-state'] 
       });
-      onComplete({ published: true });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+      });
+      handleNext();
       toast({
         title: "🎉 Salon Published Successfully!",
         description: "Your salon is now live and accepting bookings.",
@@ -551,9 +561,6 @@ export default function ReviewPublishStep({
       {/* Action Buttons */}
       <div className="flex items-center justify-between pt-4">
         <div className="text-sm text-muted-foreground">
-          {isCompleted && (
-            <span className="text-green-600 font-medium">✓ Setup Complete</span>
-          )}
         </div>
 
         {publishState?.isPublished && (

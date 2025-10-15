@@ -120,7 +120,7 @@ export default function SetupWizard({ salonId, initialStep = 1, onComplete }: Se
     await refetchSetupStatus();
     
     // Mark current step as completed locally
-    setCompletedSteps(prev => new Set([...prev, currentStep]));
+    setCompletedSteps(prev => new Set(Array.from(prev).concat(currentStep)));
     
     if (currentStep < SETUP_STEPS.length) {
       setCurrentStep(currentStep + 1);

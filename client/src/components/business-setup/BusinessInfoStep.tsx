@@ -11,9 +11,11 @@ import { Card } from "@/components/ui/card";
 
 interface BusinessInfoStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 const BUSINESS_CATEGORIES = [
@@ -25,21 +27,26 @@ const BUSINESS_CATEGORIES = [
   { value: "massage", label: "Massage Therapy", icon: "💆", gradient: "from-teal-500 to-cyan-500" },
   { value: "medical_spa", label: "Medical Spa", icon: "🏥", gradient: "from-blue-500 to-indigo-500" },
   { value: "fitness", label: "Fitness & Wellness", icon: "💪", gradient: "from-emerald-500 to-teal-500" },
-  { value: "makeup_studio", label: "Makeup Studio", icon: "💄", gradient: "from-fuchsia-500 to-pink-500" }
+  { value: "makeup_studio", label: "Makeup Studio", icon: "💄", gradient: "from-fuchsia-500 to-pink-500" },
+  { value: "piercing_studio", label: "Piercing Studio", icon: "💎", gradient: "from-amber-500 to-orange-500" },
+  { value: "tattoo_studio", label: "Tattoo Studio", icon: "🎨", gradient: "from-slate-700 to-zinc-700" }
 ];
 
 export default function BusinessInfoStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: BusinessInfoStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     category: "",
-    website: "",
-    ...initialData
+    website: ""
   });
   
   // Parse categories - support both single string and array
@@ -57,9 +64,7 @@ export default function BusinessInfoStep({
     return [];
   };
 
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    parseCategories(initialData?.category)
-  );
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -96,21 +101,6 @@ export default function BusinessInfoStep({
       const response = await apiRequest('PUT', `/api/salons/${salonId}`, data);
       return response.json();
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
-      onComplete(formData);
-      toast({
-        title: "Business Information Saved",
-        description: "Your business details have been updated successfully.",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: "Failed to save business information. Please try again.",
-        variant: "destructive",
-      });
-    },
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -132,8 +122,32 @@ export default function BusinessInfoStep({
     };
 
     setIsLoading(true);
-    await updateSalonMutation.mutateAsync(dataToSend);
-    setIsLoading(false);
+    try {
+      await updateSalonMutation.mutateAsync(dataToSend);
+      
+      // Invalidate both salon data and completion status
+      await queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
+      await queryClient.invalidateQueries({ 
+        queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+      });
+      
+      toast({
+        title: "Business Information Saved",
+        description: "Your business details have been updated successfully.",
+      });
+      
+      // Call handleNext after successful save
+      handleNext();
+    } catch (error) {
+      console.error('Error saving business info:', error);
+      toast({
+        title: "Error",
+        description: `Failed to save business information: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -188,7 +202,7 @@ export default function BusinessInfoStep({
                 (Select all that apply)
               </span>
             </Label>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-w-full">
               {BUSINESS_CATEGORIES.map((category) => {
                 const isSelected = selectedCategories.includes(category.value);
                 
@@ -196,28 +210,29 @@ export default function BusinessInfoStep({
                   <Card
                     key={category.value}
                     onClick={() => toggleCategory(category.value)}
-                    className={`relative p-4 cursor-pointer transition-all border-2 ${
+                    className={`relative p-3 cursor-pointer transition-all border-2 hover:scale-[1.02] ${
                       isSelected
-                        ? `border-purple-500 bg-gradient-to-br from-purple-50 to-pink-50 shadow-md`
-                        : 'border-gray-200 hover:border-purple-300 hover:shadow-sm'
+                        ? `border-purple-500 bg-gradient-to-br from-purple-50 to-pink-50 shadow-lg`
+                        : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
                     }`}
+                    data-testid={`card-category-${category.value}`}
                   >
                     {/* Checkmark */}
-                    <div className="absolute top-2 right-2">
+                    <div className="absolute top-2 right-2 z-10">
                       <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
                         isSelected 
-                          ? 'bg-gradient-to-r from-purple-600 to-pink-600' 
+                          ? 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-md' 
                           : 'bg-gray-200'
                       }`}>
                         {isSelected && <Check className="h-3 w-3 text-white" />}
                       </div>
                     </div>
 
-                    <div className="pr-8">
+                    <div className="pr-7">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-2xl">{category.icon}</span>
                       </div>
-                      <h4 className="font-medium text-sm">{category.label}</h4>
+                      <h4 className="font-medium text-sm leading-tight">{category.label}</h4>
                     </div>
                   </Card>
                 );

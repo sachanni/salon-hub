@@ -197,11 +197,17 @@ export const salons = pgTable("salons", {
   website: text("website"),
   category: varchar("category", { length: 50 }).notNull(), // Hair Salon, Spa, Nails, etc
   priceRange: varchar("price_range", { length: 10 }).notNull(), // $, $$, $$$, $$$$
+  venueType: varchar("venue_type", { length: 20 }).default('everyone'), // everyone, female-only, male-only
+  instantBooking: integer("instant_booking").notNull().default(0), // 1 if salon supports instant booking, 0 otherwise
+  offerDeals: integer("offer_deals").notNull().default(0), // 1 if salon offers deals/promotions, 0 otherwise
+  acceptGroup: integer("accept_group").notNull().default(0), // 1 if salon accepts group bookings, 0 otherwise
   rating: decimal("rating", { precision: 3, scale: 2 }).default('0.00'),
   reviewCount: integer("review_count").notNull().default(0),
   imageUrl: text("image_url"),
-  openTime: text("open_time"), // e.g., "9:00 AM"
-  closeTime: text("close_time"), // e.g., "8:00 PM"
+  imageUrls: text("image_urls").array(), // Array of image URLs for carousel
+  openTime: text("open_time"), // e.g., "9:00 AM" (legacy - kept for backward compatibility)
+  closeTime: text("close_time"), // e.g., "8:00 PM" (legacy - kept for backward compatibility)
+  businessHours: jsonb("business_hours"), // Structured day-by-day hours: { monday: { open: true, start: "09:00", end: "17:00" }, ... }
   isActive: integer("is_active").notNull().default(1),
   setupProgress: jsonb("setup_progress"), // Tracks completion of 8 setup steps: businessInfo, locationContact, services, staff, resources, bookingSettings, paymentSetup, media
   ownerId: varchar("owner_id").references(() => users.id), // Keep for backward compatibility
@@ -260,7 +266,7 @@ export const services = pgTable("services", {
   priceInPaisa: integer("price_in_paisa").notNull(), // Store price in smallest currency unit
   currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   isActive: integer("is_active").notNull().default(1),
-  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "restrict" }), // Prevent deleting salons with services
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }), // Auto-delete services when salon is deleted
   category: varchar("category", { length: 50 }), // Hair, Nails, Facial, Massage, etc
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
@@ -294,7 +300,8 @@ export const staff = pgTable("staff", {
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
-  role: varchar("role", { length: 100 }), // Staff role (Stylist, Colorist, Nail Technician, etc.)
+  roles: text("roles").array(), // Staff roles (Stylist, Colorist, Nail Technician, etc.) - supports multiple roles
+  gender: varchar("gender", { length: 10 }), // Staff gender (Male/Female)
   photoUrl: text("photo_url"), // Staff photo URL
   specialties: text("specialties").array(), // Array of service categories they specialize in
   isActive: integer("is_active").notNull().default(1),
@@ -467,8 +474,8 @@ export const packageServicesRelations = relations(packageServices, ({ one }) => 
 // Bookings table - stores booking information before payment
 export const bookings = pgTable("bookings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "restrict" }), // Prevent deleting salons with bookings
-  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "restrict" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }), // Auto-delete bookings when salon is deleted
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }), // Auto-delete bookings when service is deleted
   staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }),
   timeSlotId: varchar("time_slot_id").references(() => timeSlots.id, { onDelete: "restrict" }),
   customerName: text("customer_name").notNull(),
@@ -532,12 +539,12 @@ export const bookingServices = pgTable("booking_services", {
     columns: [table.bookingId, table.salonId],
     foreignColumns: [bookings.id, bookings.salonId],
     name: "booking_services_booking_salon_fk"
-  }),
+  }).onDelete("cascade"), // Auto-delete when booking is deleted
   foreignKey({
     columns: [table.serviceId, table.salonId],
     foreignColumns: [services.id, services.salonId],
     name: "booking_services_service_salon_fk"
-  }),
+  }).onDelete("cascade"), // Auto-delete when service is deleted
   // Unique constraint: booking can't have duplicate sequence numbers
   unique().on(table.bookingId, table.sequence),
 ]);
@@ -3108,11 +3115,17 @@ export const salonSearchSchema = z.object({
   radiusKm: z.number().min(0.1).max(50, "Radius must be between 0.1 and 50 kilometers").default(1),
   category: z.string().optional(),
   q: z.string().optional(),
-  sort: z.enum(['distance', 'rating', 'name']).default('distance'),
+  sort: z.enum(['distance', 'rating', 'name', 'recommended', 'top-rated', 'nearest']).default('distance'),
   page: z.number().min(1).default(1),
   pageSize: z.number().min(1).max(50).default(20),
   time: z.string().optional(),
   date: z.string().optional(),
+  maxPrice: z.number().optional(),
+  venueType: z.string().optional(),
+  availableToday: z.boolean().optional(),
+  instantBooking: z.boolean().optional(),
+  offerDeals: z.boolean().optional(),
+  acceptGroup: z.boolean().optional(),
 });
 
 export type SalonSearchParams = z.infer<typeof salonSearchSchema>;

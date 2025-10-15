@@ -17,9 +17,11 @@ import {
 
 interface MediaStepProps {
   salonId: string;
-  initialData?: any;
-  onComplete: (data: any) => void;
-  isCompleted: boolean;
+  onNext?: () => void;
+  onComplete?: () => void;
+  onBack?: () => void;
+  onSkip?: () => void;
+  isCompleted?: boolean;
 }
 
 interface MediaAsset {
@@ -84,10 +86,15 @@ const SMART_TIPS = [
 
 export default function MediaStep({ 
   salonId, 
-  initialData, 
-  onComplete, 
-  isCompleted 
+  onNext,
+  onComplete,
+  onBack,
+  onSkip,
+  isCompleted
 }: MediaStepProps) {
+  // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
+  const handleNext = onNext || onComplete || (() => {});
+  
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [uploadTab, setUploadTab] = useState<"local" | "url">("local");
   const [newMedia, setNewMedia] = useState<MediaAsset>({
@@ -118,6 +125,21 @@ export default function MediaStep({
       setMediaAssets(Array.isArray(existingMedia) ? existingMedia : []);
     }
   }, [existingMedia]);
+
+  // Map frontend categories to valid database types
+  const mapCategoryToDbType = (category: string): string => {
+    const categoryMap: { [key: string]: string } = {
+      'cover': 'cover',
+      'interior': 'gallery',
+      'services': 'gallery',
+      'team': 'gallery',
+      'products': 'gallery',
+      'gallery': 'gallery',
+      'logo': 'logo',
+      'video': 'video'
+    };
+    return categoryMap[category] || 'gallery';
+  };
 
   // Smart category suggestion based on existing photos
   const suggestedCategory = () => {
@@ -237,6 +259,7 @@ export default function MediaStep({
     mutationFn: async (media: MediaAsset) => {
       const mediaData = {
         ...media,
+        assetType: mapCategoryToDbType(media.assetType), // Map to valid DB type
         isPrimary: media.isPrimary ? 1 : 0
       };
       const response = await apiRequest('POST', `/api/salons/${salonId}/media-assets`, mediaData);
@@ -383,8 +406,13 @@ export default function MediaStep({
     setPrimaryMediaMutation.mutate(mediaId);
   };
 
-  const handleContinue = () => {
-    onComplete({ mediaAssets });
+  const handleContinue = async () => {
+    // Invalidate completion status cache
+    await queryClient.invalidateQueries({ 
+      queryKey: ['/api/salons', salonId, 'dashboard-completion'] 
+    });
+    
+    handleNext();
   };
 
   // Group media by category
@@ -807,12 +835,6 @@ export default function MediaStep({
       {/* Action Buttons */}
       <div className="flex items-center justify-between pt-4">
         <div className="text-sm">
-          {isCompleted && (
-            <span className="flex items-center gap-1 text-green-600 font-medium">
-              <CheckCircle2 className="h-4 w-4" />
-              Completed
-            </span>
-          )}
           {mediaAssets.length === 0 && (
             <span className="flex items-center gap-1 text-amber-600">
               <AlertCircle className="h-4 w-4" />

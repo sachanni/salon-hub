@@ -113,6 +113,12 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
     location: salon.address && salon.city ? `${salon.address}, ${salon.city}` : salon.location || 'Location not specified',
     // Use imageUrl from proximity search or fallback to image
     image: salon.imageUrl || salon.image || '',
+    // Pass multiple images for gallery
+    imageUrls: salon.imageUrls || [],
+    // Pass services from API
+    services: salon.services || [],
+    // Pass available time slots from API
+    availableTimeSlots: salon.availableTimeSlots || [],
     // Ensure priceRange has a safe default
     priceRange: salon.priceRange || salon.price_range || '$$',
     // Ensure category has a safe default
@@ -199,8 +205,19 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
                 // Only use fallback images if no real image is provided
                 image: salon.image || imageMap[index % imageMap.length] || salonImage1
               };
+              
+              // Extract search query and time filter for highlighting
+              const searchQuery = searchParams?.service || searchParams?.category || '';
+              const timeFilter = searchParams?.time || '';
+              
               return (
-                <SalonCard key={salon.id} {...salonWithImage} onBookingClick={onBookingClick} />
+                <SalonCard 
+                  key={salon.id} 
+                  {...salonWithImage} 
+                  onBookingClick={onBookingClick}
+                  searchQuery={searchQuery}
+                  timeFilter={timeFilter}
+                />
               );
             })
           )}

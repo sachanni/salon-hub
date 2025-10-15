@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Star, Clock, Phone, Navigation, Filter, List, Map, ArrowLeft, Calendar, Heart, Share2 } from 'lucide-react';
+import { MapPin, Star, Clock, Phone, Navigation, Filter, List, Map, ArrowLeft, Calendar, Heart, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +7,8 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import ErrorBoundary from './ErrorBoundary';
+import FilterPanel, { FilterState } from './FilterPanel';
+import CategoryTabs from './CategoryTabs';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -36,6 +38,7 @@ interface Salon {
   rating: string;
   reviewCount: number;
   imageUrl?: string;
+  imageUrls?: string[];
   openTime?: string;
   closeTime?: string;
   distance_km?: number;
@@ -562,6 +565,16 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   const [loadingTimeSlots, setLoadingTimeSlots] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
   const [sortBy, setSortBy] = useState<'distance' | 'rating' | 'name'>('distance');
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [currentImageIndex, setCurrentImageIndex] = useState<Record<string, number>>({});
+  const [filters, setFilters] = useState<FilterState>({
+    sortBy: 'recommended',
+    maxPrice: 10000,
+    venueType: 'everyone',
+    instantBooking: false,
+    availableToday: false,
+  });
 
   // Fetch salons based on search parameters
   useEffect(() => {
@@ -576,19 +589,55 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
         setLoading(true);
         setError(null);
 
+        // Map filter sortBy to API sort parameter
+        const apiSortMap: { [key: string]: string } = {
+          'recommended': 'recommended',
+          'nearest': 'distance',
+          'top-rated': 'top-rated',
+          'distance': 'distance'
+        };
+
         const params = new URLSearchParams({
           lat: searchParams.coordinates.lat.toString(),
           lng: searchParams.coordinates.lng.toString(),
           radiusKm: (searchParams.radius || 10).toString(),
-          sort: sortBy,
+          sort: apiSortMap[filters.sortBy] || 'distance',
         });
 
         if (searchParams.service) {
           params.append('q', searchParams.service);
         }
 
-        if (searchParams.category) {
+        // Apply category filter
+        if (selectedCategory && selectedCategory !== 'all') {
+          params.append('category', selectedCategory);
+        } else if (searchParams.category) {
           params.append('category', searchParams.category);
+        }
+
+        // Apply advanced filters
+        if (filters.maxPrice && filters.maxPrice < 10000) {
+          params.append('maxPrice', filters.maxPrice.toString());
+        }
+
+        if (filters.venueType && filters.venueType !== 'everyone') {
+          params.append('venueType', filters.venueType);
+        }
+
+        if (filters.availableToday) {
+          params.append('availableToday', 'true');
+        }
+
+        if (filters.instantBooking) {
+          params.append('instantBooking', 'true');
+        }
+
+        if (filters.offerDeals) {
+          params.append('offerDeals', 'true');
+        }
+
+        if (filters.acceptGroup) {
+          params.append('acceptGroup', 'true');
         }
 
         // Add time and date parameters for availability filtering
@@ -617,7 +666,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
     };
 
     fetchSalons();
-  }, [searchParams, sortBy]);
+  }, [searchParams, sortBy, filters, selectedCategory]);
 
   // Fetch time slots for all salons when they are loaded
   useEffect(() => {
@@ -632,6 +681,31 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
     // Open salon profile in new tab
     const salonProfileUrl = `/salon-profile?id=${salon.id}`;
     window.open(salonProfileUrl, '_blank');
+  };
+
+  // Carousel navigation functions
+  const handlePreviousImage = (salonId: string, totalImages: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex(prev => ({
+      ...prev,
+      [salonId]: ((prev[salonId] || 0) - 1 + totalImages) % totalImages
+    }));
+  };
+
+  const handleNextImage = (salonId: string, totalImages: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex(prev => ({
+      ...prev,
+      [salonId]: ((prev[salonId] || 0) + 1) % totalImages
+    }));
+  };
+
+  const handleDotClick = (salonId: string, index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex(prev => ({
+      ...prev,
+      [salonId]: index
+    }));
   };
 
 
@@ -855,7 +929,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
 
       <div className="flex flex-1 overflow-hidden min-w-0">
         {/* Sidebar */}
-        <div className="w-[420px] min-w-[380px] bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+        <div className="w-[400px] min-w-[360px] bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
           {/* Enhanced Header */}
           <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
             <div className="flex items-center justify-between mb-3">
@@ -867,44 +941,29 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                   Near {searchLocationName || 'your location'}
                 </p>
               </div>
-              <Button variant="ghost" size="sm" className="p-2">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="p-2 hover:bg-white/80"
+                onClick={() => setIsFilterPanelOpen(true)}
+                data-testid="button-open-filters"
+              >
                 <Filter className="w-4 h-4" />
               </Button>
             </div>
             
-            {/* Enhanced Filters */}
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Sort by</label>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="distance">Distance</option>
-                  <option value="rating">Rating</option>
-                  <option value="name">Name</option>
-                </select>
-              </div>
-              
-              {/* Quick Filter Chips */}
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="text-xs cursor-pointer hover:bg-blue-50">
-                  Hair Salons
-                </Badge>
-                <Badge variant="outline" className="text-xs cursor-pointer hover:bg-blue-50">
-                  Nail Salons
-                </Badge>
-                <Badge variant="outline" className="text-xs cursor-pointer hover:bg-blue-50">
-                  Spas
-                </Badge>
-              </div>
+            {/* Category Tabs */}
+            <div className="mt-3">
+              <CategoryTabs
+                selectedCategory={selectedCategory}
+                onCategoryChange={setSelectedCategory}
+              />
             </div>
           </div>
 
           {/* Salon List */}
           <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4 pr-2">
+            <div className="p-4 space-y-4">
               {sortedSalons.length === 0 ? (
                 <div className="text-center py-8">
                   <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-3" />
@@ -925,43 +984,100 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                   <Card
                     key={salon.id}
                     data-salon-id={salon.id}
-                    className={`cursor-pointer transition-all duration-200 hover:shadow-lg hover:scale-[1.01] mx-1 ${
+                    className={`group cursor-pointer transition-all duration-200 hover:shadow-lg hover:scale-[1.01] ${
                       selectedSalonId === salon.id ? 'ring-2 ring-blue-500 shadow-lg' : 'hover:border-blue-200'
                     }`}
                     onClick={() => handleSalonClick(salon)}
                   >
                     <CardContent className="p-0">
-                      {/* Salon Image - Fresha Style */}
-                      <div className="relative h-48 w-full overflow-hidden rounded-t-lg">
-                        {salon.imageUrl ? (
-                          <img
-                            src={salon.imageUrl}
-                            alt={salon.name}
-                            className="w-full h-full object-cover transition-transform duration-200 hover:scale-105"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500 flex items-center justify-center relative overflow-hidden">
-                            {/* Background Pattern */}
-                            <div className="absolute inset-0 opacity-10">
-                              <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent"></div>
-                              <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.1),transparent_50%)]"></div>
-                            </div>
-                            
-                            {/* Content */}
-                            <div className="text-center text-white relative z-10">
-                              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mb-3 mx-auto backdrop-blur-sm border border-white/30">
-                                <span className="text-3xl font-bold text-white">{salon.name.charAt(0)}</span>
+                      {/* Salon Image Carousel - Fresha Style */}
+                      <div className="relative h-32 w-full overflow-hidden rounded-t-lg">
+                        {(() => {
+                          const images = salon.imageUrls && salon.imageUrls.length > 0 
+                            ? salon.imageUrls 
+                            : salon.imageUrl 
+                              ? [salon.imageUrl] 
+                              : [];
+                          const currentIndex = currentImageIndex[salon.id] || 0;
+                          const hasMultipleImages = images.length > 1;
+
+                          return images.length > 0 ? (
+                            <>
+                              {/* Current Image */}
+                              <img
+                                src={images[currentIndex]}
+                                alt={`${salon.name} - Image ${currentIndex + 1}`}
+                                className="w-full h-full object-cover transition-all duration-300"
+                              />
+                              
+                              {/* Navigation Arrows - Show on hover if multiple images */}
+                              {hasMultipleImages && (
+                                <>
+                                  <button
+                                    onClick={(e) => handlePreviousImage(salon.id, images.length, e)}
+                                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                                    data-testid={`button-prev-image-${salon.id}`}
+                                  >
+                                    <ChevronLeft className="w-4 h-4" />
+                                  </button>
+                                  
+                                  <button
+                                    onClick={(e) => handleNextImage(salon.id, images.length, e)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                                    data-testid={`button-next-image-${salon.id}`}
+                                  >
+                                    <ChevronRight className="w-4 h-4" />
+                                  </button>
+                                  
+                                  {/* Dot Indicators */}
+                                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                                    {images.map((_, idx) => (
+                                      <button
+                                        key={idx}
+                                        onClick={(e) => handleDotClick(salon.id, idx, e)}
+                                        className={`w-1.5 h-1.5 rounded-full transition-all duration-200 ${
+                                          idx === currentIndex 
+                                            ? 'bg-white w-4' 
+                                            : 'bg-white/60 hover:bg-white/80'
+                                        }`}
+                                        data-testid={`button-dot-${salon.id}-${idx}`}
+                                      />
+                                    ))}
+                                  </div>
+
+                                  {/* Image Counter Badge */}
+                                  <div className="absolute top-2 left-2">
+                                    <Badge className="bg-black/60 text-white text-xs px-2 py-0.5">
+                                      {currentIndex + 1}/{images.length}
+                                    </Badge>
+                                  </div>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500 flex items-center justify-center relative overflow-hidden">
+                              {/* Background Pattern */}
+                              <div className="absolute inset-0 opacity-10">
+                                <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent"></div>
+                                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.1),transparent_50%)]"></div>
                               </div>
-                              <p className="text-sm font-semibold text-white/90 drop-shadow-lg">{salon.name}</p>
-                              <p className="text-xs text-white/70 mt-1">{salon.category.replace('_', ' ')}</p>
+                              
+                              {/* Content */}
+                              <div className="text-center text-white relative z-10">
+                                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mb-3 mx-auto backdrop-blur-sm border border-white/30">
+                                  <span className="text-3xl font-bold text-white">{salon.name.charAt(0)}</span>
+                                </div>
+                                <p className="text-sm font-semibold text-white/90 drop-shadow-lg">{salon.name}</p>
+                                <p className="text-xs text-white/70 mt-1">{salon.category.replace('_', ' ')}</p>
+                              </div>
+                              
+                              {/* Decorative Elements */}
+                              <div className="absolute top-4 right-4 w-8 h-8 bg-white/10 rounded-full"></div>
+                              <div className="absolute bottom-4 left-4 w-6 h-6 bg-white/10 rounded-full"></div>
+                              <div className="absolute top-1/2 left-4 w-4 h-4 bg-white/10 rounded-full"></div>
                             </div>
-                            
-                            {/* Decorative Elements */}
-                            <div className="absolute top-4 right-4 w-8 h-8 bg-white/10 rounded-full"></div>
-                            <div className="absolute bottom-4 left-4 w-6 h-6 bg-white/10 rounded-full"></div>
-                            <div className="absolute top-1/2 left-4 w-4 h-4 bg-white/10 rounded-full"></div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         
                         {/* Distance Badge */}
                         <div className="absolute top-3 right-3">
@@ -990,134 +1106,65 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                       </div>
 
                       {/* Salon Details */}
-                      <div className="p-4">
+                      <div className="p-3">
                         {/* Salon Name & Rating */}
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-lg font-semibold text-gray-900 break-words mb-1">
-                              {salon.name}
-                            </h3>
-                            
-                            {/* Rating & Reviews */}
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="flex items-center gap-1">
-                                <Star className="w-4 h-4 text-yellow-500 fill-current" />
-                                <span className="text-sm font-medium text-gray-900">
-                                  {formatRating(salon.rating)}
-                                </span>
-                                <span className="text-sm text-gray-500">
-                                  ({salon.reviewCount} reviews)
-                                </span>
-                              </div>
-                            </div>
-                          </div>
+                        <div className="mb-2">
+                          <h3 className="text-base font-semibold text-gray-900 break-words mb-1">
+                            {salon.name}
+                          </h3>
                           
-                          {/* Salon Number */}
-                          <Badge variant="outline" className="text-xs font-medium ml-2">
-                            #{index + 1}
-                          </Badge>
+                          {/* Rating & Reviews */}
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3.5 h-3.5 text-yellow-500 fill-current" />
+                            <span className="text-sm font-medium text-gray-900">
+                              {formatRating(salon.rating)}
+                            </span>
+                            <span className="text-sm text-gray-500">
+                              ({salon.reviewCount})
+                            </span>
+                          </div>
                         </div>
 
                         {/* Location */}
-                        <div className="flex items-start gap-2 mb-3">
-                          <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-600 leading-relaxed break-words">
-                              {salon.address}, {salon.city}
-                            </p>
-                          </div>
+                        <div className="flex items-start gap-1.5 mb-2">
+                          <MapPin className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
+                          <p className="text-xs text-gray-600 line-clamp-2">
+                            {salon.address}, {salon.city}
+                          </p>
                         </div>
 
-                        {/* Category & Services Preview */}
-                        <div className="flex items-center gap-2 mb-3">
+                        {/* Category */}
+                        <div className="mb-2">
                           <Badge variant="outline" className="text-xs">
                             {salon.category.replace('_', ' ')}
                           </Badge>
-                          {salon.description && (
-                            <span className="text-xs text-gray-500 truncate">
-                              {salon.description.length > 50 
-                                ? `${salon.description.substring(0, 50)}...` 
-                                : salon.description
-                              }
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Operating Hours & Status */}
-                        {salon.openTime && salon.closeTime && (
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-gray-400" />
-                              <span className="text-xs text-gray-600">
-                                Open {salon.openTime} - {salon.closeTime}
-                              </span>
-                            </div>
-                            
-                            {/* Salon Status Indicator */}
-                            <div className="flex items-center gap-1">
-                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                              <span className="text-xs text-green-600 font-medium">Open now</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Action Buttons */}
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // Add to favorites
-                            }}
-                            className="flex-1"
-                          >
-                            <Heart className="w-4 h-4 mr-1" />
-                            Save
-                          </Button>
-                          
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // Share salon
-                            }}
-                            className="px-3"
-                          >
-                            <Share2 className="w-4 h-4" />
-                          </Button>
                         </div>
 
                         {/* Available Time Slots */}
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <div className="flex items-center justify-between mb-2">
+                        <div className="mt-2 pt-2 border-t border-gray-100">
+                          <div className="flex items-center justify-between mb-1.5">
                             <span className="text-xs text-gray-500 font-medium">Available times</span>
-                            <span className="text-xs text-blue-600 font-medium cursor-pointer hover:underline">
-                              View all
-                            </span>
                           </div>
                           
                           {/* Time Slots */}
-                          <div className="space-y-2">
+                          <div className="space-y-1.5">
                             {(() => {
                               const salonTimeSlots = timeSlotsData[salon.id];
                               const isLoading = loadingTimeSlots[salon.id];
                               
                               if (isLoading) {
                                 return (
-                                  <div className="flex items-center justify-center py-4">
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                    <span className="ml-2 text-xs text-gray-500">Loading times...</span>
+                                  <div className="flex items-center justify-center py-2">
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                                    <span className="ml-2 text-xs text-gray-500">Loading...</span>
                                   </div>
                                 );
                               }
                               
             if (!salonTimeSlots || salonTimeSlots.availableSlots.length === 0) {
               return (
-                <div className="text-center py-4">
+                <div className="text-center py-2">
                   <span className="text-xs text-gray-500">No availability set</span>
-                  <div className="text-xs text-gray-400 mt-1">Salon needs to set up hours</div>
                 </div>
               );
             }
@@ -1132,18 +1179,15 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                                     e.stopPropagation();
                                     handleSalonClick(salon);
                                   }}
-                                  className="w-full flex items-center justify-between p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group"
+                                  className="w-full flex items-center justify-between px-2 py-1.5 bg-blue-50 hover:bg-blue-100 rounded transition-colors group"
                                 >
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1.5">
                                     <Clock className="w-3 h-3 text-blue-600 flex-shrink-0" />
-                                    <span className="text-sm font-medium text-blue-900 group-hover:text-blue-800">
+                                    <span className="text-xs font-medium text-blue-900">
                                       {slot.time}
                                     </span>
                                   </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-blue-600 font-medium">Available</div>
-                                    <div className="text-xs text-gray-500">{slot.duration} mins</div>
-                                  </div>
+                                  <span className="text-xs text-gray-500">{slot.duration} min</span>
                                 </button>
                               ));
                             })()}
@@ -1225,6 +1269,17 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Filter Panel */}
+      <FilterPanel
+        isOpen={isFilterPanelOpen}
+        onClose={() => setIsFilterPanelOpen(false)}
+        onApplyFilters={(newFilters) => {
+          setFilters(newFilters);
+          // Apply filters to salon list
+        }}
+        currentFilters={filters}
+      />
     </div>
   );
 };
