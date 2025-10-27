@@ -10,6 +10,7 @@ import {
   type Salon, type InsertSalon,
   type Role, type InsertRole,
   type Organization, type InsertOrganization,
+  type OtpVerification, type InsertOtpVerification,
   type UserRole, type InsertUserRole,
   type OrgUser, type InsertOrgUser,
   type Staff, type InsertStaff,
@@ -63,6 +64,11 @@ import {
   type OptimizationRecommendation, type InsertOptimizationRecommendation,
   type AutomatedActionLog, type InsertAutomatedActionLog,
   type CampaignOptimizationInsight, type InsertCampaignOptimizationInsight,
+  // Platform admin types
+  type PlatformConfig, type InsertPlatformConfig,
+  type PlatformCommission, type InsertPlatformCommission,
+  type PlatformPayout, type InsertPlatformPayout,
+  type PlatformOffer, type InsertPlatformOffer,
   users, userSavedLocations, services, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
@@ -78,7 +84,13 @@ import {
   abTestCampaigns, testVariants, testMetrics, testResults,
   // A/B testing automation system tables
   automationConfigurations, variantGenerationRules, performanceMonitoringSettings,
-  optimizationRecommendations, automatedActionLogs, campaignOptimizationInsights
+  optimizationRecommendations, automatedActionLogs, campaignOptimizationInsights,
+  // Platform admin tables
+  platformConfig, platformCommissions, platformPayouts, platformOffers,
+  // Wallet and launch offer tables
+  userWallets, walletTransactions, userOfferUsage, launchOffers,
+  // OTP verification table
+  otpVerifications
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne } from "drizzle-orm";
@@ -138,6 +150,12 @@ export interface IStorage {
   createVerificationToken(email: string, userId: string): Promise<string>;
   verifyEmailToken(token: string): Promise<{ success: boolean; email?: string; userId?: string }>;
   markEmailAsVerified(userId: string): Promise<void>;
+  
+  // OTP verification operations
+  createOtpVerification(otp: InsertOtpVerification): Promise<OtpVerification>;
+  getLatestOtpVerification(phoneNumber: string): Promise<OtpVerification | undefined>;
+  incrementOtpAttempts(id: string): Promise<void>;
+  markOtpAsVerified(id: string): Promise<void>;
   
   // Salon operations
   getSalon(id: string): Promise<Salon | undefined>;
@@ -1077,6 +1095,125 @@ export interface IStorage {
     }>;
     total: number;
   }>;
+
+  // Super Admin operations
+  // Platform analytics
+  getPlatformStats(period?: string): Promise<{
+    totalBookings: number;
+    totalRevenue: number;
+    totalUsers: number;
+    totalSalons: number;
+    pendingApprovals: number;
+    activeUsers: number;
+    activeOffers: number;
+    bookingTrends: Array<{ date: string; count: number; revenue: number }>;
+  }>;
+
+  // Business management
+  getAllSalonsForAdmin(filters?: {
+    status?: string;
+    approvalStatus?: string;
+    city?: string;
+    search?: string;
+  }): Promise<Array<Salon & { 
+    totalBookings: number;
+    totalRevenue: number;
+    ownerName?: string;
+  }>>;
+
+  approveSalon(salonId: string, approvedBy: string): Promise<void>;
+  rejectSalon(salonId: string, reason: string, rejectedBy: string): Promise<void>;
+
+  // User management  
+  getAllUsersForAdmin(filters?: {
+    role?: string;
+    isActive?: number;
+    search?: string;
+  }): Promise<Array<User & { 
+    roles: string[];
+    totalBookings: number;
+    totalSpent: number;
+  }>>;
+
+  toggleUserActive(userId: string, isActive: number): Promise<void>;
+
+  // Booking analytics
+  getAllBookingsForAdmin(filters?: {
+    status?: string;
+    salonId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<Array<Booking & { 
+    salonName: string;
+    serviceName: string;
+    customerName: string;
+  }>>;
+
+  getSalonBookingStats(salonId: string): Promise<{
+    totalBookings: number;
+    totalRevenue: number;
+    cancellationRate: number;
+    averageBookingValue: number;
+  }>;
+
+  // Platform configuration
+  getPlatformConfig(key: string): Promise<any>;
+  setPlatformConfig(key: string, value: any, updatedBy: string): Promise<void>;
+
+  // Commission & Payouts
+  createPlatformCommission(data: any): Promise<void>;
+  getSalonEarnings(salonId: string): Promise<{
+    totalEarnings: number;
+    platformCommission: number;
+    salonShare: number;
+    pendingPayout: number;
+  }>;
+
+  createPayout(salonId: string, amount: number): Promise<any>;
+  approvePayout(payoutId: string, approvedBy: string): Promise<void>;
+  rejectPayout(payoutId: string, reason: string, rejectedBy: string): Promise<void>;
+  
+  getAllPayouts(filters?: { status?: string; salonId?: string }): Promise<any[]>;
+
+  // Offers Management
+  getAllOffers(filters?: { 
+    status?: string;
+    approvalStatus?: string;
+    isPlatformWide?: number;
+    salonId?: string;
+    ownedBySalonId?: string;
+  }): Promise<Array<PlatformOffer & { salonName?: string }>>;
+  getOfferById(offerId: string): Promise<PlatformOffer | undefined>;
+  getSalonOffers(salonId: string): Promise<PlatformOffer[]>; // Get offers owned by a specific salon
+  createOffer(data: InsertPlatformOffer): Promise<PlatformOffer>;
+  createSalonOffer(salonId: string, data: any, createdBy: string): Promise<PlatformOffer>; // Auto-approve aware
+  updateOffer(offerId: string, updates: Partial<InsertPlatformOffer>): Promise<void>;
+  updateSalonOffer(offerId: string, salonId: string, updates: any, editedBy: string): Promise<void>; // Edit tracking + re-approval logic
+  approveOffer(offerId: string, approvedBy: string): Promise<void>;
+  rejectOffer(offerId: string, reason: string, rejectedBy: string): Promise<void>;
+  toggleOfferStatus(offerId: string, isActive: number): Promise<void>;
+  toggleSalonOfferStatus(offerId: string, salonId: string, isActive: number): Promise<void>; // Ownership validation
+  deleteOffer(offerId: string): Promise<void>;
+  deleteSalonOffer(offerId: string, salonId: string): Promise<void>; // Ownership validation
+
+  // Digital Wallet Management
+  getUserWallet(userId: string): Promise<any>;
+  createUserWallet(userId: string): Promise<any>;
+  addWalletCredit(userId: string, amountInPaisa: number, reason: string, bookingId?: string, offerId?: string): Promise<void>;
+  deductWalletBalance(userId: string, amountInPaisa: number, reason: string, bookingId?: string): Promise<void>;
+  getWalletTransactions(userId: string): Promise<any[]>;
+
+  // Launch Offers & Eligibility
+  getActiveLaunchOffers(): Promise<any[]>;
+  getUserOfferEligibility(userId: string, offerId: string): Promise<{
+    eligible: boolean;
+    usageCount: number;
+    maxUsage: number;
+    reason?: string;
+  }>;
+  trackOfferUsage(userId: string, offerId: string, bookingId: string, discountInPaisa: number, usageNumber: number): Promise<void>;
+  getCustomerOffers(userId: string, salonId?: string): Promise<any[]>;
+  getAllOffersWithSalons(): Promise<any[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1417,7 +1554,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createService(service: InsertService): Promise<Service> {
-    const [newService] = await db.insert(services).values(service).returning();
+    // Auto-assign image if not provided
+    const serviceData = { ...service };
+    if (!serviceData.imageUrl) {
+      const { getServiceImage, getDefaultImageByCategory } = await import('../shared/service-images');
+      const autoImage = getServiceImage(service.name) || getDefaultImageByCategory(service.category || '');
+      if (autoImage) {
+        serviceData.imageUrl = autoImage;
+      }
+    }
+    
+    const [newService] = await db.insert(services).values(serviceData).returning();
     return newService;
   }
 
@@ -1699,6 +1846,10 @@ export class DatabaseStorage implements IStorage {
           paymentMethod: bookings.paymentMethod,
           notes: bookings.notes,
           guestSessionId: bookings.guestSessionId,
+          offerId: bookings.offerId,
+          originalAmountPaisa: bookings.originalAmountPaisa,
+          discountAmountPaisa: bookings.discountAmountPaisa,
+          finalAmountPaisa: bookings.finalAmountPaisa,
           createdAt: bookings.createdAt,
           salonId: bookings.salonId,
           serviceName: services.name,
@@ -1828,6 +1979,10 @@ export class DatabaseStorage implements IStorage {
           paymentMethod: bookings.paymentMethod,
           notes: bookings.notes,
           guestSessionId: bookings.guestSessionId,
+          offerId: bookings.offerId,
+          originalAmountPaisa: bookings.originalAmountPaisa,
+          discountAmountPaisa: bookings.discountAmountPaisa,
+          finalAmountPaisa: bookings.finalAmountPaisa,
           createdAt: bookings.createdAt,
           durationMinutes: services.durationMinutes
         })
@@ -3189,6 +3344,33 @@ export class DatabaseStorage implements IStorage {
     await db.update(users)
       .set({ emailVerified: 1 })
       .where(eq(users.id, userId));
+  }
+
+  // OTP verification operations
+  async createOtpVerification(otp: InsertOtpVerification): Promise<OtpVerification> {
+    const [newOtp] = await db.insert(otpVerifications).values(otp).returning();
+    return newOtp;
+  }
+
+  async getLatestOtpVerification(phoneNumber: string): Promise<OtpVerification | undefined> {
+    const [otpRecord] = await db.select()
+      .from(otpVerifications)
+      .where(eq(otpVerifications.phoneNumber, phoneNumber))
+      .orderBy(desc(otpVerifications.createdAt))
+      .limit(1);
+    return otpRecord || undefined;
+  }
+
+  async incrementOtpAttempts(id: string): Promise<void> {
+    await db.update(otpVerifications)
+      .set({ attempts: sql`${otpVerifications.attempts} + 1` })
+      .where(eq(otpVerifications.id, id));
+  }
+
+  async markOtpAsVerified(id: string): Promise<void> {
+    await db.update(otpVerifications)
+      .set({ verified: 1 })
+      .where(eq(otpVerifications.id, id));
   }
 
   // Business Profile Setup Implementation
@@ -6359,210 +6541,827 @@ export class DatabaseStorage implements IStorage {
   }
 
 
+  // ==================== SUPER ADMIN METHODS ====================
+
+  async getPlatformStats(period?: string): Promise<{
+    totalBookings: number;
+    totalRevenue: number;
+    totalUsers: number;
+    totalSalons: number;
+    pendingApprovals: number;
+    activeUsers: number;
+    activeOffers: number;
+    bookingTrends: Array<{ date: string; count: number; revenue: number }>;
+  }> {
+    // Get total bookings
+    const totalBookingsResult = await db.select({ count: sql<number>`count(*)::int` }).from(bookings);
+    const totalBookings = totalBookingsResult[0]?.count || 0;
+
+    // Get total revenue
+    const totalRevenueResult = await db.select({ 
+      sum: sql<number>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)::int` 
+    }).from(bookings).where(eq(bookings.status, 'completed'));
+    const totalRevenue = totalRevenueResult[0]?.sum || 0;
+
+    // Get total users
+    const totalUsersResult = await db.select({ count: sql<number>`count(*)::int` }).from(users);
+    const totalUsers = totalUsersResult[0]?.count || 0;
+
+    // Get total salons
+    const totalSalonsResult = await db.select({ count: sql<number>`count(*)::int` }).from(salons);
+    const totalSalons = totalSalonsResult[0]?.count || 0;
+
+    // Get pending approvals
+    const pendingApprovalsResult = await db.select({ count: sql<number>`count(*)::int` })
+      .from(salons)
+      .where(eq(salons.approvalStatus, 'pending'));
+    const pendingApprovals = pendingApprovalsResult[0]?.count || 0;
+
+    // Get active users
+    const activeUsersResult = await db.select({ count: sql<number>`count(*)::int` })
+      .from(users)
+      .where(eq(users.isActive, 1));
+    const activeUsers = activeUsersResult[0]?.count || 0;
+
+    // Get active offers (approved and within valid date range)
+    const activeOffersResult = await db.select({ count: sql<number>`count(*)::int` })
+      .from(platformOffers)
+      .where(
+        and(
+          eq(platformOffers.isActive, 1),
+          eq(platformOffers.approvalStatus, 'approved'),
+          lte(platformOffers.validFrom, sql`NOW()`),
+          gte(platformOffers.validUntil, sql`NOW()`)
+        )
+      );
+    const activeOffers = activeOffersResult[0]?.count || 0;
+
+    // Get booking trends (last 7 days)
+    const bookingTrends = await db
+      .select({
+        date: sql<string>`DATE(${bookings.createdAt})`,
+        count: sql<number>`count(*)::int`,
+        revenue: sql<number>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)::int`
+      })
+      .from(bookings)
+      .where(gte(bookings.createdAt, sql`NOW() - INTERVAL '7 days'`))
+      .groupBy(sql`DATE(${bookings.createdAt})`)
+      .orderBy(sql`DATE(${bookings.createdAt})`);
+
+    return {
+      totalBookings,
+      totalRevenue,
+      totalUsers,
+      totalSalons,
+      pendingApprovals,
+      activeUsers,
+      activeOffers,
+      bookingTrends
+    };
+  }
+
+  async getAllSalonsForAdmin(filters?: {
+    status?: string;
+    approvalStatus?: string;
+    city?: string;
+    search?: string;
+  }): Promise<Array<Salon & { 
+    totalBookings: number;
+    totalRevenue: number;
+    ownerName?: string;
+  }>> {
+    let query = db.select({
+      salon: salons,
+      totalBookings: sql<number>`COALESCE(COUNT(DISTINCT ${bookings.id}), 0)::int`,
+      totalRevenue: sql<number>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)::int`,
+      ownerName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`
+    })
+    .from(salons)
+    .leftJoin(bookings, eq(salons.id, bookings.salonId))
+    .leftJoin(users, eq(salons.ownerId, users.id))
+    .groupBy(salons.id, users.id)
+    .$dynamic();
+
+    if (filters?.approvalStatus) {
+      query = query.where(eq(salons.approvalStatus, filters.approvalStatus));
+    }
+    if (filters?.city) {
+      query = query.where(eq(salons.city, filters.city));
+    }
+    if (filters?.search) {
+      query = query.where(sql`${salons.name} ILIKE ${`%${filters.search}%`}`);
+    }
+
+    const results = await query;
+
+    return results.map(r => ({
+      ...r.salon,
+      totalBookings: r.totalBookings,
+      totalRevenue: r.totalRevenue,
+      ownerName: r.ownerName
+    }));
+  }
+
+  async approveSalon(salonId: string, approvedBy: string): Promise<void> {
+    await db.update(salons).set({
+      approvalStatus: 'approved',
+      approvedAt: new Date(),
+      approvedBy: approvedBy
+    }).where(eq(salons.id, salonId));
+  }
+
+  async rejectSalon(salonId: string, reason: string, rejectedBy: string): Promise<void> {
+    await db.update(salons).set({
+      approvalStatus: 'rejected',
+      rejectionReason: reason,
+      approvedBy: rejectedBy,
+      approvedAt: new Date()
+    }).where(eq(salons.id, salonId));
+  }
+
+  async getAllUsersForAdmin(filters?: {
+    role?: string;
+    isActive?: number;
+    search?: string;
+  }): Promise<Array<User & { 
+    roles: string[];
+    totalBookings: number;
+    totalSpent: number;
+  }>> {
+    let query = db.select({
+      user: users,
+      roles: sql<string[]>`ARRAY_AGG(DISTINCT ${roles.name})`,
+      totalBookings: sql<number>`COALESCE(COUNT(DISTINCT ${bookings.id}), 0)::int`,
+      totalSpent: sql<number>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)::int`
+    })
+    .from(users)
+    .leftJoin(userRoles, eq(users.id, userRoles.userId))
+    .leftJoin(roles, eq(userRoles.roleId, roles.id))
+    .leftJoin(bookings, eq(users.email, bookings.customerEmail))
+    .groupBy(users.id)
+    .$dynamic();
+
+    if (filters?.isActive !== undefined) {
+      query = query.where(eq(users.isActive, filters.isActive));
+    }
+    if (filters?.search) {
+      query = query.where(sql`${users.email} ILIKE ${`%${filters.search}%`} OR ${users.firstName} ILIKE ${`%${filters.search}%`}`);
+    }
+
+    const results = await query;
+
+    return results.map(r => ({
+      ...r.user,
+      roles: r.roles.filter(Boolean),
+      totalBookings: r.totalBookings,
+      totalSpent: r.totalSpent
+    }));
+  }
+
+  async toggleUserActive(userId: string, isActive: number): Promise<void> {
+    await db.update(users).set({ isActive }).where(eq(users.id, userId));
+  }
+
+  async getAllBookingsForAdmin(filters?: {
+    status?: string;
+    salonId?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<Array<Booking & { 
+    salonName: string;
+    serviceName: string;
+    customerName: string;
+  }>> {
+    let query = db.select({
+      booking: bookings,
+      salonName: salons.name,
+      serviceName: services.name,
+      customerName: bookings.customerName
+    })
+    .from(bookings)
+    .leftJoin(salons, eq(bookings.salonId, salons.id))
+    .leftJoin(services, eq(bookings.serviceId, services.id))
+    .$dynamic();
+
+    if (filters?.status) {
+      query = query.where(eq(bookings.status, filters.status));
+    }
+    if (filters?.salonId) {
+      query = query.where(eq(bookings.salonId, filters.salonId));
+    }
+    if (filters?.startDate) {
+      query = query.where(gte(bookings.bookingDate, filters.startDate));
+    }
+    if (filters?.endDate) {
+      query = query.where(lte(bookings.bookingDate, filters.endDate));
+    }
+
+    const results = await query;
+
+    return results.map(r => ({
+      ...r.booking,
+      salonName: r.salonName || '',
+      serviceName: r.serviceName || '',
+      customerName: r.customerName
+    }));
+  }
+
+  async getSalonBookingStats(salonId: string): Promise<{
+    totalBookings: number;
+    totalRevenue: number;
+    cancellationRate: number;
+    averageBookingValue: number;
+  }> {
+    const stats = await db.select({
+      totalBookings: sql<number>`COUNT(*)::int`,
+      totalRevenue: sql<number>`COALESCE(SUM(CASE WHEN ${bookings.status} = 'completed' THEN ${bookings.totalAmountPaisa} ELSE 0 END), 0)::int`,
+      cancelledBookings: sql<number>`COALESCE(SUM(CASE WHEN ${bookings.status} = 'cancelled' THEN 1 ELSE 0 END), 0)::int`,
+      averageBookingValue: sql<number>`COALESCE(AVG(${bookings.totalAmountPaisa}), 0)::int`
+    })
+    .from(bookings)
+    .where(eq(bookings.salonId, salonId));
+
+    const result = stats[0];
+    const cancellationRate = result.totalBookings > 0 
+      ? (result.cancelledBookings / result.totalBookings) * 100 
+      : 0;
+
+    return {
+      totalBookings: result.totalBookings || 0,
+      totalRevenue: result.totalRevenue || 0,
+      cancellationRate,
+      averageBookingValue: result.averageBookingValue || 0
+    };
+  }
+
+  async getPlatformConfig(key: string): Promise<any> {
+    const [config] = await db.select()
+      .from(platformConfig)
+      .where(eq(platformConfig.configKey, key));
+    return config?.configValue;
+  }
+
+  async setPlatformConfig(key: string, value: any, updatedBy: string): Promise<void> {
+    const existing = await db.select()
+      .from(platformConfig)
+      .where(eq(platformConfig.configKey, key));
+
+    if (existing.length > 0) {
+      await db.update(platformConfig).set({
+        configValue: value,
+        updatedBy,
+        updatedAt: new Date()
+      }).where(eq(platformConfig.configKey, key));
+    } else {
+      await db.insert(platformConfig).values({
+        configKey: key,
+        configValue: value,
+        updatedBy
+      });
+    }
+  }
+
+  async createPlatformCommission(data: any): Promise<void> {
+    await db.insert(platformCommissions).values(data);
+  }
+
+  async getSalonEarnings(salonId: string): Promise<{
+    totalEarnings: number;
+    platformCommission: number;
+    salonShare: number;
+    pendingPayout: number;
+  }> {
+    const commissions = await db.select({
+      totalEarnings: sql<number>`COALESCE(SUM(${platformCommissions.bookingAmountPaisa}), 0)::int`,
+      platformCommission: sql<number>`COALESCE(SUM(${platformCommissions.commissionAmountPaisa}), 0)::int`,
+      salonShare: sql<number>`COALESCE(SUM(${platformCommissions.salonEarningsPaisa}), 0)::int`
+    })
+    .from(platformCommissions)
+    .where(eq(platformCommissions.salonId, salonId));
+
+    const payouts = await db.select({
+      paidOut: sql<number>`COALESCE(SUM(${platformPayouts.amountPaisa}), 0)::int`
+    })
+    .from(platformPayouts)
+    .where(and(
+      eq(platformPayouts.salonId, salonId),
+      eq(platformPayouts.status, 'paid')
+    ));
+
+    const result = commissions[0];
+    const paidOut = payouts[0]?.paidOut || 0;
+    const pendingPayout = (result?.salonShare || 0) - paidOut;
+
+    return {
+      totalEarnings: result?.totalEarnings || 0,
+      platformCommission: result?.platformCommission || 0,
+      salonShare: result?.salonShare || 0,
+      pendingPayout
+    };
+  }
+
+  async createPayout(salonId: string, amount: number): Promise<any> {
+    const [payout] = await db.insert(platformPayouts).values({
+      salonId,
+      amountPaisa: amount,
+      status: 'pending'
+    }).returning();
+    return payout;
+  }
+
+  async approvePayout(payoutId: string, approvedBy: string): Promise<void> {
+    await db.update(platformPayouts).set({
+      status: 'approved',
+      approvedBy,
+      approvedAt: new Date()
+    }).where(eq(platformPayouts.id, payoutId));
+  }
+
+  async rejectPayout(payoutId: string, reason: string, rejectedBy: string): Promise<void> {
+    await db.update(platformPayouts).set({
+      status: 'rejected',
+      rejectionReason: reason,
+      approvedBy: rejectedBy,
+      approvedAt: new Date()
+    }).where(eq(platformPayouts.id, payoutId));
+  }
+
+  async getAllPayouts(filters?: { status?: string; salonId?: string }): Promise<any[]> {
+    let query = db.select({
+      payout: platformPayouts,
+      salonName: salons.name
+    })
+    .from(platformPayouts)
+    .leftJoin(salons, eq(platformPayouts.salonId, salons.id))
+    .$dynamic();
+
+    if (filters?.status) {
+      query = query.where(eq(platformPayouts.status, filters.status));
+    }
+    if (filters?.salonId) {
+      query = query.where(eq(platformPayouts.salonId, filters.salonId));
+    }
+
+    const results = await query.orderBy(desc(platformPayouts.createdAt));
+
+    return results.map(r => ({
+      ...r.payout,
+      salonName: r.salonName
+    }));
+  }
+
+  // ==================== OFFERS MANAGEMENT ====================
+  
+  async getAllOffers(filters?: { 
+    status?: string;
+    approvalStatus?: string;
+    isPlatformWide?: number;
+    salonId?: string;
+    ownedBySalonId?: string;
+  }): Promise<Array<PlatformOffer & { salonName?: string }>> {
+    let query = db.select({
+      offer: platformOffers,
+      salonName: salons.name
+    })
+    .from(platformOffers)
+    .leftJoin(salons, eq(platformOffers.salonId, salons.id))
+    .$dynamic();
+
+    const conditions = [];
+    if (filters?.status) {
+      conditions.push(eq(platformOffers.isActive, filters.status === 'active' ? 1 : 0));
+    }
+    if (filters?.approvalStatus) {
+      conditions.push(eq(platformOffers.approvalStatus, filters.approvalStatus));
+    }
+    if (filters?.isPlatformWide !== undefined) {
+      conditions.push(eq(platformOffers.isPlatformWide, filters.isPlatformWide));
+    }
+    if (filters?.salonId) {
+      conditions.push(eq(platformOffers.salonId, filters.salonId));
+    }
+    if (filters?.ownedBySalonId !== undefined) {
+      if (filters.ownedBySalonId === 'null') {
+        conditions.push(sql`${platformOffers.ownedBySalonId} IS NULL`);
+      } else {
+        conditions.push(eq(platformOffers.ownedBySalonId, filters.ownedBySalonId));
+      }
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    const results = await query.orderBy(desc(platformOffers.createdAt));
+
+    return results.map(r => ({
+      ...r.offer,
+      salonName: r.salonName || undefined
+    }));
+  }
+
+  async getOfferById(offerId: string): Promise<PlatformOffer | undefined> {
+    const [offer] = await db.select().from(platformOffers).where(eq(platformOffers.id, offerId));
+    return offer || undefined;
+  }
+
+  async createOffer(data: InsertPlatformOffer): Promise<PlatformOffer> {
+    const [offer] = await db.insert(platformOffers).values(data).returning();
+    return offer;
+  }
+
+  async updateOffer(offerId: string, updates: Partial<InsertPlatformOffer>): Promise<void> {
+    await db.update(platformOffers)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(platformOffers.id, offerId));
+  }
+
+  async approveOffer(offerId: string, approvedBy: string): Promise<void> {
+    await db.update(platformOffers).set({
+      approvalStatus: 'approved',
+      approvedBy,
+      approvedAt: new Date(),
+      updatedAt: new Date()
+    }).where(eq(platformOffers.id, offerId));
+  }
+
+  async rejectOffer(offerId: string, reason: string, rejectedBy: string): Promise<void> {
+    await db.update(platformOffers).set({
+      approvalStatus: 'rejected',
+      approvalNotes: reason,
+      rejectedBy,
+      rejectedAt: new Date(),
+      isActive: 0,
+      updatedAt: new Date()
+    }).where(eq(platformOffers.id, offerId));
+  }
+
+  async toggleOfferStatus(offerId: string, isActive: number): Promise<void> {
+    await db.update(platformOffers)
+      .set({ isActive, updatedAt: new Date() })
+      .where(eq(platformOffers.id, offerId));
+  }
+
+  async deleteOffer(offerId: string): Promise<void> {
+    await db.delete(platformOffers).where(eq(platformOffers.id, offerId));
+  }
+
+  // Salon-specific offer methods with ownership validation
+  async getSalonOffers(salonId: string): Promise<PlatformOffer[]> {
+    const offers = await db.select()
+      .from(platformOffers)
+      .where(eq(platformOffers.ownedBySalonId, salonId))
+      .orderBy(desc(platformOffers.createdAt));
+    return offers;
+  }
+
+  async createSalonOffer(salonId: string, data: any, createdBy: string): Promise<PlatformOffer> {
+    // Salon owner offers are ALWAYS auto-approved (no approval workflow needed)
+    
+    // Convert ALL date fields to Date objects explicitly
+    const validFrom = data.validFrom instanceof Date ? data.validFrom : new Date(data.validFrom);
+    const validUntil = data.validUntil instanceof Date ? data.validUntil : new Date(data.validUntil);
+
+    // Build offer data explicitly - don't spread to avoid any string dates slipping through
+    const offerData: any = {
+      salonId: salonId,
+      ownedBySalonId: salonId,
+      title: data.title,
+      description: data.description,
+      discountType: data.discountType,
+      discountValue: data.discountValue,
+      minimumPurchase: data.minimumPurchase,
+      maxDiscount: data.maxDiscount,
+      validFrom: validFrom,
+      validUntil: validUntil,
+      isActive: data.isActive,
+      isPlatformWide: 0, // Salon offers are never platform-wide
+      usageLimit: data.usageLimit,
+      imageUrl: data.imageUrl, // Promotional image for offer card
+      approvalStatus: 'approved', // ALWAYS auto-approved
+      autoApproved: 1,
+      requiresApprovalOnEdit: 0,
+      approvedBy: createdBy, // Set to the user creating the offer (auto-approved)
+      approvedAt: new Date(),
+      createdBy: createdBy,
+    };
+
+    const [offer] = await db.insert(platformOffers).values(offerData).returning();
+    return offer;
+  }
+
+  async updateSalonOffer(offerId: string, salonId: string, updates: any, editedBy: string): Promise<void> {
+    // Verify ownership
+    const offer = await this.getOfferById(offerId);
+    if (!offer || offer.ownedBySalonId !== salonId) {
+      throw new Error('Unauthorized: Offer not owned by this salon');
+    }
+
+    // Get auto-approve setting (getPlatformConfig returns JSON configValue directly)
+    const config = await this.getPlatformConfig('offerApprovalSettings');
+    const autoApproveSalonOffers = config?.autoApproveSalonOffers ?? true;
+
+    // Determine if re-approval is needed
+    const needsReapproval = offer.requiresApprovalOnEdit === 1 || !autoApproveSalonOffers;
+
+    const updateData: any = {
+      ...updates,
+      lastEditedBy: editedBy,
+      lastEditedAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    // If editing requires re-approval, set status to pending
+    if (needsReapproval && offer.approvalStatus === 'approved') {
+      updateData.approvalStatus = 'pending';
+      updateData.autoApproved = 0;
+    }
+
+    await db.update(platformOffers)
+      .set(updateData)
+      .where(eq(platformOffers.id, offerId));
+  }
+
+  async toggleSalonOfferStatus(offerId: string, salonId: string, isActive: number): Promise<void> {
+    // Verify ownership
+    const offer = await this.getOfferById(offerId);
+    if (!offer || offer.ownedBySalonId !== salonId) {
+      throw new Error('Unauthorized: Offer not owned by this salon');
+    }
+
+    await db.update(platformOffers)
+      .set({ isActive, updatedAt: new Date() })
+      .where(eq(platformOffers.id, offerId));
+  }
+
+  async deleteSalonOffer(offerId: string, salonId: string): Promise<void> {
+    // Verify ownership
+    const offer = await this.getOfferById(offerId);
+    if (!offer || offer.ownedBySalonId !== salonId) {
+      throw new Error('Unauthorized: Offer not owned by this salon');
+    }
+
+    await db.delete(platformOffers).where(eq(platformOffers.id, offerId));
+  }
+
+  // Digital Wallet Management
+  async getUserWallet(userId: string): Promise<any> {
+    const [wallet] = await db.select().from(userWallets).where(eq(userWallets.userId, userId));
+    return wallet || null;
+  }
+
+  async createUserWallet(userId: string): Promise<any> {
+    const [wallet] = await db.insert(userWallets).values({
+      userId,
+      balanceInPaisa: 0,
+      lifetimeEarnedInPaisa: 0,
+      lifetimeSpentInPaisa: 0
+    }).returning();
+    return wallet;
+  }
+
+  async addWalletCredit(userId: string, amountInPaisa: number, reason: string, bookingId?: string, offerId?: string): Promise<void> {
+    let wallet = await this.getUserWallet(userId);
+    if (!wallet) {
+      wallet = await this.createUserWallet(userId);
+    }
+
+    await db.update(userWallets)
+      .set({
+        balanceInPaisa: wallet.balanceInPaisa + amountInPaisa,
+        lifetimeEarnedInPaisa: wallet.lifetimeEarnedInPaisa + amountInPaisa,
+        updatedAt: new Date()
+      })
+      .where(eq(userWallets.id, wallet.id));
+
+    await db.insert(walletTransactions).values({
+      walletId: wallet.id,
+      userId,
+      type: 'credit',
+      amountInPaisa,
+      reason,
+      bookingId: bookingId || null,
+      offerId: offerId || null
+    });
+  }
+
+  async deductWalletBalance(userId: string, amountInPaisa: number, reason: string, bookingId?: string): Promise<void> {
+    const wallet = await this.getUserWallet(userId);
+    if (!wallet || wallet.balanceInPaisa < amountInPaisa) {
+      throw new Error('Insufficient wallet balance');
+    }
+
+    await db.update(userWallets)
+      .set({
+        balanceInPaisa: wallet.balanceInPaisa - amountInPaisa,
+        lifetimeSpentInPaisa: wallet.lifetimeSpentInPaisa + amountInPaisa,
+        updatedAt: new Date()
+      })
+      .where(eq(userWallets.id, wallet.id));
+
+    await db.insert(walletTransactions).values({
+      walletId: wallet.id,
+      userId,
+      type: 'debit',
+      amountInPaisa,
+      reason,
+      bookingId: bookingId || null
+    });
+  }
+
+  async getWalletTransactions(userId: string): Promise<any[]> {
+    const transactions = await db.select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.userId, userId))
+      .orderBy(desc(walletTransactions.createdAt));
+    return transactions;
+  }
+
+  // Launch Offers & Eligibility
+  async getActiveLaunchOffers(): Promise<any[]> {
+    const now = new Date();
+    const offers = await db.select()
+      .from(launchOffers)
+      .where(
+        and(
+          eq(launchOffers.isActive, 1),
+          lte(launchOffers.validFrom, now),
+          gte(launchOffers.validUntil, now)
+        )
+      );
+    return offers;
+  }
+
+  async getUserOfferEligibility(userId: string, offerId: string): Promise<{
+    eligible: boolean;
+    usageCount: number;
+    maxUsage: number;
+    reason?: string;
+  }> {
+    const [offer] = await db.select().from(launchOffers).where(eq(launchOffers.id, offerId));
+    
+    if (!offer) {
+      return { eligible: false, usageCount: 0, maxUsage: 0, reason: 'Offer not found' };
+    }
+
+    if (offer.isActive === 0) {
+      return { eligible: false, usageCount: 0, maxUsage: offer.maxUsagePerUser || 0, reason: 'Offer is inactive' };
+    }
+
+    const now = new Date();
+    if (now < offer.validFrom || now > offer.validUntil) {
+      return { eligible: false, usageCount: 0, maxUsage: offer.maxUsagePerUser || 0, reason: 'Offer expired or not yet valid' };
+    }
+
+    const usageRecords = await db.select()
+      .from(userOfferUsage)
+      .where(and(
+        eq(userOfferUsage.userId, userId),
+        eq(userOfferUsage.offerId, offerId)
+      ));
+
+    const usageCount = usageRecords.length;
+    const maxUsage = offer.maxUsagePerUser || 999;
+
+    if (usageCount >= maxUsage) {
+      return { eligible: false, usageCount, maxUsage, reason: 'Usage limit reached' };
+    }
+
+    return { eligible: true, usageCount, maxUsage };
+  }
+
+  async trackOfferUsage(userId: string, offerId: string, bookingId: string, discountInPaisa: number, usageNumber: number): Promise<void> {
+    await db.insert(userOfferUsage).values({
+      userId,
+      offerId,
+      bookingId,
+      discountAppliedInPaisa: discountInPaisa,
+      usageNumber
+    });
+  }
+
+  async getCustomerOffers(userId: string, salonId?: string): Promise<any[]> {
+    const now = new Date();
+    
+    const conditions = [
+      eq(platformOffers.isActive, 1),
+      eq(platformOffers.approvalStatus, 'approved'),
+      lte(platformOffers.validFrom, now),
+      gte(platformOffers.validUntil, now)
+    ];
+
+    // Include platform-wide offers OR salon-specific offers (if salonId provided)
+    if (salonId) {
+      conditions.push(
+        or(
+          eq(platformOffers.isPlatformWide, 1),
+          eq(platformOffers.salonId, salonId)
+        )!
+      );
+    } else {
+      // If no salonId, only show platform-wide offers
+      conditions.push(eq(platformOffers.isPlatformWide, 1));
+    }
+
+    const results = await db.select({
+      offer: platformOffers,
+      salonName: salons.name
+    })
+    .from(platformOffers)
+    .leftJoin(salons, eq(platformOffers.salonId, salons.id))
+    .where(and(...conditions))
+    .orderBy(desc(platformOffers.createdAt));
+    
+    // Map database columns to calculator expected format (camelCase)
+    return results.map(r => ({
+      id: r.offer.id,
+      title: r.offer.title,
+      description: r.offer.description,
+      discountType: r.offer.discountType,
+      discountValue: r.offer.discountValue,
+      minimumPurchase: r.offer.minimumPurchase,
+      maxDiscount: r.offer.maxDiscount,
+      isPlatformWide: r.offer.isPlatformWide,
+      salonId: r.offer.salonId,
+      ownedBySalonId: r.offer.ownedBySalonId,
+      validFrom: r.offer.validFrom,
+      validUntil: r.offer.validUntil,
+      usageLimit: r.offer.usageLimit,
+      usageCount: r.offer.usageCount,
+      imageUrl: r.offer.imageUrl,
+      isActive: r.offer.isActive,
+      approvalStatus: r.offer.approvalStatus,
+      salonName: r.salonName || undefined
+    }));
+  }
+
+  async getAllOffersWithSalons(): Promise<any[]> {
+    const now = new Date();
+    
+    const conditions = [
+      eq(platformOffers.isActive, 1),
+      eq(platformOffers.approvalStatus, 'approved'),
+      lte(platformOffers.validFrom, now),
+      gte(platformOffers.validUntil, now)
+    ];
+
+    const results = await db.select({
+      offer: platformOffers,
+      salon: salons
+    })
+    .from(platformOffers)
+    .leftJoin(salons, eq(platformOffers.salonId, salons.id))
+    .where(and(...conditions))
+    .orderBy(desc(platformOffers.createdAt));
+    
+    return results.map(r => ({
+      id: r.offer.id,
+      title: r.offer.title,
+      description: r.offer.description,
+      discountType: r.offer.discountType,
+      discountValue: r.offer.discountValue,
+      minimumPurchase: r.offer.minimumPurchase,
+      maxDiscount: r.offer.maxDiscount,
+      isPlatformWide: r.offer.isPlatformWide,
+      salonId: r.offer.salonId,
+      validFrom: r.offer.validFrom,
+      validUntil: r.offer.validUntil,
+      isActive: r.offer.isActive,
+      approvalStatus: r.offer.approvalStatus,
+      salon: r.salon ? {
+        id: r.salon.id,
+        name: r.salon.name,
+        address: r.salon.address,
+        city: r.salon.city,
+        state: r.salon.state,
+        rating: r.salon.rating,
+        reviewCount: r.salon.reviewCount,
+        category: r.salon.category,
+        images: r.salon.images
+      } : null
+    }));
+  }
 }
+
+export const storage = new DatabaseStorage();
+
 
 // Example data initialization
 async function initializeSalonsAndServices() {
   try {
     // Check if salons already exist
     const existingSalons = await db.select().from(salons);
-    const salonsArray = existingSalons || [];
-    if (salonsArray.length === 0) {
-      // Create sample salons for demonstration
-      const mockSalons: InsertSalon[] = [
-        {
-          name: "Artisan Theory Salon",
-          description: "Modern hair salon specializing in cuts, color, and styling",
-          address: "789 Fashion Avenue",
-          city: "Chicago",
-          state: "IL", 
-          zipCode: "60603",
-          phone: "+1-312-555-0123",
-          email: "info@artisantheory.com",
-          category: "Hair Salon",
-          priceRange: "$$",
-          openTime: "9:00 AM",
-          closeTime: "9:00 PM",
-          isActive: 1
-        },
-        {
-          name: "LO Spa & Nails",
-          description: "Luxury nail spa with premium manicure and pedicure services",
-          address: "123 Chicago Loop",
-          city: "Chicago",
-          state: "IL",
-          zipCode: "60601",
-          phone: "+1-312-555-0456",
-          email: "contact@lospa.com",
-          category: "Nails",
-          priceRange: "$$$",
-          openTime: "10:00 AM",
-          closeTime: "8:00 PM",
-          isActive: 1
-        },
-        {
-          name: "Tranquil Spa Retreat",
-          description: "Full-service spa offering massage, facials, and wellness treatments",
-          address: "456 Downtown District",
-          city: "Chicago",
-          state: "IL",
-          zipCode: "60602",
-          phone: "+1-312-555-0789",
-          email: "hello@tranquilspa.com",
-          category: "Massage",
-          priceRange: "$$$$",
-          openTime: "8:00 AM",
-          closeTime: "10:00 PM",
-          isActive: 1
-        }
-      ];
+    
+    if (existingSalons.length === 0) {
+      console.log('🏪 Initializing sample salons and services...');
       
-      const createdSalons = await db.insert(salons).values(mockSalons).returning();
-      console.log('✅ Initialized salons in database');
-      
-      // Create services for each salon
-      const salonServices: InsertService[] = [
-        // Artisan Theory Salon services
-        { salonId: createdSalons[0].id, name: "Haircut & Style", description: "Professional haircut and styling", durationMinutes: 60, priceInPaisa: 6500, category: "Hair", currency: "INR", isActive: 1 },
-        { salonId: createdSalons[0].id, name: "Color Treatment", description: "Full hair coloring service", durationMinutes: 120, priceInPaisa: 15000, category: "Hair", currency: "INR", isActive: 1 },
-        
-        // LO Spa & Nails services
-        { salonId: createdSalons[1].id, name: "Manicure", description: "Complete nail care and polish", durationMinutes: 45, priceInPaisa: 3500, category: "Nails", currency: "INR", isActive: 1 },
-        { salonId: createdSalons[1].id, name: "Pedicure", description: "Relaxing foot care and polish", durationMinutes: 60, priceInPaisa: 4500, category: "Nails", currency: "INR", isActive: 1 },
-        
-        // Tranquil Spa Retreat services
-        { salonId: createdSalons[2].id, name: "Facial Treatment", description: "Deep cleansing facial", durationMinutes: 90, priceInPaisa: 12000, category: "Facial", currency: "INR", isActive: 1 },
-        { salonId: createdSalons[2].id, name: "Swedish Massage", description: "Relaxing full body massage", durationMinutes: 60, priceInPaisa: 8000, category: "Massage", currency: "INR", isActive: 1 }
-      ];
-      
-      await db.insert(services).values(salonServices);
-      console.log('✅ Initialized services in database');
-      
-      // Create sample media assets for each salon
-      const sampleMediaAssets: InsertMediaAsset[] = [
-        // Artisan Theory Salon images
-        { 
-          salonId: createdSalons[0].id, 
-          assetType: 'gallery', 
-          url: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=400&h=300&fit=crop&crop=center', 
-          altText: 'Artisan Theory Salon interior', 
-          isPrimary: 1 
-        },
-        { 
-          salonId: createdSalons[0].id, 
-          assetType: 'gallery', 
-          url: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400&h=300&fit=crop&crop=center', 
-          altText: 'Hair styling station', 
-          isPrimary: 0 
-        },
-        
-        // LO Spa & Nails images
-        { 
-          salonId: createdSalons[1].id, 
-          assetType: 'gallery', 
-          url: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?w=400&h=300&fit=crop&crop=center', 
-          altText: 'LO Spa & Nails interior', 
-          isPrimary: 1 
-        },
-        { 
-          salonId: createdSalons[1].id, 
-          assetType: 'gallery', 
-          url: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?w=400&h=300&fit=crop&crop=center', 
-          altText: 'Nail art station', 
-          isPrimary: 0 
-        },
-        
-        // Tranquil Spa Retreat images
-        { 
-          salonId: createdSalons[2].id, 
-          assetType: 'gallery', 
-          url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=400&h=300&fit=crop&crop=center', 
-          altText: 'Tranquil Spa Retreat interior', 
-          isPrimary: 1 
-        },
-        { 
-          salonId: createdSalons[2].id, 
-          assetType: 'gallery', 
-          url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400&h=300&fit=crop&crop=center', 
-          altText: 'Spa treatment room', 
-          isPrimary: 0 
-        }
-      ];
-      
-      await db.insert(mediaAssets).values(sampleMediaAssets);
-      console.log('✅ Initialized media assets in database');
-      
-      // Create sample time slots for each salon
-      const sampleTimeSlots: InsertTimeSlot[] = [];
-      const today = new Date();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      
-      for (const salon of createdSalons) {
-        const dates = [today, tomorrow];
-        
-        for (const date of dates) {
-          // Create morning slots (9 AM - 12 PM)
-          for (let hour = 9; hour < 12; hour++) {
-            const startTime = new Date(date);
-            startTime.setHours(hour, 0, 0, 0);
-            const endTime = new Date(startTime);
-            endTime.setHours(hour + 1, 0, 0, 0);
-            
-            sampleTimeSlots.push({
-              salonId: salon.id,
-              startDateTime: startTime,
-              endDateTime: endTime,
-              isBooked: 0,
-              isBlocked: 0
-            });
-          }
-          
-          // Create afternoon slots (2 PM - 6 PM)
-          for (let hour = 14; hour < 18; hour++) {
-            const startTime = new Date(date);
-            startTime.setHours(hour, 0, 0, 0);
-            const endTime = new Date(startTime);
-            endTime.setHours(hour + 1, 0, 0, 0);
-            
-            sampleTimeSlots.push({
-              salonId: salon.id,
-              startDateTime: startTime,
-              endDateTime: endTime,
-              isBooked: 0,
-              isBlocked: 0
-            });
-          }
-          
-          // Create evening slots (7 PM - 9 PM)
-          for (let hour = 19; hour < 21; hour++) {
-            const startTime = new Date(date);
-            startTime.setHours(hour, 0, 0, 0);
-            const endTime = new Date(startTime);
-            endTime.setHours(hour + 1, 0, 0, 0);
-            
-            sampleTimeSlots.push({
-              salonId: salon.id,
-              startDateTime: startTime,
-              endDateTime: endTime,
-              isBooked: 0,
-              isBlocked: 0
-            });
-          }
-        }
-      }
-      
-      await db.insert(timeSlots).values(sampleTimeSlots);
-      console.log('✅ Initialized time slots in database');
+      // Create default salons (empty for now - can be populated later)
+      console.log('✅ Database initialized');
     }
   } catch (error) {
     console.error('Error initializing salons and services:', error);
   }
 }
-
-export const storage = new DatabaseStorage();
-
-// Initialize data on startup - using database now
 async function initializeServices() {
   await initializeSalonsAndServices();
 }

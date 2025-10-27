@@ -4,10 +4,12 @@ import SalonMapView from "@/components/SalonMapView";
 import RecentlyViewed from "@/components/RecentlyViewed";
 import Footer from "@/components/Footer";
 import BookingModal from "@/components/BookingModal";
+import { LocationPermissionDialog } from "@/components/LocationPermissionDialog";
 import { useState, useEffect } from "react";
 import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
+import { LocationStorage } from "@/utils/versionManager";
 
 // Define SearchParams interface for communication between SearchBar and SalonGrid
 interface SearchParams {
@@ -68,42 +70,27 @@ export default function Home() {
     }
   }, [isAuthenticated, user, isLoading, setLocation]);
 
-  // Detect user's current location
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const coords = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          };
-          setCurrentLocationCoords(coords);
-          setLocationAccuracy(position.coords.accuracy);
-          console.log('Current location detected:', coords, 'Accuracy:', position.coords.accuracy);
-        },
-        (error) => {
-          console.warn('Geolocation error:', error.message);
-          // Try to get cached location from localStorage
-          const cachedLocation = localStorage.getItem('user_location');
-          if (cachedLocation) {
-            try {
-              const location = JSON.parse(cachedLocation);
-              setCurrentLocationCoords({ lat: location.lat, lng: location.lng });
-              setLocationAccuracy(location.accuracy);
-              console.log('Using cached location:', location);
-            } catch (e) {
-              console.warn('Failed to parse cached location');
-            }
-          }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 300000 // 5 minutes
-        }
-      );
+  // Handle location permission granted
+  const handleLocationGranted = (coords: { lat: number; lng: number }) => {
+    setCurrentLocationCoords(coords);
+    
+    // Save to versioned storage with 24h TTL
+    LocationStorage.save('user', coords, undefined, 24 * 60 * 60 * 1000);
+    console.log('✅ Location permission granted:', coords);
+  };
+
+  // Handle location permission denied
+  const handleLocationDenied = () => {
+    // Try to get cached location from versioned storage
+    const cachedData = LocationStorage.get('user');
+    if (cachedData) {
+      setCurrentLocationCoords(cachedData.coords);
+      setLocationAccuracy(undefined);
+      console.log('Using cached location (permission denied):', cachedData.coords);
+    } else {
+      console.log('❌ Location permission denied, no cached data available');
     }
-  }, []);
+  };
 
   // Fetch salon data on component mount for recently viewed tracking
   useEffect(() => {
@@ -166,8 +153,9 @@ export default function Home() {
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 overflow-visible">
                 <FreshaSearchBar
                   onSearch={(params) => {
-                    console.log('Home: Received search params from FreshaSearchBar:', params);
-                    console.log('Home: Coordinates received:', params.coords);
+                    console.log('🏠 Home: Received search params from FreshaSearchBar:', params);
+                    console.log('🏠 Home: Coordinates received:', params.coords);
+                    console.log('🏠 Home: EXACT Lat:', params.coords?.lat, 'Lng:', params.coords?.lng);
                     const searchParams: SearchParams = {
                       service: params.service,
                       coordinates: params.coords,
@@ -176,7 +164,8 @@ export default function Home() {
                       time: params.time,
                       date: params.date,
                     };
-                    console.log('Home: Setting search params:', searchParams);
+                    console.log('🏠 Home: Setting search params:', searchParams);
+                    console.log('🏠 Home: searchParams.coordinates:', searchParams.coordinates);
                     setSearchParams(searchParams);
                     setSearchLocationName(params.locationName || "Current Location");
                     setIsSearchActive(true);
@@ -248,15 +237,17 @@ export default function Home() {
                 <div className="max-w-5xl mx-auto">
                   <FreshaSearchBar
                     onSearch={(params) => {
-                      console.log('Home: Received search params from FreshaSearchBar:', params);
-                      console.log('Home: Coordinates received:', params.coords);
+                      console.log('🏠 Home: Received search params from FreshaSearchBar:', params);
+                      console.log('🏠 Home: Coordinates received:', params.coords);
+                      console.log('🏠 Home: EXACT Lat:', params.coords?.lat, 'Lng:', params.coords?.lng);
                       const searchParams: SearchParams = {
                         service: params.service,
                         coordinates: params.coords,
                         radius: params.radius,
                         category: params.service,
                       };
-                      console.log('Home: Setting search params:', searchParams);
+                      console.log('🏠 Home: Setting search params:', searchParams);
+                      console.log('🏠 Home: searchParams.coordinates:', searchParams.coordinates);
                       setSearchParams(searchParams);
                       setSearchLocationName(params.locationName || "Current Location");
                       setIsSearchActive(true);
@@ -330,6 +321,11 @@ export default function Home() {
         onClose={() => setIsBookingOpen(false)}
         salonName={selectedSalon}
         salonId={selectedSalonId}
+      />
+
+      <LocationPermissionDialog
+        onPermissionGranted={handleLocationGranted}
+        onPermissionDenied={handleLocationDenied}
       />
     </div>
   );

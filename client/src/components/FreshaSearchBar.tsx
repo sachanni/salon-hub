@@ -518,16 +518,32 @@ export default function FreshaSearchBar({
 
   // Handle location selection
   const handleLocationSelect = (location: any) => {
-    console.log('FreshaSearchBar: Location selected:', location);
+    console.log('🎯 FreshaSearchBar: Location selected:', location);
     const coords = location.coords || { lat: 0, lng: 0 };
-    console.log('FreshaSearchBar: Setting coordinates:', coords);
-    setSelectedLocation({
+    console.log('🎯 FreshaSearchBar: Setting NEW coordinates:', coords);
+    
+    const newLocation = {
       name: location.title || location.address,
       coords: coords
-    });
+    };
+    
+    setSelectedLocation(newLocation);
     setLocationQuery(location.title || location.address);
     setShowLocationDropdown(false);
     setShowSuggestions(false);
+    
+    // Immediately update localStorage with new location to prevent old coordinates from persisting
+    const currentSearch = localStorage.getItem('fresha-last-search');
+    if (currentSearch) {
+      try {
+        const searchData = JSON.parse(currentSearch);
+        searchData.location = newLocation;
+        localStorage.setItem('fresha-last-search', JSON.stringify(searchData));
+        console.log('✅ Updated localStorage with new location:', newLocation);
+      } catch (error) {
+        console.error('Error updating localStorage:', error);
+      }
+    }
   };
 
   // Handle location input focus
@@ -650,8 +666,9 @@ export default function FreshaSearchBar({
       return;
     }
 
-    console.log('FreshaSearchBar: Search triggered with location:', selectedLocation);
-    console.log('FreshaSearchBar: Coordinates being sent:', selectedLocation.coords);
+    console.log('🔍 FreshaSearchBar: Search triggered with location:', selectedLocation);
+    console.log('🔍 FreshaSearchBar: EXACT Coordinates being sent:', selectedLocation.coords);
+    console.log('🔍 FreshaSearchBar: Lat:', selectedLocation.coords.lat, 'Lng:', selectedLocation.coords.lng);
     
     // Format time based on selection
     let formattedTime = '';

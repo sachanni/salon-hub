@@ -1,4 +1,8 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+// CRITICAL: Load .env file and override system environment variables FIRST
+// This must happen before any other imports that use environment variables
+dotenv.config({ override: true });
+
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";

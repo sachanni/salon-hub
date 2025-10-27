@@ -6,6 +6,14 @@ import { Link } from "wouter";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
+interface ServiceDetail {
+  name: string;
+  durationMinutes: number;
+  price: number;
+  currency?: string;
+  imageUrl?: string | null;
+}
+
 interface SalonCardProps {
   id: string;
   name: string;
@@ -17,12 +25,14 @@ interface SalonCardProps {
   imageUrls?: string[]; // Multiple images for gallery
   priceRange: string;
   openTime?: string;
+  closeTime?: string;
   distance?: number; // Distance in kilometers for proximity search results
-  services?: string[]; // Services offered
+  services?: ServiceDetail[]; // Services with details (name, price, duration)
   availableTimeSlots?: Array<{ time: string; staffName?: string; available: boolean }>; // Available time slots
   onBookingClick?: (salonName: string, salonId: string) => void;
   searchQuery?: string; // Search query for highlighting matched services
   timeFilter?: string; // Time filter applied (e.g., "afternoon")
+  showServices?: boolean; // Control whether to display services (only for search results)
 }
 
 export default function SalonCard({
@@ -36,12 +46,14 @@ export default function SalonCard({
   imageUrls = [],
   priceRange,
   openTime,
+  closeTime,
   distance,
   services = [],
   availableTimeSlots = [],
   onBookingClick,
   searchQuery = '',
-  timeFilter = ''
+  timeFilter = '',
+  showServices = false
 }: SalonCardProps) {
   const [imageError, setImageError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,11 +83,6 @@ export default function SalonCard({
   // Display images: use imageUrls if available, otherwise use primary image
   const displayImages = imageUrls.length > 0 ? imageUrls.slice(0, 3) : (showFallback ? [] : [image]);
 
-  // Check if a service matches the search query
-  const isServiceMatched = (service: string) => {
-    if (!searchQuery) return false;
-    return service.toLowerCase().includes(searchQuery.toLowerCase());
-  };
 
   // Get time filter display text - handle both semantic tokens and formatted times
   const getTimeFilterText = () => {
@@ -93,6 +100,29 @@ export default function SalonCard({
     
     return '';
   };
+
+  // Check if salon is currently open
+  const isSalonOpen = () => {
+    if (!openTime || !closeTime) return null; // Unknown status
+    
+    const now = new Date();
+    const currentHours = now.getHours();
+    const currentMinutes = now.getMinutes();
+    const currentTimeInMinutes = currentHours * 60 + currentMinutes;
+    
+    // Parse open time
+    const [openHour, openMin] = openTime.split(':').map(Number);
+    const openTimeInMinutes = openHour * 60 + openMin;
+    
+    // Parse close time
+    const [closeHour, closeMin] = closeTime.split(':').map(Number);
+    const closeTimeInMinutes = closeHour * 60 + closeMin;
+    
+    // Check if current time is between open and close
+    return currentTimeInMinutes >= openTimeInMinutes && currentTimeInMinutes < closeTimeInMinutes;
+  };
+
+  const salonIsOpen = isSalonOpen();
 
   return (
     <Link href={`/salon/${id}`}>
@@ -165,7 +195,7 @@ export default function SalonCard({
             <h3 className="font-bold text-lg leading-tight line-clamp-1" data-testid={`text-salon-name-${id}`}>
               {name}
             </h3>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-1">
                 <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                 <span className="text-sm font-semibold" data-testid={`text-rating-${id}`}>
@@ -174,6 +204,20 @@ export default function SalonCard({
                 <span className="text-sm text-gray-500">({reviewCount})</span>
               </div>
               <Badge variant="outline" className="text-xs">{category}</Badge>
+              {salonIsOpen !== null && (
+                <Badge 
+                  variant="secondary" 
+                  className={cn(
+                    "text-xs font-medium",
+                    salonIsOpen 
+                      ? "bg-green-50 text-green-700 border-green-200" 
+                      : "bg-red-50 text-red-700 border-red-200"
+                  )}
+                  data-testid={`badge-status-${id}`}
+                >
+                  {salonIsOpen ? "Open" : "Closed"}
+                </Badge>
+              )}
             </div>
           </div>
 
@@ -193,37 +237,42 @@ export default function SalonCard({
             )}
           </div>
 
-          {/* Services - Fresha Style with Pills (prioritize matched services) */}
-          {services.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <Sparkles className="h-4 w-4 text-purple-500 flex-shrink-0" />
-              <div className="flex gap-1.5 flex-wrap">
-                {/* Sort services: matched ones first, then others */}
-                {[...services]
-                  .sort((a, b) => {
-                    const aMatched = isServiceMatched(a);
-                    const bMatched = isServiceMatched(b);
-                    if (aMatched && !bMatched) return -1;
-                    if (!aMatched && bMatched) return 1;
-                    return 0;
-                  })
-                  .map((service, index) => {
-                    const matched = isServiceMatched(service);
-                    return (
-                      <span 
-                        key={index}
-                        className={cn(
-                          "px-2 py-0.5 rounded-full text-xs font-medium",
-                          matched 
-                            ? "bg-purple-600 text-white ring-2 ring-purple-300" // Highlighted matched services
-                            : "bg-purple-50 text-purple-700" // Regular services
-                        )}
-                      >
-                        {service}
-                      </span>
-                    );
-                  })}
-              </div>
+          {/* Services - With Pricing Details (Only shown in search results) */}
+          {showServices && services.length > 0 && (
+            <div className="space-y-1.5">
+              {services.map((service, index) => (
+                <div 
+                  key={index}
+                  className="flex items-center gap-2 text-sm"
+                  data-testid={`service-item-${id}-${index}`}
+                >
+                  {service.imageUrl && (
+                    <img
+                      src={service.imageUrl}
+                      alt={service.name}
+                      className="w-12 h-12 rounded-md object-cover flex-shrink-0"
+                      data-testid={`img-service-card-${id}-${index}`}
+                    />
+                  )}
+                  <div className="flex items-baseline gap-2 flex-1 min-w-0">
+                    <span className="font-medium text-gray-900 truncate">
+                      {service.name}
+                    </span>
+                    <span className="text-gray-500 text-xs flex-shrink-0">
+                      {service.durationMinutes} mins
+                    </span>
+                  </div>
+                  <span className="font-semibold text-gray-900 flex-shrink-0 ml-2">
+                    from ₹{service.price.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+              <span 
+                className="inline-block text-sm font-medium text-purple-600 hover:text-purple-700 hover:underline mt-1 cursor-pointer"
+                data-testid={`link-see-more-${id}`}
+              >
+                See more
+              </span>
             </div>
           )}
 

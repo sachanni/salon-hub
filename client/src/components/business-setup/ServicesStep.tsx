@@ -30,6 +30,7 @@ interface Service {
   duration: number;
   price: number;
   category: string;
+  imageUrl?: string;
 }
 
 // Service category definitions
@@ -754,8 +755,8 @@ export default function ServicesStep({
                       <div>
                         <Label className="text-sm">Service Name</Label>
                         <Input
-                          value={editingService.name}
-                          onChange={(e) => setEditingService({ ...editingService, name: e.target.value })}
+                          value={editingService?.name || ''}
+                          onChange={(e) => editingService && setEditingService({ ...editingService, name: e.target.value })}
                           className="mt-1"
                         />
                       </div>
@@ -765,8 +766,8 @@ export default function ServicesStep({
                           <Label className="text-sm">Duration (minutes)</Label>
                           <Input
                             type="number"
-                            value={editingService.duration}
-                            onChange={(e) => setEditingService({ ...editingService, duration: parseInt(e.target.value) || 0 })}
+                            value={editingService?.duration || 0}
+                            onChange={(e) => editingService && setEditingService({ ...editingService, duration: parseInt(e.target.value) || 0 })}
                             className="mt-1"
                           />
                         </div>
@@ -774,8 +775,8 @@ export default function ServicesStep({
                           <Label className="text-sm">Price (₹)</Label>
                           <Input
                             type="number"
-                            value={editingService.price}
-                            onChange={(e) => setEditingService({ ...editingService, price: parseInt(e.target.value) || 0 })}
+                            value={editingService?.price || 0}
+                            onChange={(e) => editingService && setEditingService({ ...editingService, price: parseInt(e.target.value) || 0 })}
                             className="mt-1"
                           />
                         </div>
@@ -784,8 +785,8 @@ export default function ServicesStep({
                       <div>
                         <Label className="text-sm">Description</Label>
                         <Textarea
-                          value={editingService.description}
-                          onChange={(e) => setEditingService({ ...editingService, description: e.target.value })}
+                          value={editingService?.description || ''}
+                          onChange={(e) => editingService && setEditingService({ ...editingService, description: e.target.value })}
                           className="mt-1"
                           rows={3}
                         />
@@ -796,7 +797,7 @@ export default function ServicesStep({
                           Cancel
                         </Button>
                         <Button
-                          onClick={() => updateServiceMutation.mutate(editingService)}
+                          onClick={() => editingService && updateServiceMutation.mutate(editingService)}
                           className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                         >
                           <Check className="h-4 w-4 mr-2" />
@@ -811,17 +812,29 @@ export default function ServicesStep({
                     key={service.id}
                     className="flex items-center justify-between p-3 bg-gradient-to-br from-violet-50/50 to-pink-50/50 rounded-lg border"
                   >
-                    <div className="flex-1">
-                      <h5 className="font-medium text-sm">{service.name}</h5>
-                      <div className="flex items-center gap-4 mt-1">
-                        <span className="text-xs text-gray-600 flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {service.duration} min
-                        </span>
-                        <span className="text-xs font-medium text-purple-600 flex items-center gap-1">
-                          <IndianRupee className="h-3 w-3" />
-                          {service.price}
-                        </span>
+                    <div className="flex items-center gap-3 flex-1">
+                      {/* Service Image */}
+                      {service.imageUrl && (
+                        <img
+                          src={service.imageUrl}
+                          alt={service.name}
+                          className="w-12 h-12 rounded-md object-cover flex-shrink-0"
+                          data-testid={`img-service-setup-${service.id}`}
+                        />
+                      )}
+                      
+                      <div className="flex-1">
+                        <h5 className="font-medium text-sm">{service.name}</h5>
+                        <div className="flex items-center gap-4 mt-1">
+                          <span className="text-xs text-gray-600 flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {service.duration} min
+                          </span>
+                          <span className="text-xs font-medium text-purple-600 flex items-center gap-1">
+                            <IndianRupee className="h-3 w-3" />
+                            {service.price}
+                          </span>
+                        </div>
                       </div>
                     </div>
                     

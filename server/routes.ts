@@ -3,11 +3,12 @@ import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
 import session from "express-session";
 import MemoryStore from "memorystore";
-import { requireSalonAccess, requireStaffAccess, type AuthenticatedRequest } from "./middleware/auth";
+import { requireSalonAccess, requireStaffAccess, requireSuperAdmin, populateUserFromSession, type AuthenticatedRequest } from "./middleware/auth";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import express from "express";
 import { createClient } from 'redis';
+import { OfferCalculator } from "./offerCalculator";
 import { 
   createPaymentOrderSchema, 
   verifyPaymentSchema,
@@ -90,6 +91,11 @@ import {
   // Package/combo validation schemas
   insertServicePackageSchema,
   insertPackageServiceSchema,
+  // Platform offers validation schemas
+  createOfferSchema,
+  updateOfferSchema,
+  approveRejectOfferSchema,
+  toggleOfferStatusSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
 import { communicationService, sendBookingConfirmation, sendBookingReminder } from "./communicationService";
@@ -169,6 +175,194 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(401).json({ message: "Authentication failed" });
     }
   };
+
+  // ============ OFFER VALIDATION & DISCOUNT CALCULATION UTILITIES ============
+  
+  /**
+   * Validates offer eligibility and calculates discount
+   * @returns { isValid: boolean, discount: number, reason?: string, cashbackAmount?: number }
+   */
+  async function validateAndCalculateOffer(
+    offerId: string,
+    userId: string | undefined,
+    serviceAmount: number,
+    salonId: string
+  ): Promise<{
+    isValid: boolean;
+    discountAmount: number;
+    finalAmount: number;
+    cashbackAmount: number;
+    reason?: string;
+    offer?: any;
+  }> {
+    try {
+      // Fetch the offer by ID (not filtered by salon - supports platform-wide offers)
+      const offer = await storage.getOfferById(offerId);
+      
+      if (!offer) {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: 'Offer not found'
+        };
+      }
+      
+      // Validate salon applicability: platform-wide OR salon-specific match
+      if (!offer.isPlatformWide && offer.salonId !== salonId) {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: 'Offer does not apply to this salon'
+        };
+      }
+
+      // Check if offer is active
+      if (!offer.isActive) {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: 'Offer is inactive'
+        };
+      }
+
+      // Check approval status
+      if (offer.approvalStatus !== 'approved') {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: 'Offer is not approved'
+        };
+      }
+
+      // Check validity dates
+      const now = new Date();
+      const validFrom = new Date(offer.validFrom);
+      const validUntil = new Date(offer.validUntil);
+
+      if (now < validFrom) {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: 'Offer not yet valid'
+        };
+      }
+
+      if (now > validUntil) {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: 'Offer has expired'
+        };
+      }
+
+      // Check minimum purchase requirement
+      if (offer.minimumPurchase && serviceAmount < offer.minimumPurchase) {
+        return {
+          isValid: false,
+          discountAmount: 0,
+          finalAmount: serviceAmount,
+          cashbackAmount: 0,
+          reason: `Minimum purchase of ₹${(offer.minimumPurchase / 100).toFixed(2)} required`
+        };
+      }
+
+      // Check user eligibility if authenticated
+      if (userId) {
+        const eligibility = await storage.getUserOfferEligibility(userId, offerId);
+        if (!eligibility.eligible) {
+          return {
+            isValid: false,
+            discountAmount: 0,
+            finalAmount: serviceAmount,
+            cashbackAmount: 0,
+            reason: eligibility.reason || 'User not eligible for this offer'
+          };
+        }
+      }
+
+      // Calculate discount amount
+      let discountAmount = 0;
+      if (offer.discountType === 'percentage') {
+        discountAmount = Math.floor((serviceAmount * offer.discountValue) / 100);
+        
+        // Apply max discount cap if specified
+        if (offer.maxDiscount && discountAmount > offer.maxDiscount) {
+          discountAmount = offer.maxDiscount;
+        }
+      } else if (offer.discountType === 'fixed') {
+        discountAmount = offer.discountValue;
+      }
+
+      // Ensure discount doesn't exceed service amount
+      if (discountAmount > serviceAmount) {
+        discountAmount = serviceAmount;
+      }
+
+      const finalAmount = serviceAmount - discountAmount;
+
+      return {
+        isValid: true,
+        discountAmount,
+        finalAmount,
+        cashbackAmount: 0, // Will be calculated separately for launch offers
+        offer
+      };
+
+    } catch (error) {
+      console.error('Error validating offer:', error);
+      return {
+        isValid: false,
+        discountAmount: 0,
+        finalAmount: serviceAmount,
+        cashbackAmount: 0,
+        reason: 'Error validating offer'
+      };
+    }
+  }
+
+  /**
+   * Calculate cashback for launch offers
+   */
+  async function calculateLaunchOfferCashback(
+    userId: string,
+    offerId: string,
+    serviceAmount: number
+  ): Promise<number> {
+    try {
+      const launchOffers = await storage.getActiveLaunchOffers();
+      const launchOffer = launchOffers.find(o => o.id === offerId);
+      
+      if (!launchOffer) {
+        return 0;
+      }
+
+      let cashbackAmount = 0;
+
+      // Calculate cashback based on offer type
+      if (launchOffer.walletCashbackPercent) {
+        cashbackAmount = Math.floor((serviceAmount * launchOffer.walletCashbackPercent) / 100);
+      } else if (launchOffer.walletBonusInPaisa) {
+        cashbackAmount = launchOffer.walletBonusInPaisa;
+      }
+
+      return cashbackAmount;
+    } catch (error) {
+      console.error('Error calculating launch offer cashback:', error);
+      return 0;
+    }
+  }
 
   // Auth routes - using session-based auth
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -343,6 +537,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // OTP Verification Routes
+  // Send OTP to phone number
+  app.post('/api/otp/send', async (req, res) => {
+    try {
+      const { phoneNumber } = req.body;
+
+      if (!phoneNumber || phoneNumber.length < 10) {
+        return res.status(400).json({ error: "Valid phone number is required" });
+      }
+
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Set OTP expiry (5 minutes from now)
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      // Store OTP in database
+      await storage.createOtpVerification({
+        phoneNumber,
+        otp,
+        expiresAt,
+        verified: 0,
+        attempts: 0
+      });
+
+      // TODO: Integrate with SMS provider (Twilio, AWS SNS, etc.)
+      // For now, log OTP to console for development
+      console.log(`[OTP SENT] Phone: ${phoneNumber}, OTP: ${otp}`);
+      console.log(`NOTE: Integrate with SMS provider to send OTP via SMS`);
+
+      res.json({ 
+        success: true, 
+        message: "OTP sent successfully",
+        // Remove this in production - OTP should only be sent via SMS
+        devOtp: process.env.NODE_ENV === 'development' ? otp : undefined
+      });
+
+    } catch (error) {
+      console.error("Error sending OTP:", error);
+      res.status(500).json({ error: "Failed to send OTP. Please try again." });
+    }
+  });
+
+  // Verify OTP
+  app.post('/api/otp/verify', async (req, res) => {
+    try {
+      const { phoneNumber, otp } = req.body;
+
+      if (!phoneNumber || !otp) {
+        return res.status(400).json({ error: "Phone number and OTP are required" });
+      }
+
+      // Get the latest OTP for this phone number
+      const otpRecord = await storage.getLatestOtpVerification(phoneNumber);
+
+      if (!otpRecord) {
+        return res.status(400).json({ error: "No OTP found for this phone number" });
+      }
+
+      // Check if already verified
+      if (otpRecord.verified === 1) {
+        return res.json({ success: true, message: "Phone number already verified" });
+      }
+
+      // Check if expired
+      if (new Date() > new Date(otpRecord.expiresAt)) {
+        return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+      }
+
+      // Check if too many attempts (max 5)
+      if (otpRecord.attempts >= 5) {
+        return res.status(400).json({ error: "Too many attempts. Please request a new OTP." });
+      }
+
+      // Verify OTP
+      if (otpRecord.otp !== otp) {
+        // Increment attempt count
+        await storage.incrementOtpAttempts(otpRecord.id);
+        return res.status(400).json({ error: "Invalid OTP. Please try again." });
+      }
+
+      // Mark OTP as verified
+      await storage.markOtpAsVerified(otpRecord.id);
+
+      res.json({ success: true, message: "Phone number verified successfully" });
+
+    } catch (error) {
+      console.error("Error verifying OTP:", error);
+      res.status(500).json({ error: "Failed to verify OTP. Please try again." });
+    }
+  });
+
   // Organization endpoints
   app.post('/api/organizations', isAuthenticated, async (req: any, res) => {
     try {
@@ -502,11 +788,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Check user role for redirect
       const roles = await storage.getUserRoles(user.id);
+      const isSuperAdmin = roles.some(role => role.name === 'super_admin');
       const isOwner = roles.some(role => role.name === 'owner');
       const isCustomer = roles.some(role => role.name === 'customer');
       
       let redirectUrl = '/';
-      if (isOwner) {
+      if (isSuperAdmin) {
+        // Redirect super admins to admin dashboard
+        redirectUrl = '/admin/dashboard';
+      } else if (isOwner) {
         // Always redirect business owners to dashboard - dashboard handles setup within tabs
         redirectUrl = '/business/dashboard';
       } else if (isCustomer) {
@@ -2122,7 +2412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { name: 'Ghaziabad', area: 'Ghaziabad', coords: { lat: 28.6692, lng: 77.4538 }, state: 'Uttar Pradesh' },
         { name: 'Faridabad', area: 'Faridabad', coords: { lat: 28.4089, lng: 77.3178 }, state: 'Haryana' },
         { name: 'Gurugram', area: 'Gurugram', coords: { lat: 28.4595, lng: 77.0266 }, state: 'Haryana' },
-        { name: 'Noida', area: 'Noida', coords: { lat: 28.5355, lng: 77.3910 }, state: 'Uttar Pradesh' },
+        { name: 'Noida', area: 'Noida', coords: { lat: 28.5700, lng: 77.3200 }, state: 'Uttar Pradesh' },
         { name: 'Delhi', area: 'New Delhi', coords: { lat: 28.7041, lng: 77.1025 }, state: 'Delhi' }
       ];
 
@@ -3065,14 +3355,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Mark payment as completed
       await storage.updatePaymentStatus(paymentRecord.id, 'completed', new Date());
 
-      // Update booking status to confirmed
-      await storage.updateBookingStatus(paymentRecord.bookingId, 'confirmed');
+      // ============ OFFER VALIDATION & BOOKING CONFIRMATION ============
+      // CRITICAL: Validate offers BEFORE confirming booking to prevent usage limit bypass
+      const booking = await storage.getBooking(paymentRecord.bookingId);
+      let bookingStatus = 'confirmed'; // Default status if no offer or offer valid
+      
+      if (booking && booking.offerId) {
+        console.log(`Validating offer ${booking.offerId} for booking ${booking.id} before confirmation`);
+        
+        try {
+          // Get user by email (check for authenticated user)
+          const user = booking.guestSessionId ? null : await storage.getUserByEmail(booking.customerEmail);
+          
+          if (user) {
+            // CRITICAL: Re-validate offer eligibility at payment time
+            // This prevents users from bypassing usage limits by creating multiple bookings before paying
+            const eligibility = await storage.getUserOfferEligibility(user.id, booking.offerId);
+            
+            // Check if user is still eligible (usage limit not exceeded)
+            if (!eligibility.eligible) {
+              console.error(`🚨 CRITICAL: Offer ${booking.offerId} usage limit exceeded for user ${user.id}. Reason: ${eligibility.reason}`);
+              console.error(`   Booking ${booking.id} was created when user was eligible, but limit reached before payment.`);
+              console.error(`   This indicates potential usage limit bypass attempt.`);
+              
+              // SECURITY: Mark booking as requiring manual review - do NOT auto-confirm
+              bookingStatus = 'pending_review';
+              
+              // Add note to booking explaining the issue
+              const currentNotes = booking.notes || '';
+              const securityNote = `\n\n[SECURITY ALERT] Offer usage limit exceeded at payment time. Requires manual admin review before confirmation. User: ${user.id}, Offer: ${booking.offerId}, Reason: ${eligibility.reason}`;
+              await storage.updateBooking(booking.id, { 
+                notes: currentNotes + securityNote
+              });
+              
+              // TODO: Consider implementing automatic refund via Razorpay API
+              // For now, flag for manual admin intervention
+              console.error(`   ACTION REQUIRED: Admin must review booking ${booking.id} and either confirm at full price or initiate refund.`);
+              
+            } else {
+              // User is still eligible - track usage normally
+              const usageNumber = eligibility.usageCount + 1;
+              
+              await storage.trackOfferUsage(
+                user.id,
+                booking.offerId,
+                booking.id,
+                booking.discountAmountPaisa || 0,
+                usageNumber
+              );
+              console.log(`✅ Offer usage tracked for user ${user.id} (usage #${usageNumber})`);
 
-      // Schedule booking reminders when payment is confirmed via webhook
-      try {
-        await schedulingService.scheduleBookingReminders(paymentRecord.bookingId);
-      } catch (scheduleError) {
-        console.error('Error scheduling booking reminders via webhook:', scheduleError);
+              // Calculate and add cashback for launch offers
+              const cashbackAmount = await calculateLaunchOfferCashback(
+                user.id,
+                booking.offerId,
+                booking.originalAmountPaisa || booking.totalAmountPaisa
+              );
+
+              if (cashbackAmount > 0) {
+                // Add cashback to user's wallet (this also creates the transaction record)
+                await storage.addWalletCredit(
+                  user.id, 
+                  cashbackAmount, 
+                  `Cashback from offer on booking ${booking.id}`,
+                  booking.id,
+                  booking.offerId
+                );
+                
+                console.log(`✅ Cashback of ${cashbackAmount} paisa added to user ${user.id} wallet`);
+              }
+            }
+          } else {
+            console.log('Guest booking - offer usage not tracked for non-authenticated users');
+          }
+        } catch (offerError) {
+          console.error('Error processing offer tracking/cashback:', offerError);
+          // Don't fail the payment if offer tracking fails - but still flag for review if it's a security issue
+          bookingStatus = 'pending_review';
+        }
+      }
+
+      // Update booking status based on offer validation result
+      await storage.updateBookingStatus(paymentRecord.bookingId, bookingStatus);
+      console.log(`Booking ${paymentRecord.bookingId} status updated to: ${bookingStatus}`);
+
+      // Schedule booking reminders only for confirmed bookings (not pending_review)
+      if (bookingStatus === 'confirmed') {
+        try {
+          await schedulingService.scheduleBookingReminders(paymentRecord.bookingId);
+        } catch (scheduleError) {
+          console.error('Error scheduling booking reminders via webhook:', scheduleError);
+        }
+      } else {
+        console.log(`Skipping reminder scheduling for booking ${paymentRecord.bookingId} with status: ${bookingStatus}`);
       }
 
       console.log('Payment successfully processed via webhook:', payment.id);
@@ -3463,9 +3838,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const endIndex = startIndex + params.pageSize;
       const paginatedResults = filteredResults.slice(startIndex, endIndex);
 
+      // Calculate actual driving distances using Mapbox Directions API (industry standard)
+      // This replaces straight-line "as the crow flies" distance with real driving distance via roads
+      // Similar to Google Maps, Uber, Fresha - only shows distances people can actually travel
+      const mapboxToken = process.env.VITE_MAPBOX_TOKEN;
+      const salonsWithDrivingDistance = await Promise.all(paginatedResults.map(async salon => {
+        let drivingDistanceKm = salon.distance; // Fallback to straight-line distance
+        
+        if (mapboxToken) {
+          try {
+            // Call Mapbox Directions API to get actual driving distance
+            const directionsUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${params.lng},${params.lat};${salon.longitude},${salon.latitude}?access_token=${mapboxToken}&geometries=geojson`;
+            
+            const response = await fetch(directionsUrl, {
+              method: 'GET',
+              headers: { 'Accept': 'application/json' }
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data.routes && data.routes.length > 0) {
+                // Convert meters to kilometers - this is the ACTUAL driving distance
+                drivingDistanceKm = data.routes[0].distance / 1000;
+                console.log(`🚗 ${salon.name}: Straight-line ${salon.distance.toFixed(1)}km → Driving ${drivingDistanceKm.toFixed(1)}km`);
+              }
+            }
+          } catch (error) {
+            console.warn(`Failed to fetch driving distance for salon ${salon.id}, using straight-line distance`);
+          }
+        }
+        
+        return {
+          ...salon,
+          drivingDistance: drivingDistanceKm
+        };
+      }));
+
       // Format response with images, services, and time slots
       const response: SalonSearchResult = {
-        salons: await Promise.all(paginatedResults.map(async salon => {
+        salons: await Promise.all(salonsWithDrivingDistance.map(async salon => {
           // Fetch media assets for each salon
           const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
           const primaryImage = mediaAssets?.find((asset: any) => asset.isPrimary)?.url || 
@@ -3484,7 +3895,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Fetch services offered by this salon
           const services = await storage.getServicesBySalonId(salon.id);
-          const serviceNames = services.map((service: any) => service.name).slice(0, 3); // Top 3 services
+          const serviceDetails = services.slice(0, 3).map((service: any) => ({
+            name: service.name,
+            durationMinutes: service.durationMinutes,
+            price: service.priceInPaisa / 100, // Convert paisa to rupees
+            currency: service.currency || 'INR',
+            imageUrl: service.imageUrl || null
+          })); // Top 3 services with details
           
           // Generate time slots for the requested date with real-time availability
           let availableTimeSlots: any[] = [];
@@ -3676,11 +4093,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             reviewCount: salon.reviewCount,
             imageUrl: primaryImage,
             imageUrls: imageUrls, // Multiple images for gallery
-            services: serviceNames, // Top services offered
+            services: serviceDetails, // Top 3 services with details (name, price, duration)
             availableTimeSlots: availableTimeSlots, // Available time slots for filtered time
             openTime: salon.openTime,
             closeTime: salon.closeTime,
-            distance_km: Math.max(0.01, Number(salon.distance.toFixed(2))),
+            distance_km: Math.max(0.01, Number(salon.drivingDistance.toFixed(2))), // ACTUAL driving distance via roads (industry standard)
             createdAt: salon.createdAt,
           };
         })),
@@ -3726,20 +4143,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
         categories, 
         minPrice, 
         maxPrice, 
-        minRating 
+        minRating,
+        lat,
+        lng,
+        radiusKm
       } = req.query;
 
       const salons = await storage.getAllSalons();
       
+      // Calculate distances if coordinates are provided
+      let salonsWithDistance = salons;
+      if (lat && lng) {
+        const userLat = parseFloat(lat as string);
+        const userLng = parseFloat(lng as string);
+        const radius = radiusKm ? parseFloat(radiusKm as string) : 50; // Default 50km
+        
+        // Calculate straight-line distance for each salon
+        salonsWithDistance = salons.map(salon => ({
+          ...salon,
+          distance: calculateDistance(userLat, userLng, salon.latitude, salon.longitude)
+        })).filter(salon => salon.distance <= radius)
+          .sort((a, b) => a.distance - b.distance); // Sort by distance
+        
+        // Calculate actual driving distances using Mapbox Directions API (industry standard)
+        const mapboxToken = process.env.VITE_MAPBOX_TOKEN;
+        if (mapboxToken) {
+          salonsWithDistance = await Promise.all(salonsWithDistance.map(async salon => {
+            let drivingDistanceKm = salon.distance; // Fallback to straight-line
+            
+            try {
+              const directionsUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${userLng},${userLat};${salon.longitude},${salon.latitude}?access_token=${mapboxToken}&geometries=geojson`;
+              const response = await fetch(directionsUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+              });
+              
+              if (response.ok) {
+                const data = await response.json();
+                if (data.routes && data.routes.length > 0) {
+                  drivingDistanceKm = data.routes[0].distance / 1000;
+                  console.log(`🚗 ${salon.name}: Straight-line ${salon.distance.toFixed(1)}km → Driving ${drivingDistanceKm.toFixed(1)}km`);
+                }
+              }
+            } catch (error) {
+              console.warn(`Failed to fetch driving distance for salon ${salon.id}`);
+            }
+            
+            return {
+              ...salon,
+              distance: drivingDistanceKm, // Replace with actual driving distance
+              drivingDistance: drivingDistanceKm
+            };
+          }));
+        }
+      }
+      
       // Format salons for frontend with proper structure including images
-      let formattedSalons = await Promise.all(salons.map(async salon => {
+      let formattedSalons = await Promise.all(salonsWithDistance.map(async salon => {
         try {
           // Get the first media asset as the primary image
           const mediaAssets = await storage.getMediaAssetsBySalonId(salon.id);
           const primaryImage = mediaAssets.find(asset => asset.isPrimary) || mediaAssets[0];
           
-          console.log(`Salon ${salon.name}: Found ${mediaAssets.length} media assets, primary: ${primaryImage?.url || 'none'}`);
+          // Fetch services offered by this salon (top 3 for card display)
+          const services = await storage.getServicesBySalonId(salon.id);
+          const serviceDetails = services.slice(0, 3).map((service: any) => ({
+            name: service.name,
+            durationMinutes: service.durationMinutes,
+            price: service.priceInPaisa / 100, // Convert paisa to rupees
+            currency: service.currency || 'INR',
+            imageUrl: service.imageUrl || null
+          }));
           
+          console.log(`Salon ${salon.name}: Found ${mediaAssets.length} media assets, ${services.length} services, primary: ${primaryImage?.url || 'none'}`);
+          
+          // Parse category if it's a JSON string
+          let categoryDisplay = salon.category;
+          try {
+            if (typeof salon.category === 'string' && salon.category.startsWith('[')) {
+              const categories = JSON.parse(salon.category);
+              categoryDisplay = Array.isArray(categories) ? categories[0] || 'Beauty Services' : salon.category;
+            }
+          } catch (e) {
+            categoryDisplay = salon.category;
+          }
+
           return {
             id: salon.id,
             name: salon.name,
@@ -3747,15 +4235,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
             reviewCount: salon.reviewCount,
             location: `${salon.address}, ${salon.city}`,
             address: salon.address,
-            category: salon.category,
+            category: categoryDisplay,
             priceRange: salon.priceRange,
             openTime: salon.closeTime, // Show when it closes
             image: primaryImage?.url || '', // Include primary image URL
             latitude: salon.latitude,
-            longitude: salon.longitude
+            longitude: salon.longitude,
+            services: serviceDetails, // Add services array
+            distance_km: salon.distance ? Math.max(0.01, Number(salon.distance.toFixed(2))) : undefined // ACTUAL driving distance
           };
         } catch (error) {
           console.error(`Error fetching media for salon ${salon.id}:`, error);
+          
+          // Parse category if it's a JSON string (error fallback)
+          let categoryDisplay = salon.category;
+          try {
+            if (typeof salon.category === 'string' && salon.category.startsWith('[')) {
+              const categories = JSON.parse(salon.category);
+              categoryDisplay = Array.isArray(categories) ? categories[0] || 'Beauty Services' : salon.category;
+            }
+          } catch (e) {
+            categoryDisplay = salon.category;
+          }
+
           return {
             id: salon.id,
             name: salon.name,
@@ -3763,12 +4265,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             reviewCount: salon.reviewCount,
             location: `${salon.address}, ${salon.city}`,
             address: salon.address,
-            category: salon.category,
+            category: categoryDisplay,
             priceRange: salon.priceRange,
             openTime: salon.closeTime,
             image: '', // Fallback to empty string
             latitude: salon.latitude,
-            longitude: salon.longitude
+            longitude: salon.longitude,
+            services: [], // Empty services on error
+            distance_km: salon.distance ? Math.max(0.01, Number(salon.distance.toFixed(2))) : undefined // ACTUAL driving distance
           };
         }
       }));
@@ -4658,7 +5162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create booking endpoint - Supports multiple services with SERVER-SIDE PRICE VALIDATION
+  // Create booking endpoint - Supports multiple services with SERVER-SIDE PRICE VALIDATION and offers
   app.post('/api/bookings', async (req, res) => {
     try {
       const {
@@ -4673,7 +5177,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paymentMethod,
         isGuest,
         totalPrice,
-        totalDuration
+        totalDuration,
+        offerId
       } = req.body;
 
       // Validate required fields
@@ -4687,6 +5192,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!customerEmail) {
         return res.status(400).json({ error: 'Customer email is required' });
+      }
+
+      // Validate phone number is provided and verified via OTP
+      if (!customerPhone) {
+        return res.status(400).json({ error: 'Phone number is required' });
+      }
+
+      // Verify that the phone number was verified via OTP
+      const otpRecord = await storage.getLatestOtpVerification(customerPhone);
+      if (!otpRecord || otpRecord.verified !== 1) {
+        return res.status(400).json({ 
+          error: 'Phone number not verified',
+          details: 'Please verify your phone number with OTP before booking'
+        });
+      }
+
+      // Check if OTP verification is still valid (within 1 hour)
+      const verificationAge = Date.now() - new Date(otpRecord.createdAt).getTime();
+      if (verificationAge > 60 * 60 * 1000) { // 1 hour
+        return res.status(400).json({ 
+          error: 'Phone verification expired',
+          details: 'Please verify your phone number again'
+        });
       }
 
       // Fetch all services from database for SERVER-SIDE PRICE VALIDATION
@@ -4737,6 +5265,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Validate and apply offer if provided
+      let discountInPaisa = 0;
+      let finalAmountInPaisa = serverTotalPrice;
+      let offerSnapshot = null;
+      let userId = (req as any).user?.id || 'guest';
+
+      if (offerId) {
+        // Get offer details
+        const offer = await storage.getOfferById(offerId);
+        if (!offer) {
+          return res.status(404).json({ error: 'Offer not found' });
+        }
+
+        // Validate offer is active and approved
+        if (!offer.isActive || offer.approvalStatus !== 'approved') {
+          return res.status(400).json({ error: 'Offer is not available' });
+        }
+
+        // Validate offer applies to this salon
+        // Platform-wide offers (isPlatformWide === true) apply to all salons
+        // Salon-specific offers must match the salonId
+        if (!offer.isPlatformWide && offer.salonId !== salonId) {
+          return res.status(400).json({ error: 'Offer does not apply to this salon' });
+        }
+
+        // Check offer validity dates
+        const now = new Date();
+        if (offer.validFrom && new Date(offer.validFrom) > now) {
+          return res.status(400).json({ error: 'Offer not yet valid' });
+        }
+        if (offer.validUntil && new Date(offer.validUntil) < now) {
+          return res.status(400).json({ error: 'Offer has expired' });
+        }
+
+        // Check user eligibility (for authenticated users)
+        if (userId !== 'guest') {
+          const eligibility = await storage.getUserOfferEligibility(userId, offerId);
+          if (!eligibility.eligible) {
+            return res.status(400).json({ 
+              error: 'Not eligible for this offer',
+              reason: eligibility.reason
+            });
+          }
+        }
+
+        // Check minimum purchase requirement
+        if (offer.minimumPurchase && serverTotalPrice < offer.minimumPurchase) {
+          return res.status(400).json({ 
+            error: `Minimum purchase of ₹${(offer.minimumPurchase / 100).toFixed(0)} required for this offer`
+          });
+        }
+
+        // Calculate discount (server-side) based on discountType and discountValue
+        if (offer.discountType === 'percentage') {
+          discountInPaisa = Math.floor((serverTotalPrice * offer.discountValue) / 100);
+        } else if (offer.discountType === 'fixed') {
+          discountInPaisa = offer.discountValue;
+        }
+
+        // Apply max discount cap
+        if (offer.maxDiscount && discountInPaisa > offer.maxDiscount) {
+          discountInPaisa = offer.maxDiscount;
+        }
+
+        // Ensure discount never exceeds total price (prevent negative final amount)
+        if (discountInPaisa > serverTotalPrice) {
+          discountInPaisa = serverTotalPrice;
+        }
+
+        finalAmountInPaisa = serverTotalPrice - discountInPaisa;
+
+        // Create offer snapshot for booking record
+        offerSnapshot = {
+          offerId: offer.id,
+          offerTitle: offer.title,
+          discountType: offer.discountType,
+          discountValue: offer.discountValue,
+          discountApplied: discountInPaisa
+        };
+
+        console.log(`✅ Offer applied: ${offer.title}, discount: ₹${(discountInPaisa / 100).toFixed(0)}`);
+      }
+
       // Create booking record
       // Note: Currently storing primary service only. Multiple services stored in notes.
       // TODO: Create booking_services join table for proper multi-service support
@@ -4753,19 +5364,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bookingTime: time,
         status: 'pending',
         totalAmountPaisa: serverTotalPrice,
+        discountInPaisa: discountInPaisa,
+        finalAmountPaisa: finalAmountInPaisa,
+        offerId: offerId || null,
+        offerSnapshot: offerSnapshot ? JSON.stringify(offerSnapshot) : null,
         paymentStatus: paymentMethod === 'pay_at_salon' ? 'pending' : 'pending',
         paymentMethod: paymentMethod || 'pay_at_salon',
         notes: serviceIds.length > 1 ? `Multiple services: ${services.map(s => s!.name).join(', ')}` : null,
         guestSessionId: isGuest ? bookingId : null
       });
 
-      console.log(`✅ Booking created: ${booking.id} with ${serviceIds.length} services`);
+      // Track offer usage if offer was applied
+      if (offerId && userId !== 'guest' && discountInPaisa > 0) {
+        // Get current usage count to determine usage number
+        const eligibility = await storage.getUserOfferEligibility(userId, offerId);
+        const usageNumber = (eligibility.usageCount || 0) + 1;
+        
+        await storage.trackOfferUsage(userId, offerId, booking.id, discountInPaisa, usageNumber);
+        console.log(`✅ Offer usage tracked: user ${userId}, offer ${offerId}, usage #${usageNumber}`);
+      }
+
+      console.log(`✅ Booking created: ${booking.id} with ${serviceIds.length} services${offerId ? ' and offer applied' : ''}`);
 
       res.json({
         success: true,
         bookingId: booking.id,
         totalPrice: serverTotalPrice,
+        discountApplied: discountInPaisa,
+        finalPrice: finalAmountInPaisa,
         totalDuration: serverTotalDuration,
+        offerApplied: offerSnapshot,
         message: 'Booking created successfully'
       });
 
@@ -4861,6 +5489,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: 'Failed to validate booking time slot' });
       }
 
+      // OFFER VALIDATION AND DISCOUNT CALCULATION
+      let offerValidation = {
+        isValid: false,
+        discountAmount: 0,
+        finalAmount: service.priceInPaisa,
+        cashbackAmount: 0,
+        offer: null as any
+      };
+
+      const userId = (req as any).session?.userId;
+      
+      if (input.booking.offerId) {
+        console.log(`Validating offer ${input.booking.offerId} for booking`);
+        offerValidation = await validateAndCalculateOffer(
+          input.booking.offerId,
+          userId,
+          service.priceInPaisa,
+          input.salonId
+        );
+
+        if (!offerValidation.isValid) {
+          console.log(`Offer validation failed: ${offerValidation.reason}`);
+          return res.status(400).json({ 
+            error: 'Offer validation failed',
+            details: offerValidation.reason || 'Invalid offer'
+          });
+        }
+
+        console.log(`✅ Offer validated: ${offerValidation.discountAmount} paisa discount applied`);
+      }
+
       // Create booking record BEFORE payment - ensures we have a record
       const tCreateBooking0 = Date.now();
       const booking = await storage.createBooking({
@@ -4872,11 +5531,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bookingDate: input.booking.date,
         bookingTime: input.booking.time,
         status: input.booking.paymentMethod === 'pay_at_salon' ? 'confirmed' : 'pending',
-        totalAmountPaisa: service.priceInPaisa, // SERVER-CONTROLLED AMOUNT
+        totalAmountPaisa: offerValidation.finalAmount, // Use discounted amount
         currency: service.currency,
         paymentMethod: input.booking.paymentMethod || 'pay_now', // Include payment method
         notes: input.booking.notes,
-        guestSessionId: input.booking.guestSessionId // Store guest session ID if provided
+        guestSessionId: input.booking.guestSessionId, // Store guest session ID if provided
+        // Offer-related fields
+        offerId: input.booking.offerId || null,
+        originalAmountPaisa: input.booking.offerId ? service.priceInPaisa : null,
+        discountAmountPaisa: input.booking.offerId ? offerValidation.discountAmount : null,
+        finalAmountPaisa: input.booking.offerId ? offerValidation.finalAmount : null,
       });
       const tCreateBooking1 = Date.now();
       console.log(`[perf] createBooking took ${tCreateBooking1 - tCreateBooking0}ms (bookingId=${booking.id})`);
@@ -4913,7 +5577,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({
           booking_id: booking.id,
           payment_method: 'pay_at_salon',
-          amount: service.priceInPaisa,
+          amount: offerValidation.finalAmount,
+          original_amount: input.booking.offerId ? service.priceInPaisa : undefined,
+          discount: input.booking.offerId ? offerValidation.discountAmount : undefined,
           currency: service.currency,
           status: 'confirmed'
         });
@@ -4923,7 +5589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const tCreatePayment0 = Date.now();
         const payment = await storage.createPayment({
           bookingId: booking.id,
-          amountPaisa: service.priceInPaisa, // SERVER-CONTROLLED AMOUNT
+          amountPaisa: offerValidation.finalAmount, // Use discounted amount
           currency: service.currency,
           status: 'pending',
           razorpayOrderId: null,
@@ -4935,14 +5601,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Create Razorpay order
         const razorpayOrderOptions = {
-          amount: service.priceInPaisa, // Amount in paisa - SERVER CONTROLLED
+          amount: offerValidation.finalAmount, // Use discounted amount - SERVER CONTROLLED
           currency: service.currency,
           receipt: `bk_${Date.now()}`, // Use timestamp to fit 40 char limit
           notes: {
             booking_id: booking.id,
             payment_id: payment.id,
             service_name: service.name,
-            customer_email: input.booking.customer.email
+            customer_email: input.booking.customer.email,
+            offer_id: input.booking.offerId || '',
+            discount: offerValidation.discountAmount || 0
           }
         };
 
@@ -9438,6 +10106,699 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: error.message,
         details: 'Check server logs for more information'
       });
+    }
+  });
+
+  // ==================== SUPER ADMIN ROUTES ====================
+  
+  // Platform analytics dashboard
+  app.get('/api/admin/platform-stats', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { period } = req.query;
+      const stats = await storage.getPlatformStats(period as string);
+      res.json(stats);
+    } catch (error: any) {
+      console.error('Error fetching platform stats:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Business management - get all salons with filters
+  app.get('/api/admin/salons', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { status, approvalStatus, city, search } = req.query;
+      const salons = await storage.getAllSalonsForAdmin({
+        status: status as string,
+        approvalStatus: approvalStatus as string,
+        city: city as string,
+        search: search as string
+      });
+      res.json(salons);
+    } catch (error: any) {
+      console.error('Error fetching salons for admin:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Approve salon
+  app.post('/api/admin/salons/:salonId/approve', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      await storage.approveSalon(salonId, req.user!.id);
+      res.json({ success: true, message: 'Salon approved successfully' });
+    } catch (error: any) {
+      console.error('Error approving salon:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Reject salon
+  app.post('/api/admin/salons/:salonId/reject', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const { reason } = req.body;
+      await storage.rejectSalon(salonId, reason, req.user!.id);
+      res.json({ success: true, message: 'Salon rejected successfully' });
+    } catch (error: any) {
+      console.error('Error rejecting salon:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // User management - get all users with filters
+  app.get('/api/admin/users', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { role, isActive, search } = req.query;
+      const users = await storage.getAllUsersForAdmin({
+        role: role as string,
+        isActive: isActive ? parseInt(isActive as string) : undefined,
+        search: search as string
+      });
+      res.json(users);
+    } catch (error: any) {
+      console.error('Error fetching users for admin:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Toggle user active status
+  app.patch('/api/admin/users/:userId/toggle-active', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { userId } = req.params;
+      const { isActive } = req.body;
+      await storage.toggleUserActive(userId, isActive);
+      res.json({ success: true, message: 'User status updated successfully' });
+    } catch (error: any) {
+      console.error('Error toggling user status:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Booking analytics - get all bookings with filters
+  app.get('/api/admin/bookings', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { status, salonId, startDate, endDate } = req.query;
+      const bookings = await storage.getAllBookingsForAdmin({
+        status: status as string,
+        salonId: salonId as string,
+        startDate: startDate as string,
+        endDate: endDate as string
+      });
+      res.json(bookings);
+    } catch (error: any) {
+      console.error('Error fetching bookings for admin:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get salon booking stats
+  app.get('/api/admin/salons/:salonId/stats', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const stats = await storage.getSalonBookingStats(salonId);
+      res.json(stats);
+    } catch (error: any) {
+      console.error('Error fetching salon stats:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Platform configuration
+  app.get('/api/admin/config/:key', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { key } = req.params;
+      const value = await storage.getPlatformConfig(key);
+      res.json({ key, value });
+    } catch (error: any) {
+      console.error('Error fetching platform config:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/admin/config', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { key, value } = req.body;
+      await storage.setPlatformConfig(key, value, req.user!.id);
+      res.json({ success: true, message: 'Platform config updated successfully' });
+    } catch (error: any) {
+      console.error('Error updating platform config:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Platform settings (consolidated endpoint for settings UI)
+  app.get('/api/admin/settings', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const offerApprovalSettings = await storage.getPlatformConfig('offerApprovalSettings') || { autoApproveSalonOffers: true };
+      
+      res.json({
+        offerApprovalSettings
+      });
+    } catch (error: any) {
+      console.error('Error fetching platform settings:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch('/api/admin/settings', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerApprovalSettings } = req.body;
+      
+      if (offerApprovalSettings !== undefined) {
+        // Validate settings structure
+        const settingsSchema = z.object({
+          autoApproveSalonOffers: z.boolean()
+        });
+        const validatedSettings = settingsSchema.parse(offerApprovalSettings);
+        
+        // Track settings change for analytics/audit
+        console.log(`[ADMIN_ANALYTICS] Settings updated by ${req.user!.id}:`, {
+          setting: 'offerApprovalSettings',
+          oldValue: await storage.getPlatformConfig('offerApprovalSettings'),
+          newValue: validatedSettings,
+          timestamp: new Date().toISOString()
+        });
+        
+        await storage.setPlatformConfig('offerApprovalSettings', validatedSettings, req.user!.id);
+        
+        res.json({ 
+          success: true, 
+          message: 'Platform settings updated successfully',
+          settings: {
+            offerApprovalSettings: validatedSettings
+          }
+        });
+      } else {
+        res.json({ 
+          success: true, 
+          message: 'No settings to update',
+          settings: {
+            offerApprovalSettings: await storage.getPlatformConfig('offerApprovalSettings')
+          }
+        });
+      }
+    } catch (error: any) {
+      console.error('Error updating platform settings:', error);
+      const status = error.name === 'ZodError' ? 400 : 500;
+      res.status(status).json({ error: error.message });
+    }
+  });
+
+  // Commission & Payouts
+  app.get('/api/admin/salons/:salonId/earnings', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const earnings = await storage.getSalonEarnings(salonId);
+      res.json(earnings);
+    } catch (error: any) {
+      console.error('Error fetching salon earnings:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/admin/payouts', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, amount } = req.body;
+      const payout = await storage.createPayout(salonId, amount);
+      res.json(payout);
+    } catch (error: any) {
+      console.error('Error creating payout:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/admin/payouts/:payoutId/approve', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { payoutId } = req.params;
+      await storage.approvePayout(payoutId, req.user!.id);
+      res.json({ success: true, message: 'Payout approved successfully' });
+    } catch (error: any) {
+      console.error('Error approving payout:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/admin/payouts/:payoutId/reject', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { payoutId } = req.params;
+      const { reason } = req.body;
+      await storage.rejectPayout(payoutId, reason, req.user!.id);
+      res.json({ success: true, message: 'Payout rejected successfully' });
+    } catch (error: any) {
+      console.error('Error rejecting payout:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/admin/payouts', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { status, salonId } = req.query;
+      const payouts = await storage.getAllPayouts({
+        status: status as string,
+        salonId: salonId as string
+      });
+      res.json(payouts);
+    } catch (error: any) {
+      console.error('Error fetching payouts:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================== SALON OWNER OFFER ROUTES ====================
+  
+  // Get salon's own offers
+  app.get('/api/salons/:salonId/offers', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const offers = await storage.getSalonOffers(salonId);
+      res.json(offers);
+    } catch (error: any) {
+      console.error('Error fetching salon offers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create salon offer (with auto-approve logic)
+  app.post('/api/salons/:salonId/offers', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const validatedData = createOfferSchema.parse(req.body);
+      const offer = await storage.createSalonOffer(salonId, validatedData, req.user!.id);
+      
+      // Return offer with approval metadata for UI
+      res.json({
+        ...offer,
+        _meta: {
+          autoApproved: offer.autoApproved === 1,
+          needsApproval: offer.approvalStatus === 'pending'
+        }
+      });
+    } catch (error: any) {
+      console.error('Error creating salon offer:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Update salon offer (with re-approval logic)
+  app.patch('/api/salons/:salonId/offers/:offerId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, offerId } = req.params;
+      const validatedData = updateOfferSchema.parse(req.body);
+      
+      // Get offer before update to check if it exists and track approval transitions
+      const offerBefore = await storage.getOfferById(offerId);
+      if (!offerBefore) {
+        return res.status(404).json({ error: 'Offer not found' });
+      }
+      
+      // Update offer (storage layer handles ownership validation and approval logic)
+      await storage.updateSalonOffer(offerId, salonId, validatedData, req.user!.id);
+      
+      // Get updated offer for metadata
+      const offerAfter = await storage.getOfferById(offerId);
+      if (!offerAfter) {
+        return res.status(500).json({ error: 'Failed to retrieve updated offer' });
+      }
+      
+      // Inform UI if edit triggered re-approval and include full approval metadata
+      res.json({ 
+        success: true, 
+        message: 'Offer updated successfully',
+        offer: offerAfter,
+        _meta: {
+          requiresReapproval: offerBefore.approvalStatus === 'approved' && offerAfter.approvalStatus === 'pending',
+          approvalStatus: offerAfter.approvalStatus,
+          autoApproved: offerAfter.autoApproved === 1
+        }
+      });
+    } catch (error: any) {
+      console.error('Error updating salon offer:', error);
+      const status = error.message.includes('Unauthorized') ? 403 : 400;
+      res.status(status).json({ error: error.message });
+    }
+  });
+
+  // Toggle salon offer status
+  app.post('/api/salons/:salonId/offers/:offerId/toggle', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, offerId } = req.params;
+      const validatedData = toggleOfferStatusSchema.parse(req.body);
+      await storage.toggleSalonOfferStatus(offerId, salonId, validatedData.isActive);
+      res.json({ success: true, message: 'Offer status updated successfully' });
+    } catch (error: any) {
+      console.error('Error toggling salon offer status:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Delete salon offer
+  app.delete('/api/salons/:salonId/offers/:offerId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, offerId } = req.params;
+      await storage.deleteSalonOffer(offerId, salonId);
+      res.json({ success: true, message: 'Offer deleted successfully' });
+    } catch (error: any) {
+      console.error('Error deleting salon offer:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ==================== ADMIN OFFER ROUTES ====================
+  
+  // Get all offers with filters (includes approval source metadata)
+  app.get('/api/admin/offers', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { status, approvalStatus, isPlatformWide, salonId, ownedBySalonId, autoApproved } = req.query;
+      const offers = await storage.getAllOffers({
+        status: status as string,
+        approvalStatus: approvalStatus as string,
+        isPlatformWide: isPlatformWide ? parseInt(isPlatformWide as string) : undefined,
+        salonId: salonId as string,
+        ownedBySalonId: ownedBySalonId as string
+      });
+      
+      // Filter by auto-approved if requested
+      let filteredOffers = offers;
+      if (autoApproved !== undefined) {
+        const isAutoApproved = autoApproved === '1' || autoApproved === 'true';
+        filteredOffers = offers.filter(o => (o.autoApproved === 1) === isAutoApproved);
+      }
+      
+      // Enrich with metadata for admin UI
+      const enrichedOffers = filteredOffers.map(offer => ({
+        ...offer,
+        _meta: {
+          approvalSource: offer.autoApproved === 1 ? 'auto' : 'manual',
+          isSalonOwned: offer.ownedBySalonId !== null,
+          isPlatformOffer: offer.ownedBySalonId === null
+        }
+      }));
+      
+      res.json(enrichedOffers);
+    } catch (error: any) {
+      console.error('Error fetching offers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create new offer (Super Admin - Platform-wide only)
+  app.post('/api/admin/offers', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const validatedData = createOfferSchema.parse(req.body);
+      
+      // Super admin can ONLY create platform-wide offers (not for specific salons)
+      const offerData = { 
+        ...validatedData,
+        isPlatformWide: 1, // Force platform-wide
+        salonId: null, // No specific salon
+        ownedBySalonId: null, // Created by super admin
+        approvalStatus: 'approved', // Super admin offers are auto-approved
+        createdBy: req.user!.id,
+        validFrom: new Date(validatedData.validFrom),
+        validUntil: new Date(validatedData.validUntil),
+        imageUrl: validatedData.imageUrl, // Promotional image for offer card
+      };
+      const offer = await storage.createOffer(offerData);
+      res.json(offer);
+    } catch (error: any) {
+      console.error('Error creating offer:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Update offer
+  app.patch('/api/admin/offers/:offerId', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerId } = req.params;
+      const validatedData = updateOfferSchema.parse(req.body);
+      await storage.updateOffer(offerId, validatedData);
+      res.json({ success: true, message: 'Offer updated successfully' });
+    } catch (error: any) {
+      console.error('Error updating offer:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Approve offer
+  app.post('/api/admin/offers/:offerId/approve', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerId } = req.params;
+      await storage.approveOffer(offerId, req.user!.id);
+      res.json({ success: true, message: 'Offer approved successfully' });
+    } catch (error: any) {
+      console.error('Error approving offer:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Reject offer
+  app.post('/api/admin/offers/:offerId/reject', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerId } = req.params;
+      const { reason } = approveRejectOfferSchema.parse(req.body);
+      if (!reason) {
+        return res.status(400).json({ error: 'Rejection reason is required' });
+      }
+      await storage.rejectOffer(offerId, reason, req.user!.id);
+      res.json({ success: true, message: 'Offer rejected successfully' });
+    } catch (error: any) {
+      console.error('Error rejecting offer:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Toggle offer status
+  app.post('/api/admin/offers/:offerId/toggle', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerId } = req.params;
+      const { isActive } = toggleOfferStatusSchema.parse(req.body);
+      await storage.toggleOfferStatus(offerId, isActive);
+      res.json({ success: true, message: 'Offer status updated successfully' });
+    } catch (error: any) {
+      console.error('Error toggling offer status:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Delete offer
+  app.delete('/api/admin/offers/:offerId', populateUserFromSession, requireSuperAdmin(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerId } = req.params;
+      await storage.deleteOffer(offerId);
+      res.json({ success: true, message: 'Offer deleted successfully' });
+    } catch (error: any) {
+      console.error('Error deleting offer:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ CUSTOMER-FACING OFFERS & WALLET API ============
+
+  // Get customer wallet
+  app.get('/api/wallet', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      let wallet = await storage.getUserWallet(req.user!.id);
+      if (!wallet) {
+        wallet = await storage.createUserWallet(req.user!.id);
+      }
+      res.json(wallet);
+    } catch (error: any) {
+      console.error('Error getting wallet:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get wallet transactions
+  app.get('/api/wallet/transactions', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const transactions = await storage.getWalletTransactions(req.user!.id);
+      res.json(transactions);
+    } catch (error: any) {
+      console.error('Error getting wallet transactions:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get available offers for customer
+  app.get('/api/offers', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.query;
+      const userId = req.user?.id || 'guest';
+      const offers = await storage.getCustomerOffers(userId, salonId as string);
+      res.json(offers);
+    } catch (error: any) {
+      console.error('Error getting customer offers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Calculate best applicable offer for booking (Smart Auto-Apply)
+  app.post('/api/offers/calculate', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, totalAmountPaisa, promoCode } = req.body;
+
+      if (!salonId || totalAmountPaisa === undefined) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: salonId and totalAmountPaisa' 
+        });
+      }
+
+      // Fetch all applicable offers for this salon
+      const userId = req.user?.id || 'guest';
+      const offers = await storage.getCustomerOffers(userId, salonId);
+
+      // Filter only active and approved offers
+      const activeOffers = offers.filter((offer: any) => 
+        offer.isActive === 1 && 
+        offer.approvalStatus === 'approved'
+      );
+
+      // Calculate all offers with discount amounts
+      const calculatedOffers = OfferCalculator.calculateAllOffers(
+        activeOffers,
+        totalAmountPaisa,
+        salonId
+      );
+
+      // Get the best offer (highest discount or promo code match)
+      const bestOffer = OfferCalculator.getBestOffer(
+        activeOffers,
+        totalAmountPaisa,
+        salonId,
+        promoCode
+      );
+
+      // Get price breakdown
+      const priceBreakdown = OfferCalculator.getPriceBreakdown(
+        totalAmountPaisa,
+        bestOffer
+      );
+
+      res.json({
+        bestOffer,
+        allOffers: calculatedOffers,
+        priceBreakdown,
+        hasApplicableOffers: bestOffer !== null,
+      });
+    } catch (error: any) {
+      console.error('Error calculating offers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Validate promo code
+  app.post('/api/offers/validate-promo', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, promoCode, totalAmountPaisa } = req.body;
+
+      if (!salonId || !promoCode || totalAmountPaisa === undefined) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: salonId, promoCode, and totalAmountPaisa' 
+        });
+      }
+
+      // Fetch all applicable offers
+      const userId = req.user?.id || 'guest';
+      const offers = await storage.getCustomerOffers(userId, salonId);
+
+      // Validate promo code
+      const matchedOffer = OfferCalculator.validatePromoCode(promoCode, offers);
+
+      if (!matchedOffer) {
+        return res.json({ 
+          valid: false, 
+          message: 'Invalid promo code' 
+        });
+      }
+
+      // Check if offer is still valid
+      if (!OfferCalculator.isOfferValid(matchedOffer)) {
+        return res.json({ 
+          valid: false, 
+          message: 'This promo code has expired' 
+        });
+      }
+
+      // Check usage limit
+      if (!OfferCalculator.hasUsageRemaining(matchedOffer)) {
+        return res.json({ 
+          valid: false, 
+          message: 'This promo code has reached its usage limit' 
+        });
+      }
+
+      // Calculate discount
+      const discountAmount = OfferCalculator.calculateDiscount(
+        matchedOffer,
+        totalAmountPaisa
+      );
+
+      if (discountAmount === 0) {
+        return res.json({ 
+          valid: false, 
+          message: `Minimum purchase of ₹${matchedOffer.minimumPurchase! / 100} required` 
+        });
+      }
+
+      res.json({ 
+        valid: true, 
+        offer: matchedOffer,
+        discountAmount,
+        finalAmount: totalAmountPaisa - discountAmount,
+        message: 'Promo code applied successfully!' 
+      });
+    } catch (error: any) {
+      console.error('Error validating promo code:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Check offer eligibility
+  app.get('/api/offers/:offerId/eligibility', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { offerId } = req.params;
+      const eligibility = await storage.getUserOfferEligibility(req.user!.id, offerId);
+      res.json(eligibility);
+    } catch (error: any) {
+      console.error('Error checking offer eligibility:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get customer-facing offers for a salon (platform-wide + salon-specific)
+  // Public endpoint - no authentication required for viewing offers
+  app.get('/api/offers/customer', async (req, res) => {
+    try {
+      const { salonId } = req.query;
+      const userId = 'guest'; // Default to guest for public viewing
+      
+      const offers = await storage.getCustomerOffers(userId, salonId as string);
+      res.json(offers);
+    } catch (error: any) {
+      console.error('Error fetching customer offers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get active launch offers (First 3 Bookings, etc.)
+  app.get('/api/launch-offers', async (req, res) => {
+    try {
+      const offers = await storage.getActiveLaunchOffers();
+      res.json(offers);
+    } catch (error: any) {
+      console.error('Error getting launch offers:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get all active offers with salon information (for all-offers page)
+  app.get('/api/offers/all-with-salons', async (req, res) => {
+    try {
+      const offers = await storage.getAllOffersWithSalons();
+      res.json(offers);
+    } catch (error: any) {
+      console.error('Error fetching all offers with salons:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 

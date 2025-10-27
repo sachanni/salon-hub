@@ -15,6 +15,7 @@ interface Service {
   durationMinutes: number;
   priceInPaisa: number;
   category: string;
+  imageUrl?: string | null;
 }
 
 interface Salon {
@@ -172,6 +173,14 @@ const ServicesSelection: React.FC = () => {
               >
                 <CardContent className="p-4">
                   <div className="flex items-start gap-4">
+                    {service.imageUrl && (
+                      <img
+                        src={service.imageUrl}
+                        alt={service.name}
+                        className="w-20 h-20 rounded-lg object-cover flex-shrink-0"
+                        data-testid={`img-service-select-${service.id}`}
+                      />
+                    )}
                     <div className="flex-1">
                       <h3 className="font-semibold text-gray-900 mb-1">
                         {service.name}

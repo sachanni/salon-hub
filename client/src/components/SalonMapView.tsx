@@ -9,6 +9,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import ErrorBoundary from './ErrorBoundary';
 import FilterPanel, { FilterState } from './FilterPanel';
 import CategoryTabs from './CategoryTabs';
+import MapboxSalonMap from './MapboxSalonMap';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -19,6 +20,13 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
+
+interface ServiceDetail {
+  name: string;
+  durationMinutes: number;
+  price: number;
+  currency?: string;
+}
 
 interface Salon {
   id: string;
@@ -39,6 +47,7 @@ interface Salon {
   reviewCount: number;
   imageUrl?: string;
   imageUrls?: string[];
+  services?: ServiceDetail[]; // Services with details (name, price, duration)
   openTime?: string;
   closeTime?: string;
   distance_km?: number;
@@ -147,8 +156,8 @@ const MapComponent: React.FC<{
     setMapError(null);
 
     try {
-      // Calculate center of all locations (corrected coordinates)
-      let center: [number, number] = [28.5355, 77.3910]; // Default to Greater Noida (corrected)
+      // Calculate center dynamically based on available data
+      let center: [number, number];
       
       if (searchLocation) {
         // Use search location as primary center
@@ -159,6 +168,9 @@ const MapComponent: React.FC<{
         center = [avgLat, avgLng];
       } else if (userLocation) {
         center = [userLocation.lat, userLocation.lng];
+      } else {
+        // Fallback: Delhi center (only if no location data available at all)
+        center = [28.6139, 77.2090];
       }
 
       // Get appropriate zoom level based on search radius
@@ -225,13 +237,25 @@ const MapComponent: React.FC<{
   useEffect(() => {
     if (!mapInstance || !searchRadius) return;
     
-    const newZoomLevel = getZoomLevelForRadius(searchRadius);
-    const currentZoom = mapInstance.getZoom();
-    
-    // Only update if zoom level actually changed
-    if (currentZoom !== newZoomLevel) {
-      // Disable animation to prevent race condition with marker updates
-      mapInstance.setZoom(newZoomLevel, { animate: false });
+    try {
+      // Check if map container is properly mounted
+      const container = mapInstance.getContainer();
+      if (!container || !container.parentElement) {
+        console.warn('Map container not ready for zoom update');
+        return;
+      }
+
+      const newZoomLevel = getZoomLevelForRadius(searchRadius);
+      const currentZoom = mapInstance.getZoom();
+      
+      // Only update if zoom level actually changed
+      if (currentZoom !== newZoomLevel) {
+        // Disable animation to prevent race condition with marker updates
+        mapInstance.setZoom(newZoomLevel, { animate: false });
+      }
+    } catch (error) {
+      // Silently handle zoom update errors during hot reload
+      console.debug('Zoom update skipped (map not ready):', error);
     }
   }, [mapInstance, searchRadius, getZoomLevelForRadius]);
 
@@ -555,7 +579,7 @@ const MapComponent: React.FC<{
 const SalonMapView: React.FC<SalonMapViewProps> = ({
   searchParams,
   onBackToSearch,
-  searchLocationName = "Nirala Estate, Greater Noida"
+  searchLocationName
 }) => {
   const [salons, setSalons] = useState<Salon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -568,6 +592,22 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [currentImageIndex, setCurrentImageIndex] = useState<Record<string, number>>({});
+  // Original search coordinates - for directions origin (updates only on new search, not "Search This Area")
+  const [originalSearchCoordinates, setOriginalSearchCoordinates] = useState<{lat: number; lng: number} | undefined>(searchParams.coordinates);
+  
+  // Current search coordinates - for fetching salons (can change when user clicks "Search This Area")
+  const [currentSearchCoordinates, setCurrentSearchCoordinates] = useState<{lat: number; lng: number} | undefined>(searchParams.coordinates);
+  
+  // Update coordinates when searchParams.coordinates changes (new search from home page)
+  useEffect(() => {
+    console.log('🗺️ SalonMapView: searchParams.coordinates changed:', searchParams.coordinates);
+    if (searchParams.coordinates) {
+      console.log('🗺️ SalonMapView: Updating coordinates to:', searchParams.coordinates);
+      console.log('🗺️ SalonMapView: EXACT Lat:', searchParams.coordinates.lat, 'Lng:', searchParams.coordinates.lng);
+      setOriginalSearchCoordinates(searchParams.coordinates);
+      setCurrentSearchCoordinates(searchParams.coordinates);
+    }
+  }, [searchParams.coordinates]);
   const [filters, setFilters] = useState<FilterState>({
     sortBy: 'recommended',
     maxPrice: 10000,
@@ -579,7 +619,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   // Fetch salons based on search parameters
   useEffect(() => {
     const fetchSalons = async () => {
-      if (!searchParams.coordinates) {
+      if (!currentSearchCoordinates) {
         setError('No search location provided');
         setLoading(false);
         return;
@@ -598,8 +638,8 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
         };
 
         const params = new URLSearchParams({
-          lat: searchParams.coordinates.lat.toString(),
-          lng: searchParams.coordinates.lng.toString(),
+          lat: currentSearchCoordinates.lat.toString(),
+          lng: currentSearchCoordinates.lng.toString(),
           radiusKm: (searchParams.radius || 10).toString(),
           sort: apiSortMap[filters.sortBy] || 'distance',
         });
@@ -666,7 +706,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
     };
 
     fetchSalons();
-  }, [searchParams, sortBy, filters, selectedCategory]);
+  }, [currentSearchCoordinates, searchParams.radius, searchParams.service, searchParams.category, searchParams.time, searchParams.date, sortBy, filters, selectedCategory]);
 
   // Fetch time slots for all salons when they are loaded
   useEffect(() => {
@@ -678,9 +718,8 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   }, [salons]);
 
   const handleSalonClick = (salon: Salon) => {
-    // Open salon profile in new tab
-    const salonProfileUrl = `/salon-profile?id=${salon.id}`;
-    window.open(salonProfileUrl, '_blank');
+    // Just set selected salon - popup will show inline (industry standard behavior)
+    setSelectedSalonId(salon.id);
   };
 
   // Carousel navigation functions
@@ -990,8 +1029,8 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                     onClick={() => handleSalonClick(salon)}
                   >
                     <CardContent className="p-0">
-                      {/* Salon Image Carousel - Fresha Style */}
-                      <div className="relative h-32 w-full overflow-hidden rounded-t-lg">
+                      {/* Salon Image Carousel - Fresha Style: Larger Image */}
+                      <div className="relative h-48 w-full overflow-hidden rounded-t-lg">
                         {(() => {
                           const images = salon.imageUrls && salon.imageUrls.length > 0 
                             ? salon.imageUrls 
@@ -1079,9 +1118,9 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                           );
                         })()}
                         
-                        {/* Distance Badge */}
+                        {/* Distance Badge - Fresha Style */}
                         <div className="absolute top-3 right-3">
-                          <Badge className="bg-white/90 text-gray-800 text-xs font-medium px-2 py-1">
+                          <Badge className="bg-white/95 backdrop-blur-sm text-gray-800 text-xs font-semibold px-2.5 py-1 shadow-sm">
                             {formatDistance(salon.distance_km)}
                           </Badge>
                         </div>
@@ -1105,40 +1144,73 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                         )}
                       </div>
 
-                      {/* Salon Details */}
-                      <div className="p-3">
-                        {/* Salon Name & Rating */}
-                        <div className="mb-2">
-                          <h3 className="text-base font-semibold text-gray-900 break-words mb-1">
-                            {salon.name}
-                          </h3>
-                          
-                          {/* Rating & Reviews */}
-                          <div className="flex items-center gap-1">
-                            <Star className="w-3.5 h-3.5 text-yellow-500 fill-current" />
-                            <span className="text-sm font-medium text-gray-900">
-                              {formatRating(salon.rating)}
-                            </span>
-                            <span className="text-sm text-gray-500">
-                              ({salon.reviewCount})
-                            </span>
+                      {/* Salon Details - Fresha Style */}
+                      <div className="p-4">
+                        {/* Salon Name - Larger, More Prominent */}
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2 leading-tight">
+                          {salon.name}
+                        </h3>
+                        
+                        {/* Rating & Reviews - Fresha Style */}
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <Star className="w-4 h-4 text-yellow-500 fill-current" />
+                          <span className="text-base font-semibold text-gray-900">
+                            {formatRating(salon.rating)}
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            ({salon.reviewCount})
+                          </span>
+                        </div>
+
+                        {/* Location - Subtle */}
+                        <p className="text-sm text-gray-500 mb-4">
+                          {(() => {
+                            // Extract street and area (first 3 parts before state/pincode)
+                            const addressParts = salon.address?.split(',') || [];
+                            const cleanAddress = addressParts.slice(0, 3).join(',').trim();
+                            return `${cleanAddress}, ${salon.city}`;
+                          })()}
+                        </p>
+
+                        {/* Services - Fresha Style: Interactive & Clickable */}
+                        {salon.services && salon.services.length > 0 && (
+                          <div className="mb-2">
+                            {salon.services.map((service, index) => (
+                              <a
+                                key={index}
+                                href={`/salon/${salon.id}/book?service=${encodeURIComponent(service.name)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className={`group/service flex items-start justify-between gap-3 py-1.5 px-2.5 -mx-2.5 transition-all duration-200 hover:bg-purple-50 cursor-pointer ${index < (salon.services?.length ?? 0) - 1 ? 'border-b border-gray-200' : ''}`}
+                                data-testid={`service-${salon.id}-${index}`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 mb-0.5 group-hover/service:text-purple-700 transition-colors">
+                                    {service.name}
+                                  </p>
+                                  <p className="text-xs text-gray-500 group-hover/service:text-purple-600 transition-colors">
+                                    {service.durationMinutes} mins
+                                  </p>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                  <p className="text-sm font-semibold text-gray-900 group-hover/service:text-purple-700 transition-colors">
+                                    from ₹{service.price.toLocaleString()}
+                                  </p>
+                                </div>
+                              </a>
+                            ))}
+                            <a 
+                              href={`/salon/${salon.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-block text-sm font-medium text-purple-600 hover:text-purple-700 hover:underline pt-1 ml-2.5"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              See more
+                            </a>
                           </div>
-                        </div>
-
-                        {/* Location */}
-                        <div className="flex items-start gap-1.5 mb-2">
-                          <MapPin className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-                          <p className="text-xs text-gray-600 line-clamp-2">
-                            {salon.address}, {salon.city}
-                          </p>
-                        </div>
-
-                        {/* Category */}
-                        <div className="mb-2">
-                          <Badge variant="outline" className="text-xs">
-                            {salon.category.replace('_', ' ')}
-                          </Badge>
-                        </div>
+                        )}
 
                         {/* Available Time Slots */}
                         <div className="mt-2 pt-2 border-t border-gray-100">
@@ -1179,7 +1251,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                                     e.stopPropagation();
                                     handleSalonClick(salon);
                                   }}
-                                  className="w-full flex items-center justify-between px-2 py-1.5 bg-blue-50 hover:bg-blue-100 rounded transition-colors group"
+                                  className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-blue-50 rounded transition-colors group"
                                 >
                                   <div className="flex items-center gap-1.5">
                                     <Clock className="w-3 h-3 text-blue-600 flex-shrink-0" />
@@ -1226,14 +1298,18 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                 </div>
               }
             >
-              <MapComponent
+              <MapboxSalonMap
                 salons={salons}
-                userLocation={searchParams.coordinates}
-                searchLocation={searchParams.coordinates}
+                userLocation={undefined}
+                searchLocation={currentSearchCoordinates}
                 onSalonClick={handleSalonClick}
                 selectedSalonId={selectedSalonId || undefined}
                 searchLocationName={searchLocationName}
                 searchRadius={searchParams.radius}
+                onSearchThisArea={(newCenter) => {
+                  // Update search coordinates to trigger re-fetch
+                  setCurrentSearchCoordinates(newCenter);
+                }}
               />
             </ErrorBoundary>
           ) : (

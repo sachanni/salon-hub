@@ -8,6 +8,13 @@
       "when": 1758342787244,
       "tag": "0000_lame_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1760511655777,
+      "tag": "0001_unusual_luckman",
+      "breakpoints": true
     }
   ]
 }

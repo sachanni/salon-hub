@@ -20,13 +20,16 @@ import {
   Video,
   Image as ImageIcon,
   Sparkles,
-  Grid3x3
+  Grid3x3,
+  Tag,
+  Timer
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import BookingModal from '@/components/BookingModal';
+import { PlatformOffersCarousel } from '@/components/PlatformOffersCarousel';
 import { cn } from '@/lib/utils';
 import { Map } from '@/components/ui/map';
 
@@ -65,6 +68,7 @@ interface Service {
   durationMinutes: number;
   priceInPaisa: number;
   category: string;
+  imageUrl?: string;
 }
 
 interface Staff {
@@ -95,9 +99,13 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState<string | undefined>(undefined);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  
+  // Real-time open/closed status
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   // Refs for scroll spy
   const servicesRef = useRef<HTMLDivElement>(null);
+  const offersRef = useRef<HTMLDivElement>(null);
   const staffRef = useRef<HTMLDivElement>(null);
   const aboutRef = useRef<HTMLDivElement>(null);
   const reviewsRef = useRef<HTMLDivElement>(null);
@@ -153,6 +161,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
 
       const sections = [
         { id: 'services', ref: servicesRef },
+        { id: 'offers', ref: offersRef },
         { id: 'staff', ref: staffRef },
         { id: 'about', ref: aboutRef },
         { id: 'reviews', ref: reviewsRef },
@@ -173,6 +182,15 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
     handleScroll(); // Call once on mount
     return () => window.removeEventListener('scroll', handleScroll);
   }, [STICKY_HEADER_OFFSET]);
+
+  // Update current time every minute for real-time open/closed status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Handle booking modal events
   useEffect(() => {
@@ -209,6 +227,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
   const scrollToSection = (sectionId: string) => {
     const refs: Record<string, React.RefObject<HTMLDivElement>> = {
       services: servicesRef,
+      offers: offersRef,
       staff: staffRef,
       about: aboutRef,
       reviews: reviewsRef,
@@ -264,6 +283,18 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
     queryFn: async (): Promise<any[]> => {
       if (!salonId) return [];
       const response = await fetch(`/api/salons/${salonId}/media-assets`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: !!salonId,
+  });
+
+  // Fetch salon offers (platform-wide + salon-specific)
+  const { data: offers = [], isLoading: offersLoading } = useQuery({
+    queryKey: ['salon-offers', salonId],
+    queryFn: async (): Promise<any[]> => {
+      if (!salonId) return [];
+      const response = await fetch(`/api/offers/customer?salonId=${salonId}`);
       if (!response.ok) return [];
       return response.json();
     },
@@ -457,6 +488,9 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
 
         </div>
 
+        {/* Platform-Wide Offers Carousel */}
+        <PlatformOffersCarousel offers={offers} />
+
         {/* Sticky Navigation */}
         <div className="bg-white border-b sticky top-0 z-30 shadow-sm">
           <div className="border-t bg-white">
@@ -464,6 +498,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
               <div className="flex gap-1 overflow-x-auto scrollbar-hide">
                 {[
                   { id: 'services', label: 'Services', icon: Sparkles },
+                  { id: 'offers', label: 'Offers', icon: Tag },
                   { id: 'staff', label: 'Team', icon: Users },
                   { id: 'about', label: 'About', icon: MapPin },
                   { id: 'reviews', label: 'Reviews', icon: Star },
@@ -541,7 +576,17 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                     {filteredServices.slice(0, 4).map((service) => (
                       <Card key={service.id} className="group hover:shadow-lg transition-all duration-300 border-gray-200">
                         <CardContent className="p-6">
-                          <div className="flex items-start justify-between">
+                          <div className="flex items-start justify-between gap-4">
+                            {/* Service Image */}
+                            {service.imageUrl && (
+                              <img
+                                src={service.imageUrl}
+                                alt={service.name}
+                                className="w-24 h-24 rounded-lg object-cover flex-shrink-0"
+                                data-testid={`img-service-${service.id}`}
+                              />
+                            )}
+                            
                             <div className="flex-1">
                               <h3 className="font-semibold text-gray-900 text-lg group-hover:text-purple-600 transition-colors">
                                 {service.name}
@@ -557,7 +602,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                                 </Badge>
                               </div>
                             </div>
-                            <div className="text-right ml-6">
+                            <div className="text-right ml-6 flex-shrink-0">
                               <div className="text-2xl font-bold text-gray-900 mb-2">
                                 ₹{(service.priceInPaisa / 100).toFixed(0)}
                               </div>
@@ -565,6 +610,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                                 size="sm" 
                                 onClick={() => handleBookNow(service.id)}
                                 className="bg-purple-600 hover:bg-purple-700"
+                                data-testid={`button-book-service-${service.id}`}
                               >
                                 Book
                               </Button>
@@ -592,6 +638,151 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                     <Sparkles className="w-16 h-16 mx-auto mb-4 text-gray-300" />
                     <p className="text-lg font-medium">No services available</p>
                     <p className="text-sm">Check back later for updates</p>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Offers Section - Salon-Specific Only */}
+            <section ref={offersRef} id="offers" className="scroll-mt-[200px]">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Salon Exclusive Offers</h2>
+                <p className="text-gray-600">Special deals from this salon</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {offersLoading ? (
+                  <>
+                    {[1, 2].map((i) => (
+                      <Card key={i} className="animate-pulse">
+                        <CardContent className="p-6">
+                          <div className="h-24 bg-gray-200 rounded"></div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </>
+                ) : offers && offers.filter((o: any) => o.isPlatformWide === 0).length > 0 ? (
+                  offers.filter((o: any) => o.isPlatformWide === 0).map((offer: any) => {
+                    const daysLeft = Math.ceil((new Date(offer.validUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                    const isPlatformOffer = offer.isPlatformWide === 1;
+                    
+                    return (
+                      <Card 
+                        key={offer.id} 
+                        className="group hover:shadow-xl transition-all duration-300 border-2 hover:border-purple-200 relative overflow-hidden"
+                        data-testid={`offer-card-${offer.id}`}
+                      >
+                        {/* Gradient Background Decoration */}
+                        <div className={cn(
+                          "absolute inset-0 opacity-5",
+                          isPlatformOffer 
+                            ? "bg-gradient-to-br from-purple-500 to-pink-500" 
+                            : "bg-gradient-to-br from-amber-500 to-orange-500"
+                        )}></div>
+                        
+                        <CardContent className="p-6 relative">
+                          <div className="flex items-start justify-between mb-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge 
+                                  className={cn(
+                                    "font-semibold",
+                                    isPlatformOffer
+                                      ? "bg-purple-100 text-purple-700 border-purple-200"
+                                      : "bg-amber-100 text-amber-700 border-amber-200"
+                                  )}
+                                  variant="outline"
+                                  data-testid={`offer-badge-${offer.id}`}
+                                >
+                                  {isPlatformOffer ? 'Platform Offer' : 'Salon Offer'}
+                                </Badge>
+                                {daysLeft <= 3 && (
+                                  <Badge variant="destructive" className="animate-pulse">
+                                    <Timer className="w-3 h-3 mr-1" />
+                                    {daysLeft}d left
+                                  </Badge>
+                                )}
+                              </div>
+                              
+                              <h3 className="text-lg font-bold text-gray-900 mb-1 group-hover:text-purple-600 transition-colors">
+                                {offer.title}
+                              </h3>
+                              
+                              <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                                {offer.description}
+                              </p>
+
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 text-sm">
+                                  <Tag className={cn(
+                                    "w-4 h-4",
+                                    isPlatformOffer ? "text-purple-600" : "text-amber-600"
+                                  )} />
+                                  <span className="font-semibold text-gray-900">
+                                    {offer.discountType === 'percentage' 
+                                      ? `${offer.discountValue}% OFF`
+                                      : `₹${offer.discountValue} OFF`}
+                                  </span>
+                                  {offer.maxDiscount && offer.discountType === 'percentage' && (
+                                    <span className="text-xs text-gray-500">
+                                      (max ₹{offer.maxDiscount})
+                                    </span>
+                                  )}
+                                </div>
+
+                                {offer.minimumPurchase && (
+                                  <div className="text-xs text-gray-500">
+                                    Min. purchase: ₹{(offer.minimumPurchase / 100).toFixed(0)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Discount Icon */}
+                            <div className={cn(
+                              "w-16 h-16 rounded-full flex items-center justify-center flex-shrink-0 ml-4",
+                              isPlatformOffer
+                                ? "bg-purple-100"
+                                : "bg-amber-100"
+                            )}>
+                              <div className={cn(
+                                "text-2xl font-bold",
+                                isPlatformOffer ? "text-purple-600" : "text-amber-600"
+                              )}>
+                                {offer.discountType === 'percentage' 
+                                  ? `${offer.discountValue}%`
+                                  : `₹${offer.discountValue}`}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Valid Until Date */}
+                          <div className="pt-3 border-t border-gray-100">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-500">
+                                Valid until {new Date(offer.validUntil).toLocaleDateString('en-IN', { 
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric'
+                                })}
+                              </span>
+                              <span className={cn(
+                                "font-medium",
+                                isPlatformOffer ? "text-purple-600" : "text-amber-600"
+                              )}>
+                                Auto-applied at checkout
+                              </span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full text-center py-16 text-gray-500 bg-white rounded-2xl border-2 border-dashed">
+                    <Tag className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-lg font-medium">No offers available</p>
+                    <p className="text-sm">Check back later for exciting deals</p>
                   </div>
                 )}
               </div>
@@ -821,55 +1012,154 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
 
           {/* Sticky Sidebar */}
           <div className="lg:col-span-1">
-            <div className="sticky top-48 space-y-6">
-              {/* Booking Card */}
-              <Card className="shadow-xl border-2 border-purple-100">
-                <CardContent className="p-6">
-                  <div className="space-y-4">
-                    <Button 
-                      onClick={() => handleBookNow()}
-                      size="lg"
-                      className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg hover:shadow-xl transition-all"
-                    >
-                      <Calendar className="w-5 h-5 mr-2" />
-                      Book Appointment
-                    </Button>
-                    
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button variant="outline" className="w-full" size="sm">
-                        <Phone className="w-4 h-4 mr-2" />
-                        Call
-                      </Button>
-                      <Button variant="outline" className="w-full" size="sm">
-                        <MapPin className="w-4 h-4 mr-2" />
-                        Directions
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="lg:sticky lg:top-[88px]">
+              <Card className="shadow-lg border border-gray-200 lg:max-h-[calc(100vh-120px)] lg:overflow-y-auto">
+                <CardContent className="p-6 space-y-4">
+                  {/* Salon Name */}
+                  <h1 className="text-2xl font-bold text-gray-900" data-testid="text-salon-name">
+                    {salon.name}
+                  </h1>
 
-              {/* Quick Info */}
-              <Card>
-                <CardContent className="p-6">
-                  <h3 className="font-semibold text-gray-900 mb-4">Quick Info</h3>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-600">Price Range</span>
-                      <span className="font-medium">{salon.priceRange || '₹₹'}</span>
+                  {/* Rating */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-semibold text-gray-900" data-testid="text-rating">
+                      {salon.rating || '0.0'}
+                    </span>
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star 
+                          key={star}
+                          className={cn(
+                            "w-5 h-5",
+                            star <= Math.floor(Number(salon.rating || 0)) 
+                              ? "text-yellow-400 fill-yellow-400" 
+                              : "text-gray-300"
+                          )}
+                        />
+                      ))}
                     </div>
-                    <Separator />
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-600">Rating</span>
-                      <div className="flex items-center gap-1">
-                        <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                        <span className="font-medium">{salon.rating || '0.0'}</span>
+                    {salon.reviewCount > 0 && (
+                      <span className="text-sm text-gray-500" data-testid="text-review-count">
+                        ({salon.reviewCount})
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Open/Closed Status - Intelligent day-based detection */}
+                  {(() => {
+                    const checkSalonStatus = () => {
+                      // Get current day of week (lowercase)
+                      const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+                      const currentDay = days[currentTime.getDay()];
+                      
+                      // First, check businessHours for day-specific hours
+                      const businessHours = (salon as any).businessHours;
+                      if (businessHours && typeof businessHours === 'object') {
+                        const dayHours = businessHours[currentDay];
+                        
+                        if (dayHours && dayHours.open === true && dayHours.start && dayHours.end) {
+                          const currentTimeInMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+                          const [openHour, openMin] = dayHours.start.split(':').map(Number);
+                          const openTimeInMinutes = openHour * 60 + openMin;
+                          const [closeHour, closeMin] = dayHours.end.split(':').map(Number);
+                          const closeTimeInMinutes = closeHour * 60 + closeMin;
+                          
+                          const isOpen = currentTimeInMinutes >= openTimeInMinutes && currentTimeInMinutes < closeTimeInMinutes;
+                          return {
+                            isOpen,
+                            openTime: dayHours.start,
+                            closeTime: dayHours.end
+                          };
+                        } else if (dayHours && dayHours.open === false) {
+                          // Salon is closed on this day
+                          return { isOpen: false, openTime: null, closeTime: null, closedToday: true };
+                        }
+                      }
+                      
+                      // Fallback to legacy openTime/closeTime if businessHours not available
+                      if (salon.openTime && salon.closeTime) {
+                        const currentTimeInMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+                        const [openHour, openMin] = salon.openTime.split(':').map(Number);
+                        const openTimeInMinutes = openHour * 60 + openMin;
+                        const [closeHour, closeMin] = salon.closeTime.split(':').map(Number);
+                        const closeTimeInMinutes = closeHour * 60 + closeMin;
+                        
+                        const isOpen = currentTimeInMinutes >= openTimeInMinutes && currentTimeInMinutes < closeTimeInMinutes;
+                        return { isOpen, openTime: salon.openTime, closeTime: salon.closeTime };
+                      }
+                      
+                      return null;
+                    };
+
+                    const status = checkSalonStatus();
+                    
+                    return status ? (
+                      <div className="flex items-center gap-2" data-testid="status-open-closed">
+                        <Clock className="w-4 h-4 text-gray-500" />
+                        {status.closedToday ? (
+                          <span className="text-sm text-red-600 font-medium">
+                            Closed today
+                          </span>
+                        ) : status.isOpen ? (
+                          <span className="text-sm text-green-600 font-medium">
+                            Open - closes at {status.closeTime ? new Date(`2000-01-01T${status.closeTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-red-600 font-medium">
+                            Closed - opens at {status.openTime ? new Date(`2000-01-01T${status.openTime}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''}
+                          </span>
+                        )}
                       </div>
+                    ) : null;
+                  })()}
+
+                  <Separator />
+
+                  {/* Book Now Button */}
+                  <Button 
+                    onClick={() => handleBookNow()}
+                    size="lg"
+                    className="w-full bg-black hover:bg-gray-800 text-white text-base font-medium h-12"
+                    data-testid="button-book-now"
+                  >
+                    Book now
+                  </Button>
+
+                  <Separator />
+
+                  {/* Contact */}
+                  {salon.phone && (
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-4 h-4 text-gray-500" />
+                      <a 
+                        href={`tel:${salon.phone}`}
+                        className="text-sm text-gray-700 hover:text-gray-900"
+                        data-testid="link-phone"
+                      >
+                        {salon.phone}
+                      </a>
                     </div>
-                    <Separator />
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-600">Category</span>
-                      <span className="font-medium">{salon.category.replace('_', ' ')}</span>
+                  )}
+
+                  {/* Address & Directions */}
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-700" data-testid="text-address">
+                          {salon.address}, {salon.city}, {salon.state} {salon.zipCode}
+                        </p>
+                        <button 
+                          onClick={() => {
+                            const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(salon.address + ', ' + salon.city + ', ' + salon.state)}`;
+                            window.open(url, '_blank');
+                          }}
+                          className="text-sm text-purple-600 hover:text-purple-700 font-medium mt-1 inline-block"
+                          data-testid="button-get-directions"
+                        >
+                          Get directions
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>

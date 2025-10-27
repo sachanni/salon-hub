@@ -20,6 +20,7 @@ interface Service {
   durationMinutes: number;
   priceInPaisa: number;
   category: string;
+  imageUrl?: string | null;
 }
 
 interface Salon {
@@ -254,7 +255,15 @@ const BookingPage: React.FC = () => {
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Selected Services</h2>
                 <div className="space-y-3">
                   {selectedServices.map((service, index) => (
-                    <div key={service.id} className="flex items-start justify-between py-3 border-b last:border-0">
+                    <div key={service.id} className="flex items-start gap-3 justify-between py-3 border-b last:border-0">
+                      {service.imageUrl && (
+                        <img
+                          src={service.imageUrl}
+                          alt={service.name}
+                          className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                          data-testid={`img-service-checkout-${service.id}`}
+                        />
+                      )}
                       <div className="flex-1">
                         <h3 className="font-medium text-gray-900">{service.name}</h3>
                         <p className="text-sm text-gray-600 mt-1">

@@ -55,6 +55,8 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
   // Build API URL with query parameters
   const buildApiUrl = () => {
     if (searchParams?.coordinates) {
+      console.log('📍 SalonGrid: Building API with coordinates:', searchParams.coordinates);
+      console.log('📍 SalonGrid: EXACT Lat:', searchParams.coordinates.lat, 'Lng:', searchParams.coordinates.lng);
       // Use proximity search
       const params = new URLSearchParams();
       params.append('lat', searchParams.coordinates.lat.toString());
@@ -65,10 +67,18 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
       if (searchParams.time) params.append('time', searchParams.time);
       if (searchParams.date) params.append('date', searchParams.date);
       params.append('sort', searchParams.sortBy || 'distance');
-      return `/api/search/salons?${params.toString()}`;
+      const apiUrl = `/api/search/salons?${params.toString()}`;
+      console.log('📍 SalonGrid: Final API URL:', apiUrl);
+      return apiUrl;
     } else {
-      // Use regular search
+      // Use regular search - but STILL pass coordinates if available for distance calculation!
       const params = new URLSearchParams();
+      // Always pass coordinates if available (even without explicit proximity search)
+      if (searchParams?.coordinates) {
+        params.append('lat', searchParams.coordinates.lat.toString());
+        params.append('lng', searchParams.coordinates.lng.toString());
+        params.append('radiusKm', (searchParams.radius || 50).toString());
+      }
       if (searchParams?.service) params.append('service', searchParams.service);
       if (searchParams?.category) params.append('category', searchParams.category);
       if (searchParams?.filters?.priceRange) {
@@ -126,7 +136,10 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
     // Ensure rating has a safe default
     rating: salon.rating || 0,
     // Ensure reviewCount has a safe default
-    reviewCount: salon.reviewCount || salon.review_count || 0
+    reviewCount: salon.reviewCount || salon.review_count || 0,
+    // Pass operating hours for open/closed status
+    openTime: salon.openTime,
+    closeTime: salon.closeTime
   })) : rawData || [];
 
   // NEVER use mock data - production apps should show real data or proper error states

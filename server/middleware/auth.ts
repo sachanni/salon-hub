@@ -34,10 +34,12 @@ export interface AuthUser {
   }>;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET environment variable is required');
+function getJWTSecret(): string {
+  const JWT_SECRET = process.env.JWT_SECRET;
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET environment variable is required');
+  }
+  return JWT_SECRET;
 }
 
 export async function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -49,7 +51,7 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const decoded = jwt.verify(token, getJWTSecret()) as any;
     
     // Fetch user details with organization memberships
     const user = await storage.getUserById(decoded.userId);
@@ -87,6 +89,59 @@ export function requireRole(allowedRoles: string[]) {
     const hasRequiredRole = req.user.roles.some((role: string) => allowedRoles.includes(role));
     if (!hasRequiredRole) {
       return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+
+    next();
+  };
+}
+
+// Middleware to populate req.user from session for email/password auth
+export async function populateUserFromSession(req: any, res: Response, next: NextFunction) {
+  // Skip if user is already populated (e.g., by Passport)
+  if (req.user) {
+    return next();
+  }
+
+  // Check if we have a userId in the session
+  if (!req.session?.userId) {
+    return next(); // Let downstream middleware handle auth errors
+  }
+
+  try {
+    const userId = req.session.userId;
+    const dbUser = await storage.getUserById(userId);
+    
+    if (!dbUser) {
+      return next();
+    }
+
+    const userRoles = await storage.getUserRoles(userId);
+    const orgMemberships = await storage.getUserOrganizations(userId);
+    
+    req.user = {
+      id: userId,
+      email: dbUser.email || '',
+      roles: userRoles.map(role => role.name),
+      orgMemberships
+    };
+    
+    next();
+  } catch (error) {
+    console.error('Failed to populate user from session:', error);
+    next();
+  }
+}
+
+// Super admin middleware - requires super_admin role
+export function requireSuperAdmin() {
+  return (req: any, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const isSuperAdmin = req.user.roles?.includes('super_admin');
+    if (!isSuperAdmin) {
+      return res.status(403).json({ error: 'Super admin access required' });
     }
 
     next();

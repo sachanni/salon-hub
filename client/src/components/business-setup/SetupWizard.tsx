@@ -80,13 +80,14 @@ const SETUP_STEPS = [
 export default function SetupWizard({ salonId, initialStep = 1, onComplete }: SetupWizardProps) {
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  const [hasInitialized, setHasInitialized] = useState(false);
 
   // Fetch real setup status from API
   const { data: setupStatus, isLoading: setupStatusLoading, refetch: refetchSetupStatus } = useSalonSetupStatus(salonId);
 
-  // Initialize current step based on API response (first incomplete step)
+  // Initialize current step based on API response (first incomplete step) - only on initial load
   useEffect(() => {
-    if (setupStatus && !setupStatusLoading) {
+    if (setupStatus && !setupStatusLoading && !hasInitialized) {
       // Find the first incomplete step
       const stepKeys = ['businessInfo', 'locationContact', 'services', 'staff', 'resources', 'bookingSettings', 'paymentSetup', 'media'] as const;
       const firstIncompleteIndex = stepKeys.findIndex(key => !setupStatus.steps[key].completed);
@@ -108,8 +109,24 @@ export default function SetupWizard({ salonId, initialStep = 1, onComplete }: Se
         setCurrentStep(SETUP_STEPS.length);
         onComplete?.(); // Trigger completion callback
       }
+      
+      setHasInitialized(true);
     }
-  }, [setupStatus, setupStatusLoading, onComplete]);
+  }, [setupStatus, setupStatusLoading, hasInitialized, onComplete]);
+
+  // Update completed steps when setup status changes (but don't change current step)
+  useEffect(() => {
+    if (setupStatus && hasInitialized) {
+      const stepKeys = ['businessInfo', 'locationContact', 'services', 'staff', 'resources', 'bookingSettings', 'paymentSetup', 'media'] as const;
+      const completed = new Set<number>();
+      stepKeys.forEach((key, index) => {
+        if (setupStatus.steps[key].completed) {
+          completed.add(index + 1);
+        }
+      });
+      setCompletedSteps(completed);
+    }
+  }, [setupStatus, hasInitialized]);
 
   const currentStepData = SETUP_STEPS[currentStep - 1];
   const CurrentStepComponent = currentStepData.component;

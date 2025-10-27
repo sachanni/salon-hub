@@ -181,6 +181,73 @@ export const insertOrgUserSchema = createInsertSchema(orgUsers).omit({
 export type InsertOrgUser = z.infer<typeof insertOrgUserSchema>;
 export type OrgUser = typeof orgUsers.$inferSelect;
 
+// Platform configuration - super admin settings
+export const platformConfig = pgTable("platform_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  configKey: varchar("config_key", { length: 100 }).notNull().unique(), // commission_rate, booking_rules, etc
+  configValue: jsonb("config_value").notNull(), // Flexible JSON storage for any config
+  description: text("description"),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPlatformConfigSchema = createInsertSchema(platformConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertPlatformConfig = z.infer<typeof insertPlatformConfigSchema>;
+export type PlatformConfig = typeof platformConfig.$inferSelect;
+
+// Platform commissions - track earnings per booking
+export const platformCommissions = pgTable("platform_commissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  bookingAmountPaisa: integer("booking_amount_paisa").notNull(),
+  commissionRate: decimal("commission_rate", { precision: 5, scale: 2 }).notNull(), // e.g., 15.00 for 15%
+  commissionAmountPaisa: integer("commission_amount_paisa").notNull(),
+  salonEarningsPaisa: integer("salon_earnings_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, paid, cancelled
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPlatformCommissionSchema = createInsertSchema(platformCommissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPlatformCommission = z.infer<typeof insertPlatformCommissionSchema>;
+export type PlatformCommission = typeof platformCommissions.$inferSelect;
+
+// Platform payouts - manual payout approvals to salons
+export const platformPayouts = pgTable("platform_payouts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  amountPaisa: integer("amount_paisa").notNull(), // Total payout amount
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, approved, rejected, paid
+  paymentMethod: varchar("payment_method", { length: 50 }), // bank_transfer, upi, etc
+  paymentDetails: jsonb("payment_details"), // Account details, UPI ID, etc
+  approvedBy: varchar("approved_by").references(() => users.id), // Super admin who approved
+  approvedAt: timestamp("approved_at"),
+  paidAt: timestamp("paid_at"),
+  rejectionReason: text("rejection_reason"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPlatformPayoutSchema = createInsertSchema(platformPayouts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPlatformPayout = z.infer<typeof insertPlatformPayoutSchema>;
+export type PlatformPayout = typeof platformPayouts.$inferSelect;
+
 // Salons table - business profiles linked to organizations
 export const salons = pgTable("salons", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -209,6 +276,10 @@ export const salons = pgTable("salons", {
   closeTime: text("close_time"), // e.g., "8:00 PM" (legacy - kept for backward compatibility)
   businessHours: jsonb("business_hours"), // Structured day-by-day hours: { monday: { open: true, start: "09:00", end: "17:00" }, ... }
   isActive: integer("is_active").notNull().default(1),
+  approvalStatus: varchar("approval_status", { length: 20 }).notNull().default('pending'), // pending, approved, rejected
+  approvedAt: timestamp("approved_at"),
+  approvedBy: varchar("approved_by").references(() => users.id), // Super admin who approved
+  rejectionReason: text("rejection_reason"), // Reason for rejection if status is rejected
   setupProgress: jsonb("setup_progress"), // Tracks completion of 8 setup steps: businessInfo, locationContact, services, staff, resources, bookingSettings, paymentSetup, media
   ownerId: varchar("owner_id").references(() => users.id), // Keep for backward compatibility
   orgId: varchar("org_id").references(() => organizations.id, { onDelete: "set null" }), // New organization link
@@ -268,6 +339,7 @@ export const services = pgTable("services", {
   isActive: integer("is_active").notNull().default(1),
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }), // Auto-delete services when salon is deleted
   category: varchar("category", { length: 50 }), // Hair, Nails, Facial, Massage, etc
+  imageUrl: text("image_url"), // Visual image for the service
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   // Composite unique constraint to enable composite foreign keys
@@ -490,10 +562,18 @@ export const bookings = pgTable("bookings", {
   paymentMethod: varchar("payment_method", { length: 20 }).notNull().default('pay_now'), // pay_now, pay_at_salon
   notes: text("notes"), // Special requests or notes
   guestSessionId: text("guest_session_id"), // For tracking guest user sessions
+  // Offer-related fields (snapshot at booking time for audit trail)
+  offerId: varchar("offer_id").references(() => platformOffers.id, { onDelete: "set null" }), // Applied offer (if any)
+  offerTitle: text("offer_title"), // Snapshot of offer title at booking time
+  offerDiscountType: varchar("offer_discount_type", { length: 20 }), // Snapshot: 'percentage' | 'fixed'
+  offerDiscountValue: integer("offer_discount_value"), // Snapshot: percentage or paisa amount
+  originalAmountPaisa: integer("original_amount_paisa"), // Original price before discount
+  discountAmountPaisa: integer("discount_amount_paisa"), // Discount applied in paisa
+  finalAmountPaisa: integer("final_amount_paisa"), // Final amount after discount
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
-  // Unique index to enable composite FKs from booking_services
-  uniqueIndex("bookings_id_salon_id_unique").on(table.id, table.salonId),
+  // Unique constraint to enable composite FKs from booking_services
+  unique("bookings_id_salon_id_unique").on(table.id, table.salonId),
   // Composite foreign keys to enforce same-salon membership
   foreignKey({
     columns: [table.serviceId, table.salonId],
@@ -715,6 +795,7 @@ export const createPaymentOrderSchema = z.object({
     notes: z.string().optional(),
     guestSessionId: z.string().optional(), // For guest session tracking
     paymentMethod: z.enum(['pay_now', 'pay_at_salon']).default('pay_now'), // Payment method selection
+    offerId: z.string().uuid().optional(), // Optional offer to apply
   }),
 });
 
@@ -3241,3 +3322,202 @@ export const placesGeocodeResponseSchema = z.object({
 export type PlacesAutocompleteResponse = z.infer<typeof placesAutocompleteResponseSchema>;
 export type PlacesDetailsResponse = z.infer<typeof placesDetailsResponseSchema>;
 export type PlacesGeocodeResponse = z.infer<typeof placesGeocodeResponseSchema>;
+
+// Platform Offers/Promotions - Managed by Super Admin & Salon Owners
+export const platformOffers = pgTable("platform_offers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").references(() => salons.id, { onDelete: "cascade" }), // null for platform-wide offers
+  ownedBySalonId: varchar("owned_by_salon_id").references(() => salons.id, { onDelete: "cascade" }), // Track salon ownership (null = super admin created)
+  title: text("title").notNull(),
+  description: text("description"),
+  discountType: varchar("discount_type", { length: 20 }).notNull(), // 'percentage' | 'fixed'
+  discountValue: integer("discount_value").notNull(), // percentage (1-100) or paisa amount
+  minimumPurchase: integer("minimum_purchase"), // minimum purchase in paisa
+  maxDiscount: integer("max_discount"), // maximum discount cap in paisa (for percentage discounts)
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until").notNull(),
+  isActive: integer("is_active").notNull().default(1),
+  isPlatformWide: integer("is_platform_wide").notNull().default(0), // 1 for all salons, 0 for specific salon
+  usageLimit: integer("usage_limit"), // null for unlimited
+  usageCount: integer("usage_count").notNull().default(0),
+  approvalStatus: varchar("approval_status", { length: 20 }).notNull().default('pending'), // 'pending' | 'approved' | 'rejected'
+  approvalNotes: text("approval_notes"),
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  rejectedBy: varchar("rejected_by").references(() => users.id),
+  rejectedAt: timestamp("rejected_at"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  // Approval workflow tracking (Migration: All existing offers default to manually approved state)
+  autoApproved: integer("auto_approved").notNull().default(0), // 1 if auto-approved by system, 0 if manually created/approved by admin
+  requiresApprovalOnEdit: integer("requires_approval_on_edit").notNull().default(0), // 1 if future edits need re-approval (set when auto-approve is disabled)
+  lastEditedBy: varchar("last_edited_by").references(() => users.id),
+  lastEditedAt: timestamp("last_edited_at"),
+  imageUrl: text("image_url"), // Promotional image for the offer card
+}, (table) => ({
+  // Index for salon-scoped offer queries (performance optimization)
+  ownedBySalonIdIdx: index("platform_offers_owned_by_salon_id_idx").on(table.ownedBySalonId),
+}));
+
+export const insertPlatformOfferSchema = createInsertSchema(platformOffers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+  approvedBy: true,
+  approvedAt: true,
+  rejectedBy: true,
+  rejectedAt: true,
+  autoApproved: true,
+  requiresApprovalOnEdit: true,
+  lastEditedBy: true,
+  lastEditedAt: true,
+});
+
+export const createOfferSchema = insertPlatformOfferSchema.extend({
+  validFrom: z.string().or(z.date()),
+  validUntil: z.string().or(z.date()),
+  discountType: z.enum(['percentage', 'fixed']),
+  discountValue: z.number().positive(),
+  isPlatformWide: z.number().int().min(0).max(1),
+  isActive: z.number().int().min(0).max(1).default(1),
+  imageUrl: z.string().url().optional(),
+});
+
+export const updateOfferSchema = createOfferSchema.partial().omit({
+  createdBy: true,
+});
+
+export const approveRejectOfferSchema = z.object({
+  reason: z.string().optional(),
+});
+
+export const toggleOfferStatusSchema = z.object({
+  isActive: z.number().int().min(0).max(1),
+});
+
+// Salon owner offer creation schema - simplified (no platform-wide, no super admin fields)
+export const salonOfferSchema = z.object({
+  salonId: z.string(),
+  title: z.string().min(3, "Title must be at least 3 characters"),
+  description: z.string().optional(),
+  discountType: z.enum(['percentage', 'fixed']),
+  discountValue: z.number().positive("Discount value must be positive"),
+  minimumPurchase: z.number().int().nonnegative().optional(),
+  maxDiscount: z.number().int().nonnegative().optional(),
+  validFrom: z.string().or(z.date()),
+  validUntil: z.string().or(z.date()),
+  usageLimit: z.number().int().positive().optional(),
+  isActive: z.number().int().min(0).max(1).default(1),
+  imageUrl: z.string().url().optional(),
+});
+
+// Platform settings schemas
+export const platformSettingsSchema = z.object({
+  autoApproveSalonOffers: z.boolean(),
+  commissionRate: z.number().min(0).max(100).optional(),
+});
+
+export type InsertPlatformOffer = z.infer<typeof insertPlatformOfferSchema>;
+export type PlatformOffer = typeof platformOffers.$inferSelect;
+export type SalonOfferInput = z.infer<typeof salonOfferSchema>;
+export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
+
+// Digital Wallet for Customers
+export const userWallets = pgTable("user_wallets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  balanceInPaisa: integer("balance_in_paisa").notNull().default(0),
+  lifetimeEarnedInPaisa: integer("lifetime_earned_in_paisa").notNull().default(0),
+  lifetimeSpentInPaisa: integer("lifetime_spent_in_paisa").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Wallet Transaction History
+export const walletTransactions = pgTable("wallet_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletId: varchar("wallet_id").notNull().references(() => userWallets.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 20 }).notNull(), // 'credit' | 'debit'
+  amountInPaisa: integer("amount_in_paisa").notNull(),
+  reason: text("reason").notNull(), // 'signup_bonus' | 'cashback' | 'booking_payment' | 'referral_reward' etc
+  bookingId: varchar("booking_id"),
+  offerId: varchar("offer_id").references(() => platformOffers.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// User Offer Usage Tracking (for "First 3 Bookings" type offers)
+export const userOfferUsage = pgTable("user_offer_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  offerId: varchar("offer_id").notNull().references(() => platformOffers.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").notNull(),
+  discountAppliedInPaisa: integer("discount_applied_in_paisa").notNull(),
+  usageNumber: integer("usage_number").notNull(), // 1st, 2nd, 3rd booking etc
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Special Launch Offers Configuration
+export const launchOffers = pgTable("launch_offers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  offerType: varchar("offer_type", { length: 50 }).notNull(), // 'first_booking' | 'signup_bonus' | 'referral'
+  title: text("title").notNull(),
+  description: text("description"),
+  instantDiscountPercent: integer("instant_discount_percent"), // e.g., 15%
+  walletCashbackPercent: integer("wallet_cashback_percent"), // e.g., 10%
+  walletBonusInPaisa: integer("wallet_bonus_in_paisa"), // Fixed amount bonus
+  maxUsagePerUser: integer("max_usage_per_user"), // e.g., 3 for "first 3 bookings"
+  minimumPurchaseInPaisa: integer("minimum_purchase_in_paisa"),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until").notNull(),
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertUserWalletSchema = createInsertSchema(userWallets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertWalletTransactionSchema = createInsertSchema(walletTransactions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertUserOfferUsageSchema = createInsertSchema(userOfferUsage).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertLaunchOfferSchema = createInsertSchema(launchOffers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type UserWallet = typeof userWallets.$inferSelect;
+export type WalletTransaction = typeof walletTransactions.$inferSelect;
+export type UserOfferUsage = typeof userOfferUsage.$inferSelect;
+export type LaunchOffer = typeof launchOffers.$inferSelect;
+
+// OTP Verification for Phone Numbers
+export const otpVerifications = pgTable("otp_verifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  otp: varchar("otp", { length: 6 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  verified: integer("verified").notNull().default(0), // 0 = not verified, 1 = verified
+  attempts: integer("attempts").notNull().default(0), // Track OTP verification attempts
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertOtpVerificationSchema = createInsertSchema(otpVerifications).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type OtpVerification = typeof otpVerifications.$inferSelect;

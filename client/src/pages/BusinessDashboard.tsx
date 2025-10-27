@@ -71,6 +71,7 @@ import CustomerCommunicationDashboard from "@/components/CustomerCommunicationDa
 import InventoryManagementDashboard from "@/components/InventoryManagementDashboard";
 import CalendarManagement from "@/pages/CalendarManagement";
 import PackageManagement from "@/components/business-dashboard/PackageManagement";
+import BusinessOffers from "@/pages/BusinessOffers";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -412,7 +413,8 @@ export default function BusinessDashboard() {
       icon: Calendar,
       items: [
         { id: "calendar", label: "Bookings & Calendar", icon: Calendar },
-        { id: "inventory", label: "Inventory Management", icon: Package }
+        { id: "inventory", label: "Inventory Management", icon: Package },
+        { id: "offers", label: "Offers & Promotions", icon: Gift }
       ]
     },
     {
@@ -1385,6 +1387,15 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle offers tab
+    if (activeTab === "offers") {
+      return (
+        <div className="p-6">
+          <BusinessOffers salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     // Handle calendar tab
     if (activeTab === "calendar") {
       return (
@@ -1453,7 +1464,7 @@ export default function BusinessDashboard() {
             </div>
 
             {/* Salon Selector Dropdown */}
-            {Array.isArray(salons) && salons.length > 1 && (
+            {Array.isArray(salons) && salons.length > 0 && (
               <div className="flex items-center gap-2">
                 <Select value={salonId || undefined} onValueChange={handleSalonSwitch}>
                   <SelectTrigger className="w-[200px] md:w-[280px] bg-white border-violet-200 hover:border-violet-300 focus:ring-violet-500" data-testid="dropdown-salon-selector">

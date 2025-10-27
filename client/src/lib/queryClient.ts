@@ -57,7 +57,7 @@ export const getQueryFn: <T>(options: {
       
       if (!contentType || !contentType.includes('application/json')) {
         console.log('QueryClient no JSON content-type - returning {}');
-        return {} as T;
+        return {} as unknown as T;
       }
       
       // Parse JSON response
@@ -66,7 +66,7 @@ export const getQueryFn: <T>(options: {
       
       if (!text || text.trim() === '') {
         console.log('QueryClient empty text - returning null');
-        return null as T;
+        return null as unknown as T;
       }
       
       try {
