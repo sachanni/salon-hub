@@ -5,7 +5,7 @@ import { Building2, MapPin, Scissors, Users, Calendar, Settings, CreditCard, Cam
 import { useSalonSetupStatus } from '@/hooks/useSalonSetupStatus';
 import BusinessInfoStep from './BusinessInfoStep';
 import LocationContactStep from './LocationContactStep';
-import ServicesStep from './ServicesStep';
+import { PremiumServicesStep } from './PremiumServicesStep';
 import StaffStep from './StaffStep';
 import ResourcesStep from './ResourcesStep';
 import BookingSettingsStep from './BookingSettingsStep';
@@ -38,7 +38,7 @@ const SETUP_STEPS = [
     key: 'services',
     name: 'Services & Pricing',
     icon: Scissors,
-    component: ServicesStep,
+    component: PremiumServicesStep,
   },
   {
     id: 4,

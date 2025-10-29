@@ -34,6 +34,11 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"), // Replit Auth field
   profileImageUrl: varchar("profile_image_url"), // Replit Auth field
   phone: text("phone"),
+  workPreference: varchar("work_preference", { length: 20 }), // salon, home, both
+  businessCategory: varchar("business_category", { length: 50 }), // unisex, beauty_parlour, mens_parlour
+  businessName: varchar("business_name", { length: 255 }), // Business/Salon name
+  panNumber: varchar("pan_number", { length: 10 }), // PAN number for tax
+  gstNumber: varchar("gst_number", { length: 15 }), // GST number
   emailVerified: integer("email_verified").notNull().default(0),
   phoneVerified: integer("phone_verified").notNull().default(0),
   isActive: integer("is_active").notNull().default(1),
@@ -47,6 +52,11 @@ export const insertUserSchema = createInsertSchema(users).pick({
   firstName: true,
   lastName: true,
   phone: true,
+  workPreference: true,
+  businessCategory: true,
+  businessName: true,
+  panNumber: true,
+  gstNumber: true,
 }).extend({
   username: z.string().optional(), // Username is optional, auto-generated if not provided
 });
@@ -335,23 +345,100 @@ export const services = pgTable("services", {
   description: text("description"),
   durationMinutes: integer("duration_minutes").notNull(),
   priceInPaisa: integer("price_in_paisa").notNull(), // Store price in smallest currency unit
-  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
   isActive: integer("is_active").notNull().default(1),
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }), // Auto-delete services when salon is deleted
-  category: varchar("category", { length: 50 }), // Hair, Nails, Facial, Massage, etc
+  category: varchar("category", { length: 50 }), // Hair Cut & Style, Hair Color, Makeup, etc
+  subCategory: varchar("sub_category", { length: 100 }), // Male, Female, or specific sub-category
   imageUrl: text("image_url"), // Visual image for the service
+  
+  // Gender-based service differentiation (Billu Partner App style)
+  gender: varchar("gender", { length: 10 }), // 'male', 'female', 'unisex'
+  
+  // Service approval workflow
+  approvalStatus: varchar("approval_status", { length: 20 }).notNull().default('approved'), // 'approved', 'pending', 'rejected'
+  
+  // Custom service flag
+  isCustomService: integer("is_custom_service").notNull().default(0), // 1 = salon created custom service, 0 = platform template
+  
+  // Flexible pricing structure
+  priceType: varchar("price_type", { length: 20 }).notNull().default('fixed'), // 'fixed', 'variable', 'starting_from'
+  productCostPaisa: integer("product_cost_paisa"), // Additional product cost if applicable
+  specialPricePaisa: integer("special_price_paisa"), // Promotional/special pricing
+  
+  // Service combination/package support
+  isComboService: integer("is_combo_service").notNull().default(0), // 1 if this is a combination service
+  comboServiceIds: text("combo_service_ids").array(), // Array of service IDs if combo
+  
+  // Service template reference
+  templateId: varchar("template_id"), // Reference to service template if created from template
+  
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   // Composite unique constraint to enable composite foreign keys
   unique("services_id_salon_id_unique").on(table.id, table.salonId),
+  // Index for gender-based filtering
+  index("services_gender_idx").on(table.gender),
+  // Index for category filtering
+  index("services_category_idx").on(table.category),
+  // Index for approval status
+  index("services_approval_status_idx").on(table.approvalStatus),
 ]);
 
 export const insertServiceSchema = createInsertSchema(services).omit({
   id: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 export type InsertService = z.infer<typeof insertServiceSchema>;
 export type Service = typeof services.$inferSelect;
+
+// Service Templates table - platform-wide service templates (Billu Partner App style)
+export const serviceTemplates = pgTable("service_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 50 }).notNull(), // Hair Cut & Style, Hair Color, Makeup, etc
+  subCategory: varchar("sub_category", { length: 100 }), // Male, Female, or specific sub-category
+  gender: varchar("gender", { length: 10 }).notNull(), // 'male', 'female', 'unisex'
+  
+  // Suggested pricing and duration (salons can override)
+  suggestedDurationMinutes: integer("suggested_duration_minutes").notNull(),
+  suggestedPriceInPaisa: integer("suggested_price_in_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Template metadata
+  isPopular: integer("is_popular").notNull().default(0), // 1 if this is a popular service
+  sortOrder: integer("sort_order").notNull().default(0), // For display ordering
+  imageUrl: text("image_url"), // Visual image for the template
+  
+  // Tags for better categorization
+  tags: text("tags").array(), // e.g., ['beard', 'fade', 'modern'], ['bridal', 'party'], etc
+  
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Index for category filtering
+  index("service_templates_category_idx").on(table.category),
+  // Index for gender filtering
+  index("service_templates_gender_idx").on(table.gender),
+  // Index for popular services
+  index("service_templates_popular_idx").on(table.isPopular),
+  // Unique constraint on name + category + gender to prevent duplicates
+  unique("service_templates_name_category_gender_unique").on(table.name, table.category, table.gender),
+]);
+
+export const insertServiceTemplateSchema = createInsertSchema(serviceTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertServiceTemplate = z.infer<typeof insertServiceTemplateSchema>;
+export type ServiceTemplate = typeof serviceTemplates.$inferSelect;
 
 // Service relations
 export const servicesRelations = relations(services, ({ one, many }) => ({
@@ -3521,3 +3608,68 @@ export const insertOtpVerificationSchema = createInsertSchema(otpVerifications).
 });
 
 export type OtpVerification = typeof otpVerifications.$inferSelect;
+
+// ===============================================
+// GEOCODING CACHE SYSTEM - Production-Grade Location Accuracy
+// ===============================================
+
+// Canonical geocoding locations - stores ONE authoritative record per place_id
+// This prevents duplicate coordinates for same location with different search keywords
+export const geocodeLocations = pgTable("geocode_locations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  placeId: varchar("place_id", { length: 255 }).unique(), // Google Place ID - unique identifier
+  formattedAddress: text("formatted_address").notNull(), // Official address from Google
+  normalizedHash: varchar("normalized_hash", { length: 64 }), // MD5 hash for deduplication
+  latitude: decimal("latitude", { precision: 10, scale: 8 }).notNull(), // 10.8 decimals = 1.1mm precision
+  longitude: decimal("longitude", { precision: 11, scale: 8 }).notNull(), // 11.8 decimals = 1.1mm precision
+  viewport: jsonb("viewport"), // Bounding box for map display
+  locationType: varchar("location_type", { length: 30 }), // ROOFTOP, RANGE_INTERPOLATED, GEOMETRIC_CENTER, APPROXIMATE
+  confidence: varchar("confidence", { length: 20 }).notNull().default('medium'), // high, medium, low
+  source: varchar("source", { length: 50 }).notNull().default('google_places'), // google_places, geoapify, nominatim, hardcoded
+  rawResponse: jsonb("raw_response"), // Full API response for debugging
+  verifiedAt: timestamp("verified_at").defaultNow(), // Last validation timestamp
+  expiresAt: timestamp("expires_at").notNull(), // TTL for cache - 60-90 days
+  needsReview: integer("needs_review").notNull().default(0), // Flag for manual verification
+  usageCount: integer("usage_count").notNull().default(0), // Track how often this location is used
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("geocode_locations_place_id_idx").on(table.placeId),
+  index("geocode_locations_hash_idx").on(table.normalizedHash),
+  index("geocode_locations_expires_idx").on(table.expiresAt),
+  index("geocode_locations_coords_idx").on(table.latitude, table.longitude),
+]);
+
+// Location aliases - maps search keyword variations to canonical place_id
+// Handles: "DLF Mall" vs "DLF Mall of India" vs "DLF Mall Noida" → same place_id
+export const locationAliases = pgTable("location_aliases", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  normalizedQuery: varchar("normalized_query", { length: 255 }).notNull(), // "dlf mall of india noida" (lowercase, trimmed)
+  originalQuery: varchar("original_query", { length: 255 }).notNull(), // "DLF Mall of India, Noida" (as user typed)
+  placeId: varchar("place_id", { length: 255 }).notNull(), // Foreign key to geocode_locations
+  matchType: varchar("match_type", { length: 20 }).notNull().default('exact'), // exact, partial, alias
+  usageCount: integer("usage_count").notNull().default(0), // Track popular search terms
+  locale: varchar("locale", { length: 10 }).default('en'), // Language/region code
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("location_aliases_normalized_idx").on(table.normalizedQuery),
+  index("location_aliases_place_id_idx").on(table.placeId),
+  uniqueIndex("location_aliases_query_unique").on(table.normalizedQuery, table.placeId),
+]);
+
+// Schemas for geocoding cache
+export const insertGeocodeLocationSchema = createInsertSchema(geocodeLocations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertLocationAliasSchema = createInsertSchema(locationAliases).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type GeocodeLocation = typeof geocodeLocations.$inferSelect;
+export type LocationAlias = typeof locationAliases.$inferSelect;
+export type InsertGeocodeLocation = z.infer<typeof insertGeocodeLocationSchema>;
+export type InsertLocationAlias = z.infer<typeof insertLocationAliasSchema>;

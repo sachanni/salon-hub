@@ -8,6 +8,11 @@ export interface User {
   firstName?: string;
   lastName?: string;
   profileImageUrl?: string;
+  workPreference?: string;
+  businessCategory?: string;
+  businessName?: string;
+  panNumber?: string;
+  gstNumber?: string;
   roles: string[];
   orgMemberships: Array<{
     orgId: string;

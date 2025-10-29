@@ -14,12 +14,20 @@ import { handleSocialAuth } from "@/lib/socialAuth";
 
 export default function JoinBusiness() {
   const [, setLocation] = useLocation();
+  
+  // Get work preference from URL params
+  const searchParams = new URLSearchParams(window.location.search);
+  const workPreference = searchParams.get('preference') || '';
+  
   const [formData, setFormData] = useState({
     password: "",
     email: "",
     firstName: "",
     lastName: "",
     phone: "",
+    panNumber: "",
+    gstNumber: "",
+    workPreference,
   });
   const [isLoading, setIsLoading] = useState(false);
   const [shouldRedirect, setShouldRedirect] = useState(false);
@@ -217,11 +225,15 @@ export default function JoinBusiness() {
         <div className="w-full max-w-md">
           {/* Back Button */}
           <div className="mb-8">
-            <Button asChild variant="ghost" size="sm" data-testid="button-back">
-              <Link href="/join">
-                <ChevronLeft className="h-4 w-4" />
-                Back
-              </Link>
+            <Button 
+              onClick={() => window.history.back()} 
+              variant="ghost" 
+              size="sm" 
+              data-testid="button-back"
+              className="gap-2"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back
             </Button>
           </div>
 
@@ -305,6 +317,32 @@ export default function JoinBusiness() {
                   data-testid="input-phone"
                 />
               </div>
+            </div>
+            
+            {/* PAN Number */}
+            <div className="space-y-2">
+              <Label htmlFor="panNumber">PAN Number</Label>
+              <Input
+                id="panNumber"
+                value={formData.panNumber}
+                onChange={(e) => handleInputChange('panNumber', e.target.value.toUpperCase())}
+                placeholder="ABCDE1234F"
+                maxLength={10}
+                data-testid="input-pannumber"
+              />
+            </div>
+            
+            {/* GST Number */}
+            <div className="space-y-2">
+              <Label htmlFor="gstNumber">GST Number</Label>
+              <Input
+                id="gstNumber"
+                value={formData.gstNumber}
+                onChange={(e) => handleInputChange('gstNumber', e.target.value.toUpperCase())}
+                placeholder="22AAAAA0000A1Z5"
+                maxLength={15}
+                data-testid="input-gstnumber"
+              />
             </div>
             
             {/* Password */}

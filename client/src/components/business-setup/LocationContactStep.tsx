@@ -234,7 +234,20 @@ export default function LocationContactStep({
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData((prev: typeof formData) => ({ ...prev, [field]: value }));
+    setFormData((prev: typeof formData) => {
+      const newData = { ...prev, [field]: value };
+      
+      // Clear coordinates when key address fields change so user can re-geocode
+      if (['address', 'city', 'state', 'zipCode'].includes(field)) {
+        return {
+          ...newData,
+          latitude: null,
+          longitude: null
+        };
+      }
+      
+      return newData;
+    });
   };
 
   // Geocode address using server-side API (industry standard - more reliable)
@@ -420,6 +433,9 @@ export default function LocationContactStep({
             city: city,
             state: state,
             zipCode: zipCode,
+            // Clear old coordinates so user can re-geocode with new address
+            latitude: null,
+            longitude: null
           }));
 
           // Reset custom city toggle if state has predefined cities

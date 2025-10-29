@@ -72,6 +72,7 @@ import InventoryManagementDashboard from "@/components/InventoryManagementDashbo
 import CalendarManagement from "@/pages/CalendarManagement";
 import PackageManagement from "@/components/business-dashboard/PackageManagement";
 import BusinessOffers from "@/pages/BusinessOffers";
+import { Map } from "@/components/ui/map";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -136,7 +137,7 @@ interface AnalyticsData {
 // Import step components - Use the same components as BusinessSetup
 import BusinessInfoStep from "@/components/business-setup/BusinessInfoStep";
 import LocationContactStep from "@/components/business-setup/LocationContactStep";
-import ServicesStep from "@/components/business-setup/ServicesStep";
+import { PremiumServicesStep } from "@/components/business-setup/PremiumServicesStep";
 import StaffStep from "@/components/business-setup/StaffStep";
 import ResourcesStep from "@/components/business-setup/ResourcesStep";
 import BookingSettingsStep from "@/components/business-setup/BookingSettingsStep";
@@ -309,6 +310,12 @@ export default function BusinessDashboard() {
   const completionPercentage = completionData?.overallProgress ?? 0;
   const nextStep = completionData?.nextStep;
 
+  // Separate completion checks for Business Info and Location & Contact
+  const isBusinessInfoComplete = salonData?.name && salonData?.description && salonData?.category;
+  const isLocationContactComplete = salonData?.address && salonData?.city && salonData?.state && 
+                                     salonData?.zipCode && salonData?.latitude != null && salonData?.longitude != null && 
+                                     salonData?.phone && salonData?.email;
+
   // Helper functions for formatting and trends
   const formatCurrency = (paisa: number) => {
     const rupees = paisa / 100;
@@ -422,8 +429,8 @@ export default function BusinessDashboard() {
       label: "Business Setup & Management",
       icon: Building,
       items: [
-        { id: "business-info", label: "Business Info", icon: Building, isComplete: isProfileComplete, isSetup: true },
-        { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: isProfileComplete, isSetup: true },
+        { id: "business-info", label: "Business Info", icon: Building, isComplete: !!isBusinessInfoComplete, isSetup: true },
+        { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: !!isLocationContactComplete, isSetup: true },
         { id: "services", label: "Services & Pricing", icon: Scissors, isComplete: hasServices, isSetup: true },
         { id: "packages", label: "Package & Combos", icon: Gift, isComplete: false, isSetup: false },
         { id: "staff", label: "Staff Management", icon: Users, isComplete: hasStaff, isSetup: true },
@@ -864,6 +871,61 @@ export default function BusinessDashboard() {
                     </p>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Location Set Successfully Alert */}
+          {salonData?.latitude != null && salonData?.longitude != null && (
+            <Alert className="border-green-200 bg-green-50 dark:bg-green-950">
+              <MapPin className="h-5 w-5 text-green-600" />
+              <AlertDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-green-900 dark:text-green-100 mb-1">
+                      Location Set Successfully
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Coordinates: {typeof salonData.latitude === 'number' ? salonData.latitude.toFixed(6) : parseFloat(salonData.latitude).toFixed(6)}, {typeof salonData.longitude === 'number' ? salonData.longitude.toFixed(6) : parseFloat(salonData.longitude).toFixed(6)}
+                    </p>
+                  </div>
+                  <Link href="#location-contact">
+                    <Button variant="outline" size="sm" onClick={() => setActiveTab("location-contact")}>
+                      Update Location
+                    </Button>
+                  </Link>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Location on Map */}
+          {salonData?.latitude != null && salonData?.longitude != null && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-purple-600" />
+                  <CardTitle>Location on Map</CardTitle>
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    📍 {typeof salonData.latitude === 'number' ? salonData.latitude.toFixed(6) : parseFloat(salonData.latitude).toFixed(6)}, {typeof salonData.longitude === 'number' ? salonData.longitude.toFixed(6) : parseFloat(salonData.longitude).toFixed(6)}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Map
+                  latitude={typeof salonData.latitude === 'number' ? salonData.latitude : parseFloat(salonData.latitude)}
+                  longitude={typeof salonData.longitude === 'number' ? salonData.longitude : parseFloat(salonData.longitude)}
+                  zoom={16}
+                  className="w-full h-[300px] rounded-lg border-2 border-purple-200"
+                  markerTitle={salonData.name || "Your Business Location"}
+                />
+                <div className="mt-3 flex items-center gap-2 text-xs text-purple-700 bg-purple-50 dark:bg-purple-950 dark:text-purple-300 p-2 rounded-md">
+                  <MapPin className="h-3 w-3" />
+                  <span>💡 Tip: Drag the marker to adjust your exact location</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  This is where your business will appear on the map for customers
+                </p>
               </CardContent>
             </Card>
           )}
@@ -1326,7 +1388,7 @@ export default function BusinessDashboard() {
     const components = {
       'business-info': BusinessInfoStep,
       'location-contact': LocationContactStep,
-      'services': ServicesStep,
+      'services': PremiumServicesStep,
       'staff': StaffStep,
       'resources': ResourcesStep,
       'booking-settings': BookingSettingsStep,

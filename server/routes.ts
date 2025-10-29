@@ -383,6 +383,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         firstName: user.firstName,
         lastName: user.lastName,
         profileImageUrl: user.profileImageUrl,
+        workPreference: user.workPreference,
+        businessCategory: user.businessCategory,
         roles: userRoles.map(role => role.name),
         orgMemberships
       });
@@ -395,7 +397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manual registration endpoint (works alongside Replit Auth)
   app.post('/api/auth/register', async (req: any, res) => {
     try {
-      const { email, password, firstName, lastName, phone, userType } = req.body;
+      const { email, password, firstName, lastName, phone, userType, workPreference, panNumber, gstNumber } = req.body;
 
       // Validate required fields
       if (!email || !password) {
@@ -412,13 +414,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const bcrypt = await import('bcryptjs');
       const hashedPassword = await bcrypt.default.hash(password, 10);
 
-      // Create user
+      // Create user (businessCategory and businessName will be set later in business setup)
       const userData = {
         email,
         password: hashedPassword,
         firstName: firstName || '',
         lastName: lastName || '',
         phone: phone || null,
+        workPreference: workPreference || null,
+        businessCategory: null, // Will be set during business setup wizard
+        businessName: null, // Will be set when selecting business template
+        panNumber: panNumber || null,
+        gstNumber: gstNumber || null,
         emailVerified: 0,
         phoneVerified: 0,
         isActive: 1,
@@ -454,20 +461,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const newOrg = await storage.createOrganization(orgData);
 
           // Add owner as member of organization
-          await storage.addOrganizationMember(newOrg.id, newUser.id, 'owner');
+          await storage.addUserToOrganization(newOrg.id, newUser.id, 'owner');
 
-          // Create default salon for the organization
+          // Create default salon for the organization with empty name (user will fill during setup)
           const salonData = {
-            name: `${firstName || 'My'} ${lastName || ''} Salon`.trim(),
+            name: '', // Empty - user will provide during Business Info step
             organizationId: newOrg.id,
             ownerId: newUser.id,
             address: '',
             city: '',
             state: '',
-            postalCode: '',
-            country: 'India',
+            zipCode: '', // Use zipCode instead of postalCode
+            phone: phone || '',
             email: email,
-            isActive: true
+            category: '', // Empty - user will select during Business Info step
+            priceRange: '', // Empty - will be set during setup
+            description: '' // Empty - user will provide during Business Info step
           };
           const newSalon = await storage.createSalon(salonData);
           
@@ -981,8 +990,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate each of the 8 setup steps
       const setupStatus = {
         businessInfo: {
-          completed: !!(salon.name && salon.description && salon.category && salon.priceRange),
-          requiredFields: ['name', 'description', 'category', 'priceRange'],
+          completed: !!(salon.name && salon.category),
+          requiredFields: ['name', 'category'],
           missingFields: [] as string[],
         },
         locationContact: {
@@ -2035,7 +2044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { name: 'Cross River Mall', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
         { name: 'Great India Place', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
         { name: 'Logix City Centre', area: 'Sector 32, Noida', coords: { lat: 28.6000, lng: 77.3300 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
-        { name: 'DLF Mall of India', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 }
+        { name: 'DLF Mall of India', area: 'Sector 18, Noida', coords: { lat: 28.5682, lng: 77.3250 }, state: 'Uttar Pradesh', country: 'India', priority: 2 }
       ];
 
       // Smart search algorithm for Delhi NCR with fuzzy matching
@@ -2315,7 +2324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           { name: 'Cross River Mall', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
           { name: 'Great India Place', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
           { name: 'Logix City Centre', area: 'Sector 32, Noida', coords: { lat: 28.6000, lng: 77.3300 }, state: 'Uttar Pradesh', country: 'India', priority: 2 },
-          { name: 'DLF Mall of India', area: 'Sector 18, Noida', coords: { lat: 28.5900, lng: 77.3200 }, state: 'Uttar Pradesh', country: 'India', priority: 2 }
+          { name: 'DLF Mall of India', area: 'Sector 18, Noida', coords: { lat: 28.5682, lng: 77.3250 }, state: 'Uttar Pradesh', country: 'India', priority: 2 }
         ];
         
         // Smart search algorithm for Delhi NCR with fuzzy matching
@@ -4803,6 +4812,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching services:', error);
       res.status(500).json({ error: 'Failed to fetch services' });
+    }
+  });
+
+  // Get service templates (for service library during business setup)
+  app.get('/api/service-templates', async (req, res) => {
+    try {
+      const { gender, category, isPopular } = req.query;
+      
+      const serviceTemplates = await storage.getServiceTemplates({
+        gender: gender as string | undefined,
+        category: category as string | undefined,
+        isPopular: isPopular === 'true' ? true : isPopular === 'false' ? false : undefined,
+      });
+      
+      res.json(serviceTemplates || []);
+    } catch (error) {
+      console.error('Error fetching service templates:', error);
+      res.status(500).json({ error: 'Failed to fetch service templates' });
     }
   });
 

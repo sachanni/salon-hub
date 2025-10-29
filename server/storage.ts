@@ -2,6 +2,7 @@ import {
   type User, type InsertUser, type UpsertUser,
   type UserSavedLocation, type InsertUserSavedLocation,
   type Service, type InsertService,
+  type ServiceTemplate, type InsertServiceTemplate,
   type ServicePackage, type InsertServicePackage,
   type PackageService, type InsertPackageService,
   type Booking, type InsertBooking,
@@ -69,9 +70,13 @@ import {
   type PlatformCommission, type InsertPlatformCommission,
   type PlatformPayout, type InsertPlatformPayout,
   type PlatformOffer, type InsertPlatformOffer,
-  users, userSavedLocations, services, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
+  // Geocoding cache types
+  type GeocodeLocation, type InsertGeocodeLocation,
+  type LocationAlias, type InsertLocationAlias,
+  users, userSavedLocations, services, serviceTemplates, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
+  geocodeLocations, locationAliases,
   // Financial system tables
   expenseCategories, expenses, commissionRates, commissions, budgets, financialReports, taxSettings,
   // Communication system tables
@@ -172,6 +177,13 @@ export interface IStorage {
   createService(service: InsertService): Promise<Service>;
   updateService(id: string, updates: Partial<InsertService>): Promise<void>;
   deleteService(id: string): Promise<void>;
+  
+  // Service template operations
+  getServiceTemplates(filters?: {
+    gender?: string;
+    category?: string;
+    isPopular?: boolean;
+  }): Promise<ServiceTemplate[]>;
   
   // Booking operations
   getBooking(id: string): Promise<Booking | undefined>;
@@ -1574,6 +1586,42 @@ export class DatabaseStorage implements IStorage {
 
   async deleteService(id: string): Promise<void> {
     await db.update(services).set({ isActive: 0 }).where(eq(services.id, id));
+  }
+
+  // Service template operations
+  async getServiceTemplates(filters?: {
+    gender?: string;
+    category?: string;
+    isPopular?: boolean;
+  }): Promise<ServiceTemplate[]> {
+    try {
+      let query = db.select().from(serviceTemplates).where(eq(serviceTemplates.isActive, 1));
+      
+      const conditions = [eq(serviceTemplates.isActive, 1)];
+      
+      if (filters?.gender) {
+        conditions.push(eq(serviceTemplates.gender, filters.gender));
+      }
+      
+      if (filters?.category) {
+        conditions.push(eq(serviceTemplates.category, filters.category));
+      }
+      
+      if (filters?.isPopular !== undefined) {
+        conditions.push(eq(serviceTemplates.isPopular, filters.isPopular ? 1 : 0));
+      }
+      
+      const result = await db
+        .select()
+        .from(serviceTemplates)
+        .where(and(...conditions))
+        .orderBy(serviceTemplates.sortOrder, serviceTemplates.category, serviceTemplates.name);
+      
+      return result || [];
+    } catch (error) {
+      console.error('Error fetching service templates:', error);
+      return [];
+    }
   }
 
   // Package/Combo operations
@@ -3707,22 +3755,20 @@ export class DatabaseStorage implements IStorage {
     const bookingSettings = await this.getBookingSettings(salonId);
     const mediaAssets = await this.getMediaAssetsBySalonId(salonId);
 
-    // Check Profile completion - match setup-status requirements
+    // Check Profile completion - ALL fields are mandatory
     const profileMissingFields: string[] = [];
-    // Business Info fields
+    // Business Info - Required fields
     if (!salon?.name) profileMissingFields.push('name');
-    if (!salon?.description) profileMissingFields.push('description');
     if (!salon?.category) profileMissingFields.push('category');
-    if (!salon?.priceRange) profileMissingFields.push('priceRange');
-    // Location Contact fields
+    // Location Contact - ALL fields are required
     if (!salon?.address) profileMissingFields.push('address');
     if (!salon?.city) profileMissingFields.push('city');
     if (!salon?.state) profileMissingFields.push('state');
     if (!salon?.zipCode) profileMissingFields.push('zipCode');
-    if (!salon?.latitude) profileMissingFields.push('latitude');
-    if (!salon?.longitude) profileMissingFields.push('longitude');
     if (!salon?.phone) profileMissingFields.push('phone');
     if (!salon?.email) profileMissingFields.push('email');
+    if (!salon?.latitude) profileMissingFields.push('latitude');
+    if (!salon?.longitude) profileMissingFields.push('longitude');
     
     const profileComplete = profileMissingFields.length === 0;
 
@@ -7340,6 +7386,113 @@ export class DatabaseStorage implements IStorage {
         images: r.salon.images
       } : null
     }));
+  }
+
+  // ===============================================
+  // GEOCODING CACHE METHODS - Production-Grade Location Accuracy
+  // ===============================================
+
+  async findLocationAlias(normalizedQuery: string): Promise<{ placeId: string } | null> {
+    const [alias] = await db
+      .select({ placeId: locationAliases.placeId })
+      .from(locationAliases)
+      .where(eq(locationAliases.normalizedQuery, normalizedQuery))
+      .limit(1);
+    
+    return alias || null;
+  }
+
+  async getGeocodeLocation(placeId: string): Promise<any | null> {
+    const [location] = await db
+      .select()
+      .from(geocodeLocations)
+      .where(eq(geocodeLocations.placeId, placeId))
+      .limit(1);
+    
+    return location || null;
+  }
+
+  async upsertGeocodeLocation(data: any): Promise<void> {
+    await db
+      .insert(geocodeLocations)
+      .values(data)
+      .onConflictDoUpdate({
+        target: geocodeLocations.placeId,
+        set: {
+          formattedAddress: data.formattedAddress,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          locationType: data.locationType,
+          confidence: data.confidence,
+          viewport: data.viewport,
+          rawResponse: data.rawResponse,
+          verifiedAt: data.verifiedAt,
+          expiresAt: data.expiresAt,
+          usageCount: sql`${geocodeLocations.usageCount} + 1`,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  async createLocationAlias(data: any): Promise<void> {
+    try {
+      await db.insert(locationAliases).values(data);
+    } catch (error) {
+      // Ignore duplicate key errors
+      if (!(error instanceof Error && error.message.includes('duplicate'))) {
+        throw error;
+      }
+    }
+  }
+
+  async incrementLocationUsage(placeId: string, normalizedQuery: string): Promise<void> {
+    // Update geocode_locations usage count
+    await db
+      .update(geocodeLocations)
+      .set({ 
+        usageCount: sql`${geocodeLocations.usageCount} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(geocodeLocations.placeId, placeId));
+
+    // Update location_aliases usage count
+    await db
+      .update(locationAliases)
+      .set({ usageCount: sql`${locationAliases.usageCount} + 1` })
+      .where(
+        and(
+          eq(locationAliases.normalizedQuery, normalizedQuery),
+          eq(locationAliases.placeId, placeId)
+        )
+      );
+  }
+
+  async findLocationByCoordinates(
+    lat: number,
+    lng: number,
+    radiusMeters: number
+  ): Promise<any | null> {
+    // PostgreSQL Haversine formula to find nearby locations
+    // This is a simplified version - in production, use PostGIS for better performance
+    const results = await db
+      .select()
+      .from(geocodeLocations)
+      .where(
+        sql`
+          (
+            6371000 * acos(
+              cos(radians(${lat})) * 
+              cos(radians(CAST(${geocodeLocations.latitude} AS FLOAT))) * 
+              cos(radians(CAST(${geocodeLocations.longitude} AS FLOAT)) - radians(${lng})) + 
+              sin(radians(${lat})) * 
+              sin(radians(CAST(${geocodeLocations.latitude} AS FLOAT)))
+            )
+          ) <= ${radiusMeters}
+        `
+      )
+      .limit(1);
+    
+    return results[0] || null;
   }
 }
 

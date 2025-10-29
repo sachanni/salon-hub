@@ -43,7 +43,7 @@ const SETUP_SECTIONS = [
     id: 'location_contact',
     title: 'Location & Contact',
     icon: MapPin,
-    requiredFields: ['address', 'city', 'phone'],
+    requiredFields: ['address', 'city', 'state', 'zipCode', 'phone', 'email', 'latitude', 'longitude'],
     endpoint: '/api/salons'
   },
   {

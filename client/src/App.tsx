@@ -11,6 +11,7 @@ import Home from "@/pages/Home";
 import Join from "@/pages/Join";
 import JoinCustomer from "@/pages/JoinCustomer";
 import JoinBusiness from "@/pages/JoinBusiness";
+import BusinessOnboarding from "@/pages/BusinessOnboarding";
 import LoginCustomer from "@/pages/LoginCustomer";
 import LoginBusiness from "@/pages/LoginBusiness";
 import BusinessSetup from "@/pages/BusinessSetup";
@@ -36,7 +37,8 @@ function Router() {
         <Route path="/" component={Home} />
         <Route path="/join" component={Join} />
         <Route path="/join/customer" component={JoinCustomer} />
-        <Route path="/join/business" component={JoinBusiness} />
+        <Route path="/join/business" component={BusinessOnboarding} />
+        <Route path="/join/business/register" component={JoinBusiness} />
         <Route path="/login/customer" component={LoginCustomer} />
         <Route path="/login/business" component={LoginBusiness} />
         <Route path="/business/setup" component={BusinessSetup} />

@@ -19,18 +19,118 @@ interface BusinessInfoStepProps {
 }
 
 const BUSINESS_CATEGORIES = [
-  { value: "hair_salon", label: "Hair Salon", icon: "💇", gradient: "from-purple-500 to-pink-500" },
-  { value: "nail_salon", label: "Nail Salon", icon: "💅", gradient: "from-pink-500 to-rose-500" },
-  { value: "spa", label: "Spa & Wellness", icon: "🧘", gradient: "from-indigo-500 to-purple-500" },
-  { value: "beauty_salon", label: "Beauty Salon", icon: "✨", gradient: "from-violet-500 to-purple-500" },
-  { value: "barber", label: "Barber Shop", icon: "💈", gradient: "from-slate-600 to-gray-600" },
-  { value: "massage", label: "Massage Therapy", icon: "💆", gradient: "from-teal-500 to-cyan-500" },
-  { value: "medical_spa", label: "Medical Spa", icon: "🏥", gradient: "from-blue-500 to-indigo-500" },
-  { value: "fitness", label: "Fitness & Wellness", icon: "💪", gradient: "from-emerald-500 to-teal-500" },
-  { value: "makeup_studio", label: "Makeup Studio", icon: "💄", gradient: "from-fuchsia-500 to-pink-500" },
-  { value: "piercing_studio", label: "Piercing Studio", icon: "💎", gradient: "from-amber-500 to-orange-500" },
-  { value: "tattoo_studio", label: "Tattoo Studio", icon: "🎨", gradient: "from-slate-700 to-zinc-700" }
+  { 
+    value: "hair_salon", 
+    label: "Hair Salon", 
+    description: "Cuts, styling, coloring & treatments",
+    image: "/assets/categories/Hair_Salon_interior_design_7ee2ce15.png",
+    gradient: "from-purple-500 to-pink-500",
+    autoDescription: "Welcome to our professional hair salon! We specialize in expert haircuts, creative styling, vibrant coloring, and transformative hair treatments. Our skilled stylists stay current with the latest trends and techniques to help you achieve your perfect look. Whether you're looking for a bold new style or a classic refresh, we're here to bring your hair goals to life."
+  },
+  { 
+    value: "nail_salon", 
+    label: "Nail Salon", 
+    description: "Manicures, pedicures & nail art",
+    image: "/assets/categories/Nail_Salon_workspace_70f03ece.png",
+    gradient: "from-pink-500 to-rose-500",
+    autoDescription: "Discover premium nail care at our salon! We offer luxurious manicures, relaxing pedicures, and stunning nail art designs. Using high-quality products and the latest techniques, our nail technicians create beautiful, long-lasting results. From classic elegance to creative designs, we'll pamper your hands and feet to perfection."
+  },
+  { 
+    value: "spa", 
+    label: "Spa & Wellness", 
+    description: "Relaxation, body treatments & spa",
+    image: "/assets/categories/Spa_and_Wellness_center_0507eeab.png",
+    gradient: "from-indigo-500 to-purple-500",
+    autoDescription: "Experience ultimate relaxation at our spa & wellness center. We provide rejuvenating body treatments, therapeutic massages, and holistic wellness services in a tranquil environment. Our expert therapists use premium products and time-tested techniques to restore your mind, body, and spirit. Escape the stress of daily life and indulge in pure relaxation."
+  },
+  { 
+    value: "beauty_salon", 
+    label: "Beauty Salon", 
+    description: "Full-service beauty treatments",
+    image: "/assets/categories/Beauty_Salon_interior_c34027b1.png",
+    gradient: "from-violet-500 to-purple-500",
+    autoDescription: "Your one-stop destination for complete beauty care! We offer a comprehensive range of beauty services including skincare, makeup, hair styling, and grooming. Our talented beauty professionals are dedicated to enhancing your natural beauty and helping you look and feel your absolute best for any occasion."
+  },
+  { 
+    value: "barber", 
+    label: "Barber Shop", 
+    description: "Men's haircuts, shaves & grooming",
+    image: "/assets/categories/Barber_Shop_interior_ab1e8eed.png",
+    gradient: "from-slate-600 to-gray-600",
+    autoDescription: "Experience traditional barbering excellence! We specialize in precision haircuts, classic straight-razor shaves, beard trimming, and complete men's grooming services. Our skilled barbers combine timeless techniques with modern styles to deliver the sharp, confident look you deserve."
+  },
+  { 
+    value: "massage", 
+    label: "Massage Therapy", 
+    description: "Therapeutic massage & bodywork",
+    image: "/assets/categories/Massage_Therapy_room_f456670d.png",
+    gradient: "from-teal-500 to-cyan-500",
+    autoDescription: "Find relief and relaxation through our professional massage therapy services. We offer a variety of therapeutic massage techniques and bodywork treatments designed to reduce stress, ease muscle tension, and promote overall wellness. Our certified massage therapists customize each session to address your specific needs and help you achieve optimal well-being."
+  },
+  { 
+    value: "medical_spa", 
+    label: "Medical Spa", 
+    description: "Advanced aesthetic treatments",
+    image: "/assets/categories/Medical_Spa_treatment_room_20b662eb.png",
+    gradient: "from-blue-500 to-indigo-500",
+    autoDescription: "Advanced aesthetic treatments in a clinical setting. Our medical spa combines medical expertise with spa luxury to deliver cutting-edge skincare treatments, anti-aging procedures, and non-invasive cosmetic enhancements. Led by licensed medical professionals, we use state-of-the-art technology to help you achieve your aesthetic goals safely and effectively."
+  },
+  { 
+    value: "fitness", 
+    label: "Fitness & Wellness", 
+    description: "Yoga, fitness classes & wellness",
+    image: "/assets/categories/Fitness_and_Wellness_studio_55aa1c7c.png",
+    gradient: "from-emerald-500 to-teal-500",
+    autoDescription: "Transform your health at our fitness & wellness studio! We offer dynamic fitness classes, rejuvenating yoga sessions, and personalized wellness programs designed to strengthen your body and energize your mind. Our expert instructors create an encouraging environment where everyone can achieve their fitness goals."
+  },
+  { 
+    value: "makeup_studio", 
+    label: "Makeup Studio", 
+    description: "Professional makeup & styling",
+    image: "/assets/categories/Makeup_Studio_workspace_d6349cde.png",
+    gradient: "from-fuchsia-500 to-pink-500",
+    autoDescription: "Professional makeup artistry for every occasion! Whether you need bridal makeup, special event styling, or everyday beauty looks, our talented makeup artists bring creativity and precision to every application. We use premium cosmetics and the latest techniques to create flawless, camera-ready results that enhance your natural beauty."
+  },
+  { 
+    value: "piercing_studio", 
+    label: "Piercing Studio", 
+    description: "Professional body piercing",
+    image: "/assets/categories/Piercing_Studio_interior_36cf6e8d.png",
+    gradient: "from-amber-500 to-orange-500",
+    autoDescription: "Safe, professional body piercing services in a clean, sterile environment. Our experienced piercers use only the highest quality jewelry and follow strict health and safety protocols. From classic ear piercings to more unique placements, we provide expert guidance and meticulous care throughout your piercing experience."
+  },
+  { 
+    value: "tattoo_studio", 
+    label: "Tattoo Studio", 
+    description: "Custom tattoo art & designs",
+    image: "/assets/categories/Tattoo_Studio_interior_77107fd7.png",
+    gradient: "from-slate-700 to-zinc-700",
+    autoDescription: "Custom tattoo artistry and designs created by talented artists. We specialize in bringing your vision to life with unique, high-quality tattoos in various styles. Our artists work closely with you to create meaningful, beautifully executed body art in a clean, professional studio environment. From intricate details to bold statements, we deliver exceptional results."
+  }
 ];
+
+// Smart description generator based on selected categories
+const generateAutoDescription = (selectedCategories: string[]): string => {
+  if (selectedCategories.length === 0) return "";
+  
+  if (selectedCategories.length === 1) {
+    const category = BUSINESS_CATEGORIES.find(c => c.value === selectedCategories[0]);
+    return category?.autoDescription || "";
+  }
+  
+  // Multi-category descriptions
+  const categoryLabels = selectedCategories
+    .map(value => BUSINESS_CATEGORIES.find(c => c.value === value)?.label)
+    .filter(Boolean);
+  
+  const services = selectedCategories.map(value => {
+    const cat = BUSINESS_CATEGORIES.find(c => c.value === value);
+    return cat?.description;
+  }).filter(Boolean);
+  
+  // Create cohesive multi-service description
+  return `Welcome to our full-service beauty and wellness destination! We specialize in ${categoryLabels.join(', ')}, offering ${services.join(', ')} all under one roof. Our talented team of professionals is dedicated to providing exceptional service and helping you look and feel your absolute best. Whether you're visiting for a single service or a complete transformation, we're here to exceed your expectations with quality care and attention to detail.`;
+};
 
 export default function BusinessInfoStep({ 
   salonId, 
@@ -65,6 +165,7 @@ export default function BusinessInfoStep({
   };
 
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [hasManuallyEditedDescription, setHasManuallyEditedDescription] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -92,8 +193,24 @@ export default function BusinessInfoStep({
       // Parse and set categories
       const categories = parseCategories(salon.category);
       setSelectedCategories(categories);
+      
+      // If salon already has a description, mark as manually edited to preserve it
+      if (salon.description && salon.description.trim()) {
+        setHasManuallyEditedDescription(true);
+      }
     }
   }, [salonData]);
+
+  // Auto-fill description when categories change (only if not manually edited)
+  useEffect(() => {
+    if (selectedCategories.length > 0 && !hasManuallyEditedDescription) {
+      const autoDescription = generateAutoDescription(selectedCategories);
+      setFormData((prev: typeof formData) => ({
+        ...prev,
+        description: autoDescription
+      }));
+    }
+  }, [selectedCategories, hasManuallyEditedDescription]);
 
   // Update salon mutation
   const updateSalonMutation = useMutation({
@@ -152,6 +269,11 @@ export default function BusinessInfoStep({
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev: typeof formData) => ({ ...prev, [field]: value }));
+    
+    // Track manual edits to description
+    if (field === 'description') {
+      setHasManuallyEditedDescription(true);
+    }
   };
 
   const toggleCategory = (categoryValue: string) => {
@@ -196,13 +318,13 @@ export default function BusinessInfoStep({
 
           {/* Business Categories - Multi-Select */}
           <div>
-            <Label className="text-sm font-medium mb-3 block">
+            <Label className="text-sm font-medium mb-4 block">
               Business Categories * 
               <span className="text-muted-foreground font-normal ml-2">
                 (Select all that apply)
               </span>
             </Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-full">
               {BUSINESS_CATEGORIES.map((category) => {
                 const isSelected = selectedCategories.includes(category.value);
                 
@@ -210,29 +332,47 @@ export default function BusinessInfoStep({
                   <Card
                     key={category.value}
                     onClick={() => toggleCategory(category.value)}
-                    className={`relative p-3 cursor-pointer transition-all border-2 hover:scale-[1.02] ${
+                    className={`group relative overflow-hidden cursor-pointer transition-all duration-300 border-2 ${
                       isSelected
-                        ? `border-purple-500 bg-gradient-to-br from-purple-50 to-pink-50 shadow-lg`
-                        : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
+                        ? 'border-purple-500 shadow-xl ring-2 ring-purple-300 ring-opacity-50'
+                        : 'border-gray-200 hover:border-purple-300 hover:shadow-lg'
                     }`}
                     data-testid={`card-category-${category.value}`}
                   >
-                    {/* Checkmark */}
-                    <div className="absolute top-2 right-2 z-10">
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
-                        isSelected 
-                          ? 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-md' 
-                          : 'bg-gray-200'
-                      }`}>
-                        {isSelected && <Check className="h-3 w-3 text-white" />}
+                    {/* Background Image with Overlay */}
+                    <div className="relative h-40">
+                      <img 
+                        src={category.image} 
+                        alt={category.label}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      />
+                      {/* Gradient Overlay */}
+                      <div className={`absolute inset-0 bg-gradient-to-t ${category.gradient} opacity-40 group-hover:opacity-50 transition-opacity duration-300`}></div>
+                      
+                      {/* Checkmark */}
+                      <div className="absolute top-3 right-3 z-10">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 ${
+                          isSelected 
+                            ? 'bg-white shadow-lg scale-110' 
+                            : 'bg-white/80 backdrop-blur-sm'
+                        }`}>
+                          {isSelected ? (
+                            <Check className="h-5 w-5 text-purple-600 stroke-[3]" />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full border-2 border-gray-400"></div>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="pr-7">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-2xl">{category.icon}</span>
+                      {/* Category Info */}
+                      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 via-black/60 to-transparent">
+                        <h4 className="font-semibold text-white text-base mb-1 drop-shadow-lg">
+                          {category.label}
+                        </h4>
+                        <p className="text-white/90 text-xs leading-relaxed drop-shadow-md">
+                          {category.description}
+                        </p>
                       </div>
-                      <h4 className="font-medium text-sm leading-tight">{category.label}</h4>
                     </div>
                   </Card>
                 );
@@ -240,9 +380,16 @@ export default function BusinessInfoStep({
             </div>
             
             {selectedCategories.length > 0 && (
-              <p className="text-xs text-purple-600 mt-2 flex items-center gap-1">
-                ✨ {selectedCategories.length} categor{selectedCategories.length === 1 ? 'y' : 'ies'} selected - Services will be automatically suggested based on your selection
-              </p>
+              <div className="mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                <p className="text-sm text-purple-700 flex items-center gap-2">
+                  <Check className="h-4 w-4 text-purple-600" />
+                  <span className="font-medium">
+                    {selectedCategories.length} categor{selectedCategories.length === 1 ? 'y' : 'ies'} selected
+                  </span>
+                  <span className="text-purple-600">•</span>
+                  <span className="text-purple-600">Services will be automatically suggested based on your selection</span>
+                </p>
+              </div>
             )}
           </div>
 
@@ -250,15 +397,25 @@ export default function BusinessInfoStep({
           <div>
             <Label htmlFor="description" className="text-sm font-medium">
               Business Description
+              {selectedCategories.length > 0 && !hasManuallyEditedDescription && (
+                <span className="ml-2 text-xs text-purple-600 font-normal">
+                  ✨ Auto-generated (you can edit this)
+                </span>
+              )}
             </Label>
             <Textarea
               id="description"
               value={formData.description}
               onChange={(e) => handleInputChange('description', e.target.value)}
               placeholder="Tell customers about your business, specialties, and what makes you unique..."
-              className="mt-1 min-h-[100px]"
+              className="mt-1 min-h-[120px]"
               data-testid="textarea-description"
             />
+            {selectedCategories.length > 0 && !hasManuallyEditedDescription && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                💡 We've created a professional description based on your selected categories. Feel free to customize it to match your unique style!
+              </p>
+            )}
           </div>
 
           {/* Website */}

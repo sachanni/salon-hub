@@ -1,17 +1,18 @@
 // Intelligent mapping between business categories and service categories
 // This creates a smart connection so the platform shows relevant services
+// Keys match the database values (snake_case format)
 
 export const BUSINESS_TO_SERVICE_MAPPING: Record<string, string[]> = {
-  'hair_salon': ['hair', 'eyes', 'hair-removal', 'piercing'],
-  'nail_salon': ['nails', 'piercing'],
-  'spa': ['massage', 'skincare', 'body', 'wellness'],
-  'beauty_salon': ['hair', 'nails', 'skincare', 'eyes', 'hair-removal', 'makeup', 'piercing', 'tattoo'],
-  'barber': ['hair', 'mens', 'tattoo'],
-  'massage': ['massage', 'wellness', 'body'],
-  'medical_spa': ['skincare', 'body', 'wellness', 'hair-removal', 'tattoo'],
-  'fitness': ['wellness', 'massage'],
-  'makeup_studio': ['makeup', 'eyes', 'hair', 'tattoo'],
-  'tattoo_studio': ['tattoo', 'piercing']
+  'hair_salon': ['Hair Cut & Style', 'Hair Color', 'Hair Treatment', 'Waxing & Threading'],
+  'nail_salon': ['Mani-Pedi & Hygiene'],
+  'spa': ['Massage & Spa', 'Skin Care', 'Body Treatment'],
+  'beauty_salon': ['Hair Cut & Style', 'Hair Color', 'Hair Treatment', 'Skin Care', 'Makeup', 'Mani-Pedi & Hygiene', 'Waxing & Threading'],
+  'barber': ['Hair Cut & Style', 'Hair Treatment'],
+  'massage': ['Massage & Spa', 'Body Treatment'],
+  'medical_spa': ['Skin Care', 'Body Treatment', 'Waxing & Threading'],
+  'fitness': ['Massage & Spa', 'Body Treatment'],
+  'makeup_studio': ['Makeup', 'Hair Cut & Style'],
+  'tattoo_studio': ['Piercing & Tattoo']
 };
 
 // Get relevant service categories based on business categories
@@ -25,7 +26,7 @@ export function getRelevantServiceCategories(businessCategories: string[]): stri
   
   // If no mapping found, show all categories
   if (relevantCategories.size === 0) {
-    return ['hair', 'nails', 'skincare', 'massage', 'eyes', 'hair-removal', 'piercing', 'tattoo', 'makeup', 'body', 'mens', 'wellness'];
+    return ['Hair Cut & Style', 'Hair Color', 'Hair Treatment', 'Skin Care', 'Makeup', 'Mani-Pedi & Hygiene', 'Massage & Spa', 'Body Treatment', 'Waxing & Threading', 'Piercing & Tattoo'];
   }
   
   return Array.from(relevantCategories);

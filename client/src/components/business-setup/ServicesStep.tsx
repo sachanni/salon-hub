@@ -13,6 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { getRelevantServiceCategories, getSmartServiceSuggestions } from "@/lib/serviceCategoryMapping";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { useAuth } from "@/contexts/AuthContext";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Info } from "lucide-react";
 
 interface ServicesStepProps {
   salonId: string;
@@ -33,20 +36,20 @@ interface Service {
   imageUrl?: string;
 }
 
-// Service category definitions
+// Service category definitions with target audience metadata
 const mainCategories = [
-  { id: 'hair', name: 'Hair & Styling', icon: '💇', gradient: 'from-purple-500 to-pink-500' },
-  { id: 'nails', name: 'Nails', icon: '💅', gradient: 'from-pink-500 to-rose-500' },
-  { id: 'skincare', name: 'Skincare & Facials', icon: '✨', gradient: 'from-violet-500 to-purple-500' },
-  { id: 'massage', name: 'Massage & Spa', icon: '💆', gradient: 'from-indigo-500 to-purple-500' },
-  { id: 'eyes', name: 'Eyebrows & Lashes', icon: '👁️', gradient: 'from-fuchsia-500 to-pink-500' },
-  { id: 'hair-removal', name: 'Hair Removal', icon: '🪶', gradient: 'from-rose-500 to-pink-500' },
-  { id: 'piercing', name: 'Piercing', icon: '💎', gradient: 'from-amber-500 to-orange-500' },
-  { id: 'tattoo', name: 'Tattoo', icon: '🎨', gradient: 'from-slate-700 to-gray-800' },
-  { id: 'makeup', name: 'Makeup', icon: '💄', gradient: 'from-pink-500 to-fuchsia-500' },
-  { id: 'body', name: 'Body Treatments', icon: '🧖', gradient: 'from-purple-500 to-violet-500' },
-  { id: 'mens', name: "Men's Grooming", icon: '💈', gradient: 'from-slate-600 to-gray-600' },
-  { id: 'wellness', name: 'Wellness & Other', icon: '🧘‍♀️', gradient: 'from-emerald-500 to-teal-500' },
+  { id: 'hair', name: 'Hair & Styling', icon: '💇', gradient: 'from-purple-500 to-pink-500', targetAudiences: ['men', 'women'] },
+  { id: 'nails', name: 'Nails', icon: '💅', gradient: 'from-pink-500 to-rose-500', targetAudiences: ['women'] },
+  { id: 'skincare', name: 'Skincare & Facials', icon: '✨', gradient: 'from-violet-500 to-purple-500', targetAudiences: ['women'] },
+  { id: 'massage', name: 'Massage & Spa', icon: '💆', gradient: 'from-indigo-500 to-purple-500', targetAudiences: ['men', 'women'] },
+  { id: 'eyes', name: 'Eyebrows & Lashes', icon: '👁️', gradient: 'from-fuchsia-500 to-pink-500', targetAudiences: ['women'] },
+  { id: 'hair-removal', name: 'Hair Removal', icon: '🪶', gradient: 'from-rose-500 to-pink-500', targetAudiences: ['women'] },
+  { id: 'piercing', name: 'Piercing', icon: '💎', gradient: 'from-amber-500 to-orange-500', targetAudiences: ['men', 'women'] },
+  { id: 'tattoo', name: 'Tattoo', icon: '🎨', gradient: 'from-slate-700 to-gray-800', targetAudiences: ['men', 'women'] },
+  { id: 'makeup', name: 'Makeup', icon: '💄', gradient: 'from-pink-500 to-fuchsia-500', targetAudiences: ['women'] },
+  { id: 'body', name: 'Body Treatments', icon: '🧖', gradient: 'from-purple-500 to-violet-500', targetAudiences: ['men', 'women'] },
+  { id: 'mens', name: "Men's Grooming", icon: '💈', gradient: 'from-slate-600 to-gray-600', targetAudiences: ['men'] },
+  { id: 'wellness', name: 'Wellness & Other', icon: '🧘‍♀️', gradient: 'from-emerald-500 to-teal-500', targetAudiences: ['men', 'women'] },
 ];
 
 const subServices: Record<string, { name: string; icon: string }[]> = {
@@ -267,6 +270,35 @@ export default function ServicesStep({
   const [showAllCategories, setShowAllCategories] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  
+  // Get business category from authenticated user (fallback to 'unisex' if not set)
+  const businessCategory = user?.businessCategory || 'unisex';
+  
+  // Determine which target audiences to show based on business category
+  const getVisibleAudiences = (category: string): string[] => {
+    switch (category) {
+      case 'beauty_parlour':
+        return ['women'];
+      case 'mens_parlour':
+        return ['men'];
+      case 'unisex':
+      default:
+        return ['men', 'women'];
+    }
+  };
+  
+  const visibleAudiences = getVisibleAudiences(businessCategory);
+  
+  // Filter categories based on target audience
+  const filterCategoriesByAudience = (categories: typeof mainCategories) => {
+    return categories.filter(cat => 
+      cat.targetAudiences.some(audience => visibleAudiences.includes(audience))
+    );
+  };
+  
+  // Get filtered categories
+  const audienceFilteredCategories = filterCategoriesByAudience(mainCategories);
   
   // Ref for bulk review section to enable auto-scroll
   const bulkReviewRef = useRef<HTMLDivElement>(null);
@@ -306,10 +338,46 @@ export default function ServicesStep({
   const relevantServiceCategories = getRelevantServiceCategories(businessCategories);
   const smartSuggestions = getSmartServiceSuggestions(businessCategories);
 
-  // Filter main categories to show only relevant ones (unless user wants to see all)
+  // Helper to get human-readable business category names
+  const getBusinessCategoryLabel = (category: string): string => {
+    const labels: Record<string, string> = {
+      'hair_salon': 'Hair Salon',
+      'nail_salon': 'Nail Salon',
+      'spa': 'Spa & Wellness',
+      'beauty_salon': 'Beauty Salon',
+      'barber': 'Barber Shop',
+      'massage': 'Massage Therapy',
+      'medical_spa': 'Medical Spa',
+      'fitness': 'Fitness',
+      'makeup_studio': 'Makeup Studio',
+      'tattoo_studio': 'Tattoo Studio'
+    };
+    return labels[category] || category;
+  };
+
+  const businessCategoryLabels = businessCategories.map(cat => getBusinessCategoryLabel(cat));
+
+  // Apply audience filtering first, then relevance filtering
+  // If user wants to see all categories, show all audience-filtered categories
   const displayedCategories = showAllCategories 
-    ? mainCategories 
-    : mainCategories.filter(cat => relevantServiceCategories.includes(cat.id));
+    ? audienceFilteredCategories 
+    : audienceFilteredCategories.filter(cat => relevantServiceCategories.includes(cat.id));
+  
+  // Count how many categories were filtered out
+  const filteredOutCount = mainCategories.length - audienceFilteredCategories.length;
+  
+  // Get category label for banner
+  const getCategoryLabel = (category: string): string => {
+    switch (category) {
+      case 'beauty_parlour':
+        return "Beauty Parlour (Women's Services)";
+      case 'mens_parlour':
+        return "Men's Parlour (Men's Services)";
+      case 'unisex':
+      default:
+        return 'Unisex Salon (All Services)';
+    }
+  };
 
   // Load existing services
   const { data: existingServices } = useQuery({
@@ -536,6 +604,25 @@ export default function ServicesStep({
         </div>
       )}
 
+      {/* Intelligent Filtering Banner */}
+      {!showBulkReview && filteredOutCount > 0 && (
+        <Alert className="bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200">
+          <Info className="h-4 w-4 text-purple-600" />
+          <AlertDescription className="text-sm">
+            <span className="font-medium text-purple-900">Smart Service Filtering Active:</span>{' '}
+            Showing services tailored for <strong>{getCategoryLabel(businessCategory)}</strong>.
+            {businessCategory === 'unisex' && filteredOutCount === 0 && (
+              <span className="ml-1">All services are available for your salon type.</span>
+            )}
+            {businessCategory !== 'unisex' && (
+              <span className="ml-1">
+                {filteredOutCount} category{filteredOutCount > 1 ? 'ies' : 'y'} filtered out to match your business type.
+              </span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Intelligent Suggestions Based on Business Category */}
       {!showBulkReview && services.length === 0 && smartSuggestions.length > 0 && (
         <Card className="bg-gradient-to-br from-violet-50 to-pink-50 border-purple-200">
@@ -593,13 +680,54 @@ export default function ServicesStep({
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Category Pills with Intelligent Filtering */}
-          <div className="space-y-2">
+          <div className="space-y-3">
             {businessCategories.length > 0 && !showAllCategories && (
-              <div className="flex items-center gap-2 mb-2">
-                <Badge className="bg-gradient-to-r from-purple-600 to-pink-600">
-                  <Brain className="h-3 w-3 mr-1" />
-                  Recommended for your business
-                </Badge>
+              <div className="bg-gradient-to-r from-purple-50 via-pink-50 to-rose-50 border border-purple-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-3 py-1">
+                    <Brain className="h-4 w-4 mr-1.5" />
+                    Recommended for your business
+                  </Badge>
+                </div>
+                <p className="text-xs text-gray-600">
+                  Based on your selection of {businessCategoryLabels.length > 0 && (
+                    <>
+                      {businessCategoryLabels.map((label, index) => (
+                        <span key={index}>
+                          {index > 0 && (index === businessCategoryLabels.length - 1 ? ' and ' : ', ')}
+                          <strong>{label}</strong>
+                        </span>
+                      ))}
+                    </>
+                  )}, 
+                  we're showing {displayedCategories.length} relevant service categories. 
+                  {audienceFilteredCategories.length - displayedCategories.length > 0 && (
+                    <span> {audienceFilteredCategories.length - displayedCategories.length} other category{audienceFilteredCategories.length - displayedCategories.length > 1 ? 'ies are' : 'y is'} available under "+ Show All Categories".</span>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {showAllCategories && businessCategories.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-blue-900">
+                      Showing All Categories
+                    </p>
+                    <p className="text-xs text-blue-700 mt-0.5">
+                      You're viewing all {displayedCategories.length} service categories
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAllCategories(false)}
+                    className="text-xs border-blue-300 hover:bg-blue-100"
+                  >
+                    Show Recommended Only
+                  </Button>
+                </div>
               </div>
             )}
             
@@ -623,10 +751,11 @@ export default function ServicesStep({
               {!showAllCategories && businessCategories.length > 0 && (
                 <button
                   onClick={() => setShowAllCategories(true)}
-                  className="px-4 py-2 rounded-full text-sm font-medium bg-white border-2 border-dashed border-gray-300 text-gray-600 hover:border-purple-400 hover:text-purple-600 transition-all"
+                  className="px-4 py-2 rounded-full text-sm font-medium bg-white border-2 border-dashed border-purple-300 text-purple-600 hover:border-purple-500 hover:bg-purple-50 transition-all"
                   data-testid="button-show-all-categories"
                 >
-                  + Show All Categories
+                  <Plus className="h-4 w-4 inline-block mr-1" />
+                  Show All Categories
                 </button>
               )}
             </div>
