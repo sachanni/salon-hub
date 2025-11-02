@@ -26,6 +26,34 @@ Preferred communication style: Simple, everyday language.
 - **Backend**: Node.js with Express.js, TypeScript, RESTful API design, Drizzle ORM.
 - **Database**: PostgreSQL via Neon serverless infrastructure (Drizzle Kit for schema management). Prices stored in `priceInPaisa`, duration in `durationMinutes`.
 - **Authentication & Security**: Express sessions with PostgreSQL store, server-side price validation, Zod schemas, and CORS.
+- **Firebase Phone Authentication (Nov 2025)**: Production-ready Firebase Phone Auth integration for both customer and business registration with:
+  - **Client-side**: Reusable `PhoneVerification` component with OTP input, send/verify buttons, and invisible reCAPTCHA
+  - **Server-side**: Firebase Admin SDK integration for secure token verification before account creation
+  - Phone number formatting to E.164 international format (auto-adds +91 for India)
+  - 6-digit OTP verification with Firebase Auth
+  - Resend OTP functionality with 30-second cooldown timer
+  - Comprehensive error handling for invalid phone, expired OTP, quota exceeded
+  - Integration in both `JoinCustomer.tsx` and `JoinBusiness.tsx` registration pages
+  - Form validation requiring phone verification before account creation
+  - Firebase token passed to backend and verified server-side for enhanced security
+  - Server verifies phone number matches between token and form submission
+  - Sets `phoneVerified = 1` in database only after successful server-side verification
+  - Module: `server/firebaseAdmin.ts` with `verifyFirebaseToken()` and `getPhoneNumberFromToken()` functions
+  - Updated `/api/auth/register` endpoint with token verification middleware
+  - Component: `PhoneVerification.tsx` with loading states and success feedback
+- **Firebase Email Verification (Nov 2025)**: Production-ready email verification system using Firebase Authentication with:
+  - **Welcome Email System**: Automatically sends verification email after successful registration
+  - **Firebase Integration**: Uses Firebase Auth's `createUserWithEmailAndPassword()` and `sendEmailVerification()` methods
+  - **Email Service Module**: `client/src/lib/emailVerification.ts` with `sendWelcomeEmailWithVerification()`, `checkEmailVerificationStatus()`, and `resendVerificationEmail()` functions
+  - **Verification Flow**: User receives email with verification link → clicks link → redirected to `/email-verified` page → email marked as verified in Firebase
+  - **Email Verification Page**: `/email-verified` route displays success/failed status with appropriate UI feedback
+  - **Dual User System**: Creates Firebase user for email verification while maintaining database user for application data
+  - **Database Field**: `emailVerified` column tracks verification status (0 = pending, 1 = verified)
+  - **Error Handling**: Graceful handling of invalid email, weak password, network errors with user-friendly messages
+  - **Resend Functionality**: Built-in support for resending verification emails if needed
+  - **Integrated with Registration**: Both `JoinCustomer.tsx` and `JoinBusiness.tsx` automatically send welcome emails post-registration
+  - **No External Dependencies**: Uses Firebase only, no SendGrid or other email service required
+  - **Customizable Landing Page**: Verification link redirects to configurable URL (defaults to `/email-verified`)
 - **Setup Wizard Architecture**: Standardized prop interface for steps, React Query for data pre-population.
 - **Time Slot Management**: Timezone-safe handling, dynamic generation based on salon hours (30-minute intervals), and robust date parsing/formatting.
 - **Real-Time Booking Availability**: Production-ready slot conflict detection with 15-second polling, comprehensive overlap prevention, and staff-aware availability.
@@ -99,4 +127,5 @@ Preferred communication style: Simple, everyday language.
 - **Mapbox GL JS**: Interactive maps library.
 - **react-map-gl**: React wrapper for Mapbox.
 - **supercluster**: Point clustering library for map markers.
-- **SMS Provider (TODO)**: Integration planned for phone OTP verification (currently uses mock OTP).
+- **Firebase**: Phone authentication and OTP verification.
+- **SMS Provider (Deprecated)**: Replaced with Firebase Phone Auth for registration OTP verification. The existing booking flow OTP system (with `otpVerifications` table) remains for booking confirmation.

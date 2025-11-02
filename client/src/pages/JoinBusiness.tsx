@@ -11,6 +11,8 @@ import { ToastAction } from "@/components/ui/toast";
 import professionalImage from "@assets/stock_images/professional_hair_st_a5606468.jpg";
 import { SocialLogin } from "@/components/SocialLogin";
 import { handleSocialAuth } from "@/lib/socialAuth";
+import { PhoneVerification } from "@/components/PhoneVerification";
+import { sendWelcomeEmailWithVerification } from "@/lib/emailVerification";
 
 export default function JoinBusiness() {
   const [, setLocation] = useLocation();
@@ -31,6 +33,8 @@ export default function JoinBusiness() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [shouldRedirect, setShouldRedirect] = useState(false);
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [firebaseToken, setFirebaseToken] = useState<string | undefined>();
   const { toast } = useToast();
   const { checkAuth, isAuthenticated, user } = useAuth();
 
@@ -60,8 +64,24 @@ export default function JoinBusiness() {
     }
   }, [shouldRedirect]);
 
+  const handlePhoneVerified = (phone: string, token?: string) => {
+    setFormData(prev => ({ ...prev, phone }));
+    setPhoneVerified(true);
+    setFirebaseToken(token);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!phoneVerified) {
+      toast({
+        title: "Phone verification required",
+        description: "Please verify your phone number before creating an account.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -73,7 +93,9 @@ export default function JoinBusiness() {
         credentials: 'include', // AUTHENTICATION FIX: Include credentials for cookie handling
         body: JSON.stringify({
           ...formData,
-          userType: 'owner'
+          userType: 'owner',
+          firebaseToken,
+          phoneVerified: true,
         }),
       });
 
@@ -95,13 +117,30 @@ export default function JoinBusiness() {
         } catch (error) {
           console.warn('Failed to store auth data:', error);
         }
-        
-        // Show success toast
-        toast({
-          title: "Welcome to SalonHub!",
-          description: "Registration successful! Setting up your business profile...",
-          duration: 4000,
-        });
+
+        // Send welcome email with verification link using Firebase
+        console.log('📧 Sending welcome email with verification link...');
+        const emailResult = await sendWelcomeEmailWithVerification(
+          formData.email,
+          formData.password
+        );
+
+        if (emailResult.success) {
+          console.log('✅ Verification email sent successfully');
+          toast({
+            title: "Welcome to SalonHub!",
+            description: "Registration successful! Please check your email to verify your account.",
+            duration: 6000,
+          });
+        } else {
+          console.error('❌ Email verification failed:', emailResult.error);
+          toast({
+            title: "Email verification failed",
+            description: emailResult.message || "Failed to send verification email. Please contact support.",
+            variant: "destructive",
+            duration: 6000,
+          });
+        }
         
         console.log('Registration complete, refreshing auth state');
         
@@ -302,22 +341,12 @@ export default function JoinBusiness() {
               </div>
             </div>
             
-            {/* Phone */}
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => handleInputChange('phone', e.target.value)}
-                  placeholder="+1 (555) 123-4567"
-                  className="pl-10"
-                  data-testid="input-phone"
-                />
-              </div>
-            </div>
+            {/* Phone Verification */}
+            <PhoneVerification
+              onVerified={handlePhoneVerified}
+              initialPhone={formData.phone}
+              required={true}
+            />
             
             {/* PAN Number */}
             <div className="space-y-2">

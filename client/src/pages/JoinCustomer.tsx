@@ -10,6 +10,8 @@ import customerImage from "@assets/stock_images/happy_woman_getting__3f5716b3.jp
 import { SocialLogin } from "@/components/SocialLogin";
 import { handleSocialAuth } from "@/lib/socialAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { PhoneVerification } from "@/components/PhoneVerification";
+import { sendWelcomeEmailWithVerification } from "@/lib/emailVerification";
 
 export default function JoinCustomer() {
   const [, setLocation] = useLocation();
@@ -21,6 +23,8 @@ export default function JoinCustomer() {
     phone: "",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [firebaseToken, setFirebaseToken] = useState<string | undefined>();
   const { toast } = useToast();
   const { isAuthenticated, isBusinessUser, isLoading: authLoading } = useAuth();
 
@@ -35,8 +39,24 @@ export default function JoinCustomer() {
     }
   }, [isAuthenticated, isBusinessUser, authLoading, setLocation]);
 
+  const handlePhoneVerified = (phone: string, token?: string) => {
+    setFormData(prev => ({ ...prev, phone }));
+    setPhoneVerified(true);
+    setFirebaseToken(token);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!phoneVerified) {
+      toast({
+        title: "Phone verification required",
+        description: "Please verify your phone number before creating an account.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -47,37 +67,47 @@ export default function JoinCustomer() {
         },
         body: JSON.stringify({
           ...formData,
-          userType: 'customer'
+          userType: 'customer',
+          firebaseToken,
+          phoneVerified: true,
         }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        if (data.requiresVerification) {
-          toast({
-            title: "Account Created Successfully!",
-            description: "Please check your email to verify your account before you can start booking with SalonHub.",
-            duration: 8000, // Show longer for important verification message
-          });
-          
-          // Show verification message instead of redirecting
-          // User will be redirected after email verification
-        } else {
+        // Send welcome email with verification link using Firebase
+        console.log('📧 Sending welcome email with verification link...');
+        const emailResult = await sendWelcomeEmailWithVerification(
+          formData.email,
+          formData.password
+        );
+
+        if (emailResult.success) {
+          console.log('✅ Verification email sent successfully');
           toast({
             title: "Welcome to SalonHub!",
-            description: "Your customer account has been created successfully.",
+            description: "Registration successful! Please check your email to verify your account.",
+            duration: 6000,
           });
-          
-          // Store token and user if provided
-          if (data.token) {
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-          }
-          
-          // Redirect to customer dashboard
-          setLocation('/customer/dashboard');
+        } else {
+          console.error('❌ Email verification failed:', emailResult.error);
+          toast({
+            title: "Email verification failed",
+            description: emailResult.message || "Failed to send verification email. Please contact support.",
+            variant: "destructive",
+            duration: 6000,
+          });
         }
+
+        // Store token and user if provided
+        if (data.token) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+        }
+        
+        // Redirect to customer dashboard
+        setLocation('/customer/dashboard');
       } else {
         toast({
           title: "Registration Failed",
@@ -207,22 +237,12 @@ export default function JoinCustomer() {
               </div>
             </div>
             
-            {/* Phone */}
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => handleInputChange('phone', e.target.value)}
-                  placeholder="+1 (555) 123-4567"
-                  className="pl-10"
-                  data-testid="input-phone"
-                />
-              </div>
-            </div>
+            {/* Phone Verification */}
+            <PhoneVerification
+              onVerified={handlePhoneVerified}
+              initialPhone={formData.phone}
+              required={true}
+            />
             
             {/* Password */}
             <div className="space-y-2">

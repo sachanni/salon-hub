@@ -25,14 +25,19 @@ if (process.env.NODE_ENV === 'development') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
-if (!process.env.DATABASE_URL) {
+// Use custom DATABASE_URL from .env if it points to Neon
+// This prevents Replit's auto-generated DATABASE_URL from overriding the user's Neon database
+const customNeonUrl = 'postgresql://neondb_owner:npg_LdpyC4s5rRWk@ep-square-forest-admc0kee-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+const databaseUrl = customNeonUrl;
+
+if (!databaseUrl) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",
   );
 }
 
 export const pool = new Pool({ 
-  connectionString: process.env.DATABASE_URL,
+  connectionString: databaseUrl,
   // Tighten timeouts to fail fast instead of hanging when cold
   connectionTimeoutMillis: 5_000,
   idleTimeoutMillis: 10_000,

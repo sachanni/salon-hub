@@ -27,6 +27,7 @@ import SalonBookingPage from "@/pages/SalonBookingPage";
 import ServicesSelection from "@/pages/ServicesSelection";
 import BookingPage from "@/pages/BookingPage";
 import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
+import EmailVerified from "@/pages/EmailVerified";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -66,6 +67,7 @@ function Router() {
         </Route>
         <Route path="/services" component={ServicesSelection} />
         <Route path="/booking" component={BookingPage} />
+        <Route path="/email-verified" component={EmailVerified} />
         
         {/* Super Admin Routes */}
         <Route path="/admin/:rest*" component={SuperAdminDashboard} />

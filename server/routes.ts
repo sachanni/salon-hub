@@ -7,6 +7,7 @@ import { requireSalonAccess, requireStaffAccess, requireSuperAdmin, populateUser
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import express from "express";
+import { verifyFirebaseToken, getPhoneNumberFromToken } from "./firebaseAdmin";
 import { createClient } from 'redis';
 import { OfferCalculator } from "./offerCalculator";
 import { 
@@ -397,7 +398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manual registration endpoint (works alongside Replit Auth)
   app.post('/api/auth/register', async (req: any, res) => {
     try {
-      const { email, password, firstName, lastName, phone, userType, workPreference, panNumber, gstNumber } = req.body;
+      const { email, password, firstName, lastName, phone, userType, workPreference, panNumber, gstNumber, firebaseToken, phoneVerified } = req.body;
 
       // Validate required fields
       if (!email || !password) {
@@ -410,6 +411,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "User with this email already exists" });
       }
 
+      // Server-side Firebase token verification (if provided)
+      let verifiedPhoneNumber: string | null = null;
+      let isPhoneVerified = 0;
+
+      if (firebaseToken && phoneVerified) {
+        try {
+          console.log('🔐 Verifying Firebase token for registration...');
+          const decodedToken = await verifyFirebaseToken(firebaseToken);
+          
+          if (decodedToken) {
+            verifiedPhoneNumber = getPhoneNumberFromToken(decodedToken);
+            
+            // Ensure the phone number from token matches the provided phone
+            if (verifiedPhoneNumber && phone && verifiedPhoneNumber !== phone) {
+              return res.status(400).json({ 
+                error: "Phone number mismatch. The verified phone number does not match the provided phone." 
+              });
+            }
+            
+            isPhoneVerified = 1;
+            console.log('✅ Firebase token verified successfully. Phone verified:', verifiedPhoneNumber);
+          }
+        } catch (error: any) {
+          console.error('❌ Firebase token verification failed:', error.message);
+          return res.status(400).json({ 
+            error: error.message || "Failed to verify phone number. Please try again." 
+          });
+        }
+      }
+
       // Hash password
       const bcrypt = await import('bcryptjs');
       const hashedPassword = await bcrypt.default.hash(password, 10);
@@ -420,14 +451,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         password: hashedPassword,
         firstName: firstName || '',
         lastName: lastName || '',
-        phone: phone || null,
+        phone: verifiedPhoneNumber || phone || null,
         workPreference: workPreference || null,
         businessCategory: null, // Will be set during business setup wizard
         businessName: null, // Will be set when selecting business template
         panNumber: panNumber || null,
         gstNumber: gstNumber || null,
         emailVerified: 0,
-        phoneVerified: 0,
+        phoneVerified: isPhoneVerified,
         isActive: 1,
       };
 
