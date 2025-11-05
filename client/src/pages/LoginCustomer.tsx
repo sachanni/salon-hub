@@ -7,8 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { Separator } from "@/components/ui/separator";
 import { Heart, Eye, EyeOff, Sparkles, Star, Calendar } from "lucide-react";
+import { PasswordResetModal } from "@/components/PasswordResetModal";
 
 export default function LoginCustomer() {
   const [formData, setFormData] = useState({
@@ -18,6 +18,7 @@ export default function LoginCustomer() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
   const { toast } = useToast();
   const { checkAuth } = useAuth();
   const [, setLocation] = useLocation();
@@ -34,7 +35,10 @@ export default function LoginCustomer() {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          loginType: 'customer' // Enforce customer-only login
+        }),
       });
 
       const data = await response.json();
@@ -52,6 +56,20 @@ export default function LoginCustomer() {
         setLocation(data.redirect || '/customer/dashboard');
       } else {
         setError(data.error || "Login failed. Please try again.");
+        
+        // Handle wrong portal redirect
+        if (data.redirectTo) {
+          toast({
+            title: "Wrong Login Portal",
+            description: data.error,
+            variant: "destructive",
+          });
+          // Redirect to the correct portal after 2 seconds
+          setTimeout(() => {
+            setLocation(data.redirectTo);
+          }, 2000);
+          return;
+        }
         
         if (data.requiresVerification) {
           toast({
@@ -71,10 +89,6 @@ export default function LoginCustomer() {
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     setError(""); // Clear error when user starts typing
-  };
-
-  const handleReplitLogin = () => {
-    window.location.href = '/api/login?userType=customer';
   };
 
   return (
@@ -204,41 +218,19 @@ export default function LoginCustomer() {
                   </div>
                 )}
               </Button>
+              
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordReset(true)}
+                  className="text-sm text-pink-600 hover:text-pink-800 dark:text-pink-400 dark:hover:text-pink-300 underline font-medium"
+                >
+                  Forgot password? Click here to Reset
+                </button>
+              </div>
             </form>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <Separator className="w-full" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  Or continue with
-                </span>
-              </div>
-            </div>
-
-            <Button 
-              variant="outline" 
-              className="w-full border-pink-200 hover:bg-pink-50 text-pink-700 hover:text-pink-800 py-3" 
-              onClick={handleReplitLogin}
-              data-testid="button-replit-login"
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Continue with Replit
-            </Button>
-
-            <div className="text-center space-y-3">
-              <div className="bg-pink-50 dark:bg-pink-900/20 rounded-lg p-4">
-                <p className="text-sm text-pink-700 dark:text-pink-300">
-                  New to SalonHub?{" "}
-                  <Link href="/join/customer" className="text-pink-600 hover:text-pink-800 underline font-semibold">
-                    Create your free account
-                  </Link>
-                </p>
-                <p className="text-xs text-pink-600 dark:text-pink-400 mt-1">
-                  Join thousands of happy customers!
-                </p>
-              </div>
+            <div className="text-center">
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Business owner?{" "}
                 <Link href="/login/business" className="text-blue-600 hover:text-blue-800 underline font-medium">
@@ -255,6 +247,11 @@ export default function LoginCustomer() {
           </Link>
         </div>
       </div>
+
+      <PasswordResetModal 
+        open={showPasswordReset} 
+        onClose={() => setShowPasswordReset(false)} 
+      />
     </div>
   );
 }

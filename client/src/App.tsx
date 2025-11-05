@@ -28,6 +28,8 @@ import ServicesSelection from "@/pages/ServicesSelection";
 import BookingPage from "@/pages/BookingPage";
 import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
 import EmailVerified from "@/pages/EmailVerified";
+import EmailVerificationExpired from "@/pages/EmailVerificationExpired";
+import ResetPassword from "@/pages/ResetPassword";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -68,6 +70,8 @@ function Router() {
         <Route path="/services" component={ServicesSelection} />
         <Route path="/booking" component={BookingPage} />
         <Route path="/email-verified" component={EmailVerified} />
+        <Route path="/email-verification-expired" component={EmailVerificationExpired} />
+        <Route path="/reset-password" component={ResetPassword} />
         
         {/* Super Admin Routes */}
         <Route path="/admin/:rest*" component={SuperAdminDashboard} />

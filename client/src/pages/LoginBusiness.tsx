@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Separator } from "@/components/ui/separator";
 import { Building2, Eye, EyeOff, BarChart3, Shield, TrendingUp, Users, Calendar, DollarSign } from "lucide-react";
+import { PasswordResetModal } from "@/components/PasswordResetModal";
 
 export default function LoginBusiness() {
   const [formData, setFormData] = useState({
@@ -18,6 +19,7 @@ export default function LoginBusiness() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
   const { toast } = useToast();
   const { checkAuth } = useAuth();
   const [, setLocation] = useLocation();
@@ -34,7 +36,10 @@ export default function LoginBusiness() {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          loginType: 'business' // Enforce business-only login
+        }),
       });
 
       const data = await response.json();
@@ -52,6 +57,20 @@ export default function LoginBusiness() {
         setLocation(data.redirect || '/');
       } else {
         setError(data.error || "Login failed. Please try again.");
+        
+        // Handle wrong portal redirect
+        if (data.redirectTo) {
+          toast({
+            title: "Wrong Login Portal",
+            description: data.error,
+            variant: "destructive",
+          });
+          // Redirect to the correct portal after 2 seconds
+          setTimeout(() => {
+            setLocation(data.redirectTo);
+          }, 2000);
+          return;
+        }
         
         if (data.requiresVerification) {
           toast({
@@ -71,10 +90,6 @@ export default function LoginBusiness() {
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     setError(""); // Clear error when user starts typing
-  };
-
-  const handleReplitLogin = () => {
-    window.location.href = '/api/login?userType=owner';
   };
 
   return (
@@ -227,42 +242,19 @@ export default function LoginBusiness() {
                   </div>
                 )}
               </Button>
+              
+              <div className="text-center mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(true)}
+                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 underline transition-colors"
+                >
+                  Forgot password? Click here to Reset
+                </button>
+              </div>
             </form>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <Separator className="w-full" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  Or continue with
-                </span>
-              </div>
-            </div>
-
-            <Button 
-              variant="outline" 
-              className="w-full border-blue-200 hover:bg-blue-50 text-blue-700 hover:text-blue-800 py-4 font-medium" 
-              onClick={handleReplitLogin}
-              data-testid="button-replit-login"
-            >
-              <Building2 className="h-4 w-4 mr-2" />
-              Continue with Replit
-            </Button>
-
             <div className="text-center space-y-4">
-              <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
-                <p className="text-sm text-slate-700 dark:text-slate-300 mb-2">
-                  New business owner?{" "}
-                  <Link href="/join/business" className="text-blue-600 hover:text-blue-800 underline font-semibold">
-                    Start your free trial
-                  </Link>
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  Join 10,000+ successful salon businesses
-                </p>
-              </div>
-              
               <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 rounded-lg p-4 border border-blue-200/50">
                 <div className="flex items-center justify-center gap-2 mb-2">
                   <Shield className="h-4 w-4 text-blue-600" />
@@ -289,6 +281,11 @@ export default function LoginBusiness() {
           </Link>
         </div>
       </div>
+      
+      <PasswordResetModal 
+        open={showResetModal} 
+        onClose={() => setShowResetModal(false)} 
+      />
     </div>
   );
 }

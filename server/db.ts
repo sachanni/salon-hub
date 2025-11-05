@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+// Load .env file first before accessing environment variables
+dotenv.config({ override: true });
+
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
@@ -10,29 +14,12 @@ import * as schema from "@shared/schema";
 // Enable WebSocket constructor to avoid fetch issues
 neonConfig.webSocketConstructor = ws;
 
-// IMPORTANT: Neon serverless driver uses WebSocket connections over TLS.
-// In Replit's development environment, Neon's proxy uses self-signed certificates
-// for the WebSocket connection (wss://helium/v2).
-// 
-// We MUST disable TLS verification in development for the WebSocket connection to work.
-// This is safe because:
-// 1. Only affects development environment (NODE_ENV=development)
-// 2. Replit environment is already sandboxed and secure
-// 3. Production deployments use proper TLS validation
-//
-// Note: This generates a Node.js warning, which is expected and harmless in this context.
-if (process.env.NODE_ENV === 'development') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-}
-
-// Use custom DATABASE_URL from .env if it points to Neon
-// This prevents Replit's auto-generated DATABASE_URL from overriding the user's Neon database
-const customNeonUrl = 'postgresql://neondb_owner:npg_LdpyC4s5rRWk@ep-square-forest-admc0kee-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
-const databaseUrl = customNeonUrl;
+// Use EXTERNAL_DATABASE_URL from .env for external Neon database
+const databaseUrl = process.env.EXTERNAL_DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
+    "EXTERNAL_DATABASE_URL must be set in .env file. Please add your external database connection string.",
   );
 }
 

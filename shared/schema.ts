@@ -40,8 +40,13 @@ export const users = pgTable("users", {
   panNumber: varchar("pan_number", { length: 10 }), // PAN number for tax
   gstNumber: varchar("gst_number", { length: 15 }), // GST number
   emailVerified: integer("email_verified").notNull().default(0),
+  emailVerificationToken: varchar("email_verification_token"), // Email verification token
+  emailVerificationExpiry: timestamp("email_verification_expiry"), // Email verification token expiry
+  emailVerificationSentAt: timestamp("email_verification_sent_at"), // When verification email was last sent
   phoneVerified: integer("phone_verified").notNull().default(0),
   isActive: integer("is_active").notNull().default(1),
+  passwordResetToken: varchar("password_reset_token"), // Password reset token
+  passwordResetExpiry: timestamp("password_reset_expiry"), // Password reset token expiry
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(), // Replit Auth field
 });
@@ -3608,6 +3613,24 @@ export const insertOtpVerificationSchema = createInsertSchema(otpVerifications).
 });
 
 export type OtpVerification = typeof otpVerifications.$inferSelect;
+
+// Password Reset OTP for Phone Numbers
+export const passwordResetOtps = pgTable("password_reset_otps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  otp: varchar("otp", { length: 6 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  verified: integer("verified").notNull().default(0), // 0 = not verified, 1 = verified
+  attempts: integer("attempts").notNull().default(0), // Track OTP verification attempts
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPasswordResetOtpSchema = createInsertSchema(passwordResetOtps).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type PasswordResetOtp = typeof passwordResetOtps.$inferSelect;
 
 // ===============================================
 // GEOCODING CACHE SYSTEM - Production-Grade Location Accuracy

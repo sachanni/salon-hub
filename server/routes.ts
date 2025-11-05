@@ -537,12 +537,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         redirectUrl = '/customer/dashboard';
       }
 
-      // Try to send verification email in background (optional)
+      // Generate and send email verification (production-ready with retry logic)
       try {
-        const verificationToken = await storage.createVerificationToken(newUser.email || '', newUser.id);
-        await sendVerificationEmail(newUser.email || '', newUser.firstName || 'User', verificationToken);
-      } catch (error) {
-        console.log("Email verification sending failed (non-blocking):", error);
+        // Generate secure verification token
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        
+        // Hash the token before storing (SHA-256 for security)
+        const hashedToken = crypto.createHash('sha256').update(verificationToken).digest('hex');
+        
+        const verificationExpiry = new Date();
+        verificationExpiry.setHours(verificationExpiry.getHours() + 24); // 24-hour expiry
+
+        // Save hashed token to users table
+        await storage.saveEmailVerificationToken(newUser.id, hashedToken, verificationExpiry);
+
+        // Generate verification link
+        const baseUrl = process.env.APP_BASE_URL || 
+                       (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : 'http://localhost:5000');
+        const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
+
+        // Send appropriate welcome + verification email based on user type
+        const isBusinessUser = userType === 'owner';
+        
+        if (isBusinessUser) {
+          const { sendBusinessWelcomeVerificationEmail } = await import('./lib/sendgrid');
+          await sendBusinessWelcomeVerificationEmail(
+            newUser.email || '',
+            verificationLink,
+            newUser.firstName || undefined
+          );
+          console.log('✅ Business welcome + verification email sent to:', newUser.email);
+        } else {
+          const { sendWelcomeVerificationEmail } = await import('./lib/sendgrid');
+          await sendWelcomeVerificationEmail(
+            newUser.email || '',
+            verificationLink,
+            newUser.firstName || undefined
+          );
+          console.log('✅ Customer welcome + verification email sent to:', newUser.email);
+        }
+
+      } catch (emailError) {
+        // Log error but don't block registration
+        console.error('❌ Email verification sending failed (non-blocking):', emailError);
+        // User can still log in and request verification later
       }
 
       // Success with session established - no verification required for immediate access
@@ -559,6 +597,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Registration error:", error);
       res.status(500).json({ error: "Failed to create account. Please try again." });
+    }
+  });
+
+  // Email verification endpoint - verify email when user clicks link
+  app.get('/api/auth/verify-email', async (req, res) => {
+    try {
+      const { token } = req.query;
+
+      if (!token || typeof token !== 'string') {
+        return res.redirect('/email-verification-expired?error=invalid');
+      }
+
+      console.log('🔐 Verifying email with token...');
+
+      // Hash the token to compare with stored hashed token (SHA-256)
+      const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+      // Get user by hashed verification token
+      const user = await storage.getUserByEmailVerificationToken(hashedToken);
+
+      if (!user) {
+        console.log('❌ Invalid verification token');
+        return res.redirect('/email-verification-expired?error=invalid');
+      }
+
+      // Check if already verified
+      if (user.emailVerified === 1) {
+        console.log('✅ Email already verified, redirecting to success page');
+        return res.redirect('/email-verified?already=true');
+      }
+
+      // Check if token has expired
+      if (!user.emailVerificationExpiry || new Date() > user.emailVerificationExpiry) {
+        console.log('⏰ Verification token has expired');
+        return res.redirect('/email-verification-expired?error=expired');
+      }
+
+      // Mark email as verified and clear token
+      await storage.markEmailAsVerified(user.id);
+
+      console.log('✅ Email verified successfully for user:', user.email);
+
+      // Redirect to success page
+      return res.redirect('/email-verified');
+
+    } catch (error) {
+      console.error('❌ Email verification error:', error);
+      return res.redirect('/email-verification-expired?error=unknown');
+    }
+  });
+
+  // Resend email verification endpoint with rate limiting (works for both authenticated and unauthenticated users)
+  app.post('/api/auth/resend-verification', async (req: any, res) => {
+    try {
+      const { email } = req.body;
+      const userId = req.session?.userId;
+
+      let user;
+
+      // Support both authenticated and unauthenticated resend requests
+      if (userId) {
+        // Authenticated user - get from session
+        user = await storage.getUserById(userId);
+      } else if (email) {
+        // Unauthenticated user - lookup by email
+        user = await storage.getUserByEmail(email);
+      } else {
+        return res.status(400).json({ 
+          error: "Please provide your email address or log in to resend verification email." 
+        });
+      }
+
+      if (!user || !user.email) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Check if already verified
+      if (user.emailVerified === 1) {
+        return res.status(400).json({ 
+          error: "Email is already verified" 
+        });
+      }
+
+      // Rate limiting: Check if verification email was sent in last 60 seconds
+      if (user.emailVerificationSentAt) {
+        const timeSinceLastSent = Date.now() - user.emailVerificationSentAt.getTime();
+        const cooldownPeriod = 60 * 1000; // 60 seconds
+
+        if (timeSinceLastSent < cooldownPeriod) {
+          const remainingSeconds = Math.ceil((cooldownPeriod - timeSinceLastSent) / 1000);
+          return res.status(429).json({ 
+            error: `Please wait ${remainingSeconds} seconds before requesting another verification email.`,
+            remainingSeconds
+          });
+        }
+      }
+
+      console.log('📧 Resending verification email to:', user.email);
+
+      // Generate new secure verification token
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      
+      // Hash the token before storing (SHA-256 for security)
+      const hashedToken = crypto.createHash('sha256').update(verificationToken).digest('hex');
+      
+      const verificationExpiry = new Date();
+      verificationExpiry.setHours(verificationExpiry.getHours() + 24); // 24-hour expiry
+
+      // Save hashed token to users table
+      await storage.saveEmailVerificationToken(user.id, hashedToken, verificationExpiry);
+
+      // Generate verification link (use unhashed token in URL)
+      const baseUrl = process.env.APP_BASE_URL || 
+                     (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : 'http://localhost:5000');
+      const verificationLink = `${baseUrl}/api/auth/verify-email?token=${verificationToken}`;
+
+      // Determine if business user
+      const isBusinessUser = user.workPreference !== null || user.businessCategory !== null;
+
+      // Send appropriate welcome + verification email
+      if (isBusinessUser) {
+        const { sendBusinessWelcomeVerificationEmail } = await import('./lib/sendgrid');
+        await sendBusinessWelcomeVerificationEmail(
+          user.email,
+          verificationLink,
+          user.firstName || undefined
+        );
+      } else {
+        const { sendWelcomeVerificationEmail } = await import('./lib/sendgrid');
+        await sendWelcomeVerificationEmail(
+          user.email,
+          verificationLink,
+          user.firstName || undefined
+        );
+      }
+
+      console.log('✅ Verification email resent successfully to:', user.email);
+
+      res.json({
+        success: true,
+        message: "Verification email sent! Please check your inbox.",
+        emailSent: true
+      });
+
+    } catch (error) {
+      console.error('❌ Error resending verification email:', error);
+      res.status(500).json({ 
+        error: "Failed to resend verification email. Please try again later." 
+      });
     }
   });
 
@@ -793,7 +980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manual login endpoint (email/password)
   app.post('/api/auth/login', async (req: any, res) => {
     try {
-      const { email, password } = req.body;
+      const { email, password, loginType } = req.body;
 
       // Validate required fields
       if (!email || !password) {
@@ -818,6 +1005,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isValidPassword = await bcrypt.default.compare(password, user.password);
       if (!isValidPassword) {
         return res.status(401).json({ error: "Invalid email or password" });
+      }
+
+      // Validate user type matches the login portal
+      const isBusinessUser = !!(user.workPreference || user.businessCategory || user.businessName);
+      
+      if (loginType === 'customer' && isBusinessUser) {
+        return res.status(403).json({ 
+          error: "This is a business account. Please use the business login portal.",
+          redirectTo: "/login/business"
+        });
+      }
+      
+      if (loginType === 'business' && !isBusinessUser) {
+        return res.status(403).json({ 
+          error: "This is a customer account. Please use the customer login portal.",
+          redirectTo: "/login/customer"
+        });
       }
 
       // Email verification is now optional - users can login without verification
@@ -857,6 +1061,285 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Login failed. Please try again." });
+    }
+  });
+
+  // Password Reset Flow - Step 1: Send Reset Email
+  // Note: Also aliased as '/api/auth/request-password-reset' for frontend compatibility
+  app.post('/api/auth/send-password-reset', async (req: any, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      // Find user by email
+      const user = await storage.getUserByEmail(email);
+
+      // Security: Don't reveal if email exists or not
+      const successMessage = "If an account exists with this email, you will receive a password reset link.";
+
+      if (!user) {
+        return res.json({ message: successMessage });
+      }
+
+      // Generate reset token (this will be sent in the email)
+      const { randomUUID, createHash } = await import('crypto');
+      const resetToken = randomUUID();
+      const resetExpiry = new Date(Date.now() + 3600000); // 1 hour from now
+
+      // Hash the token before storing in database for security
+      // Using SHA-256 for deterministic hashing (unlike bcrypt which uses salt)
+      const hashedToken = createHash('sha256').update(resetToken).digest('hex');
+
+      // Save hashed token to database
+      await storage.savePasswordResetToken(user.id, hashedToken, resetExpiry);
+
+      // Build reset link with proper domain configuration
+      // Priority: APP_BASE_URL (production/custom) > REPLIT_DOMAINS (Replit env) > localhost (dev)
+      let baseUrl = process.env.APP_BASE_URL;
+      
+      if (!baseUrl && process.env.REPLIT_DOMAINS) {
+        // REPLIT_DOMAINS can be comma-separated, take the first one
+        const domains = process.env.REPLIT_DOMAINS.split(',');
+        baseUrl = `https://${domains[0].trim()}`;
+      }
+      
+      if (!baseUrl) {
+        baseUrl = 'http://localhost:5000';
+      }
+      
+      const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
+
+      // Send email via SendGrid
+      const { sendPasswordResetEmail } = await import('./lib/sendgrid');
+      try {
+        await sendPasswordResetEmail(email, resetLink, user.firstName);
+        console.log(`[Password Reset] Email sent to ${email}`);
+      } catch (emailError) {
+        console.error('[Password Reset] Email error:', emailError);
+        // Don't fail the request if email fails, return success message anyway
+      }
+
+      return res.json({ message: successMessage });
+    } catch (error: any) {
+      console.error('[Password Reset] Error:', error);
+      return res.status(500).json({ error: "Failed to process password reset request" });
+    }
+  });
+
+  // Password Reset Flow - Step 2: Verify Reset Token
+  app.post('/api/auth/verify-reset-token', async (req: any, res) => {
+    try {
+      const { token } = req.body;
+
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      // Hash the incoming token to compare with stored hash
+      const { createHash } = await import('crypto');
+      const hashedToken = createHash('sha256').update(token).digest('hex');
+
+      const user = await storage.getUserByPasswordResetToken(hashedToken);
+
+      if (!user || !user.passwordResetToken || !user.passwordResetExpiry) {
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+
+      // Check if token has expired
+      if (new Date(user.passwordResetExpiry) < new Date()) {
+        // Clear expired token
+        await storage.clearPasswordResetToken(user.id);
+        return res.status(400).json({ error: "Token has expired. Please request a new password reset." });
+      }
+
+      return res.json({ 
+        valid: true, 
+        email: user.email 
+      });
+    } catch (error) {
+      console.error('[Verify Reset Token] Error:', error);
+      return res.status(500).json({ error: "Failed to verify token" });
+    }
+  });
+
+  // Alias for frontend compatibility (request-password-reset → send-password-reset)
+  app.post('/api/auth/request-password-reset', async (req: any, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      const user = await storage.getUserByEmail(email);
+      const successMessage = "If an account exists with this email, you will receive a password reset link.";
+
+      if (!user) {
+        return res.json({ message: successMessage });
+      }
+
+      const { randomUUID, createHash } = await import('crypto');
+      const resetToken = randomUUID();
+      const resetExpiry = new Date(Date.now() + 3600000);
+      const hashedToken = createHash('sha256').update(resetToken).digest('hex');
+
+      await storage.savePasswordResetToken(user.id, hashedToken, resetExpiry);
+
+      let baseUrl = process.env.APP_BASE_URL;
+      
+      if (!baseUrl && process.env.REPLIT_DOMAINS) {
+        const domains = process.env.REPLIT_DOMAINS.split(',');
+        baseUrl = `https://${domains[0].trim()}`;
+      }
+      
+      if (!baseUrl) {
+        baseUrl = 'http://localhost:5000';
+      }
+      
+      const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
+
+      const { sendPasswordResetEmail } = await import('./lib/sendgrid');
+      try {
+        await sendPasswordResetEmail(email, resetLink, user.firstName);
+        console.log(`[Password Reset] Email sent to ${email}`);
+      } catch (emailError) {
+        console.error('[Password Reset] Email error:', emailError);
+      }
+
+      return res.json({ message: successMessage });
+    } catch (error: any) {
+      console.error('[Password Reset] Error:', error);
+      return res.status(500).json({ error: "Failed to process password reset request" });
+    }
+  });
+
+  // Password Reset Flow - Step 3: Confirm Password Reset
+  app.post('/api/auth/confirm-password-reset', async (req: any, res) => {
+    try {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        return res.status(400).json({ error: "Token and new password are required" });
+      }
+
+      // Validate password strength
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters long" });
+      }
+
+      // Hash the incoming token to compare with stored hash
+      const { createHash } = await import('crypto');
+      const hashedToken = createHash('sha256').update(token).digest('hex');
+
+      // Verify token
+      const user = await storage.getUserByPasswordResetToken(hashedToken);
+
+      if (!user || !user.passwordResetToken || !user.passwordResetExpiry) {
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+
+      if (new Date(user.passwordResetExpiry) < new Date()) {
+        await storage.clearPasswordResetToken(user.id);
+        return res.status(400).json({ error: "Token has expired" });
+      }
+
+      // Hash the new password
+      const bcrypt = await import('bcryptjs');
+      const hashedPassword = await bcrypt.default.hash(newPassword, 10);
+
+      // Update password and clear reset token
+      await storage.updateUserPassword(user.id, hashedPassword);
+      await storage.clearPasswordResetToken(user.id);
+
+      // Send confirmation email
+      const { sendPasswordChangedEmail } = await import('./lib/sendgrid');
+      try {
+        await sendPasswordChangedEmail(user.email!, user.firstName);
+      } catch (emailError) {
+        console.error('[Password Changed Email] Error:', emailError);
+        // Don't fail the request if email fails
+      }
+
+      return res.json({ message: "Password successfully reset. You can now login with your new password." });
+    } catch (error: any) {
+      console.error('[Confirm Password Reset] Error:', error);
+      return res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
+  // Password Reset via Firebase Phone OTP
+  app.post('/api/auth/reset-password-via-phone', async (req: any, res) => {
+    try {
+      const { firebaseToken, phoneNumber, newPassword } = req.body;
+
+      if (!firebaseToken || !phoneNumber || !newPassword) {
+        return res.status(400).json({ error: "Firebase token, phone number, and new password are required" });
+      }
+
+      // Validate password strength
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters long" });
+      }
+
+      // Verify Firebase token
+      const { verifyFirebaseToken, getPhoneNumberFromToken } = await import('./firebaseAdmin');
+      
+      try {
+        const decodedToken = await verifyFirebaseToken(firebaseToken);
+        const tokenPhone = getPhoneNumberFromToken(decodedToken);
+
+        // Validate that we have a phone number in the token
+        if (!tokenPhone) {
+          return res.status(400).json({ error: "Firebase token does not contain a phone number" });
+        }
+
+        // Ensure phone numbers match
+        const normalizePhone = (phone: string) => phone.replace(/\D/g, '');
+        if (normalizePhone(tokenPhone) !== normalizePhone(phoneNumber)) {
+          return res.status(400).json({ error: "Phone number mismatch" });
+        }
+
+        // Find user by phone number
+        const user = await storage.getUserByPhone(phoneNumber);
+
+        if (!user) {
+          return res.status(404).json({ error: "No account found with this phone number" });
+        }
+
+        // Hash the new password
+        const bcrypt = await import('bcryptjs');
+        const hashedPassword = await bcrypt.default.hash(newPassword, 10);
+
+        // Update password
+        await storage.updateUserPassword(user.id, hashedPassword);
+
+        // Send confirmation email if user has email
+        if (user.email) {
+          const { sendPasswordChangedEmail } = await import('./lib/sendgrid');
+          try {
+            await sendPasswordChangedEmail(user.email, user.firstName);
+          } catch (emailError) {
+            console.error('[Password Changed Email] Error:', emailError);
+            // Don't fail the request if email fails
+          }
+        }
+
+        console.log(`[Password Reset via Phone] Password reset successful for user ${user.id}`);
+
+        return res.json({ 
+          success: true,
+          message: "Password successfully reset. You can now login with your new password." 
+        });
+      } catch (firebaseError: any) {
+        console.error('[Firebase Verification] Error:', firebaseError);
+        return res.status(400).json({ error: "Invalid or expired Firebase token" });
+      }
+    } catch (error: any) {
+      console.error('[Reset Password via Phone] Error:', error);
+      return res.status(500).json({ error: "Failed to reset password" });
     }
   });
 
