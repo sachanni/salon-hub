@@ -967,16 +967,16 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
       </div>
 
       <div className="flex flex-1 overflow-hidden min-w-0">
-        {/* Sidebar */}
-        <div className="w-[400px] min-w-[360px] bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+        {/* Sidebar - Responsive: Full width on mobile, sidebar on desktop */}
+        <div className="w-full md:w-[400px] md:min-w-[360px] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
           {/* Enhanced Header */}
-          <div className="p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
+          <div className="p-4 md:p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">
+                <h2 className="text-xl md:text-lg font-semibold text-gray-900">
                   {salons.length} salons found
                 </h2>
-                <p className="text-sm text-gray-600">
+                <p className="text-base md:text-sm text-gray-600">
                   Near {searchLocationName || 'your location'}
                 </p>
               </div>
@@ -987,12 +987,12 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                 onClick={() => setIsFilterPanelOpen(true)}
                 data-testid="button-open-filters"
               >
-                <Filter className="w-4 h-4" />
+                <Filter className="w-5 h-5 md:w-4 md:h-4" />
               </Button>
             </div>
             
             {/* Category Tabs */}
-            <div className="mt-3">
+            <div className="mt-3 -mx-4 px-4">
               <CategoryTabs
                 selectedCategory={selectedCategory}
                 onCategoryChange={setSelectedCategory}
@@ -1002,7 +1002,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
 
           {/* Salon List */}
           <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4">
+            <div className="p-4 md:p-4 space-y-4">
               {sortedSalons.length === 0 ? (
                 <div className="text-center py-8">
                   <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-3" />

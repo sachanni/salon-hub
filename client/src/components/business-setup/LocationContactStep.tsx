@@ -5,7 +5,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { MapPin, Clock, Navigation } from "lucide-react";
+import { MapPin, Clock, Navigation, Search } from "lucide-react";
+import GoogleBusinessSearchDialog from "./GoogleBusinessSearchDialog";
 // Google Maps is now loaded using functional API instead of Loader class
 import {
   Select,
@@ -78,6 +79,7 @@ export default function LocationContactStep({
   // Use onNext if provided (from SetupWizard), otherwise use onComplete (from Dashboard)
   const handleNext = onNext || onComplete || (() => {});
   const [formData, setFormData] = useState({
+    shopNumber: "",
     address: "",
     city: "",
     state: "",
@@ -113,6 +115,7 @@ export default function LocationContactStep({
   const isInitialCityCustom = false;
     
   const [showCustomCity, setShowCustomCity] = useState(isInitialCityCustom);
+  const [showGoogleImport, setShowGoogleImport] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -141,6 +144,7 @@ export default function LocationContactStep({
       const data = salonData as any;
       
       // Filter out placeholder values - treat them as empty strings
+      const cleanShopNumber = isPlaceholderValue(data.shopNumber) ? "" : data.shopNumber;
       const cleanAddress = isPlaceholderValue(data.address) ? "" : data.address;
       const cleanCity = isPlaceholderValue(data.city) ? "" : data.city;
       const cleanState = isPlaceholderValue(data.state) ? "" : data.state;
@@ -149,6 +153,7 @@ export default function LocationContactStep({
       const cleanEmail = isPlaceholderValue(data.email) ? "" : data.email;
       
       setFormData({
+        shopNumber: cleanShopNumber || "",
         address: cleanAddress || "",
         city: cleanCity || "",
         state: cleanState || "",
@@ -177,7 +182,7 @@ export default function LocationContactStep({
 
   // Update salon mutation
   const updateSalonMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
+    mutationFn: async (data: any) => {
       const response = await apiRequest('PUT', `/api/salons/${salonId}`, data);
       return response.json();
     },
@@ -354,8 +359,11 @@ export default function LocationContactStep({
   // Initialize Google Maps Autocomplete
   useEffect(() => {
     const initAutocomplete = async () => {
-      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-      if (!apiKey || !addressInputRef.current) return;
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim();
+      if (!apiKey || !addressInputRef.current) {
+        console.error("Google Maps API key not found. Please check VITE_GOOGLE_MAPS_API_KEY in environment variables.");
+        return;
+      }
 
       try {
         // Load Google Maps using functional API
@@ -544,6 +552,24 @@ export default function LocationContactStep({
         <div className="space-y-4 p-4 bg-gradient-to-br from-violet-50 to-pink-50 rounded-lg">
           <h4 className="font-medium text-sm text-gray-700">Business Address</h4>
           
+          {/* Shop Number */}
+          <div className="space-y-2">
+            <Label htmlFor="shopNumber" className="text-sm font-medium text-gray-700">
+              Shop Number <span className="text-gray-400">(Optional)</span>
+            </Label>
+            <Input
+              id="shopNumber"
+              type="text"
+              placeholder="e.g., Shop 12, Suite 3B, Unit 5"
+              value={formData.shopNumber}
+              onChange={(e) => setFormData({...formData, shopNumber: e.target.value})}
+              className="h-11"
+            />
+            <p className="text-xs text-gray-500">
+              Add your shop/unit number if you're in a mall or building complex
+            </p>
+          </div>
+
           <div>
             <Label htmlFor="address" className="text-sm font-medium flex items-center justify-between">
               <span>Street Address *</span>
@@ -754,6 +780,21 @@ export default function LocationContactStep({
               </div>
             )}
           </div>
+
+          {/* Import from Google Button */}
+          {formData.latitude && formData.longitude && formData.address && (
+            <div className="pt-4">
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full border-2 border-dashed border-purple-300 text-purple-600 hover:bg-purple-50"
+                onClick={() => setShowGoogleImport(true)}
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Import from Google (5 Reviews + Rating)
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Map Preview Section */}
@@ -842,6 +883,22 @@ export default function LocationContactStep({
           </Button>
         </div>
       </form>
+
+      {/* Google Business Import Dialog */}
+      <GoogleBusinessSearchDialog
+        open={showGoogleImport}
+        onOpenChange={setShowGoogleImport}
+        latitude={formData.latitude || 0}
+        longitude={formData.longitude || 0}
+        businessName={(salonData as any)?.name || ''}
+        salonId={salonId}
+        onImportSuccess={() => {
+          toast({ title: "Success!", description: "Google reviews imported successfully" });
+          setShowGoogleImport(false);
+          // Invalidate queries to refresh salon data
+          queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId] });
+        }}
+      />
     </div>
   );
 }

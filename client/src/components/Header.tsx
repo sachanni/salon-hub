@@ -1,4 +1,4 @@
-import { User, Menu, Moon, Sun, ChevronDown, Building2, Scissors, Wallet, Gift } from "lucide-react";
+import { User, Menu, Moon, Sun, ChevronDown, Building2, Scissors, Wallet, Gift, LayoutDashboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -63,6 +63,12 @@ export default function Header() {
             <Link href="/" className="text-foreground hover:text-primary transition-colors">
               Home
             </Link>
+            {isAuthenticated && user?.roles?.includes('customer') && (
+              <Link href="/customer/dashboard" className="text-foreground hover:text-primary transition-colors flex items-center gap-1" data-testid="link-dashboard">
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
+              </Link>
+            )}
             <a href="#" className="text-foreground hover:text-primary transition-colors">Find Salons</a>
             <Link href="/all-offers" className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm" data-testid="link-all-offers">
               <Gift className="h-4 w-4" />

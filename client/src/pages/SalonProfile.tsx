@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import BookingModal from '@/components/BookingModal';
 import { PlatformOffersCarousel } from '@/components/PlatformOffersCarousel';
+import { ReviewSection } from '@/components/reviews/ReviewSection';
 import { cn } from '@/lib/utils';
 import { Map } from '@/components/ui/map';
 
@@ -998,15 +999,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                 <p className="text-gray-600">See what our clients are saying</p>
               </div>
 
-              <Card>
-                <CardContent className="p-12">
-                  <div className="text-center text-gray-500">
-                    <Star className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                    <p className="text-lg font-medium">No reviews yet</p>
-                    <p className="text-sm">Be the first to review {salon.name}!</p>
-                  </div>
-                </CardContent>
-              </Card>
+              <ReviewSection salonId={salonId} />
             </section>
           </div>
 

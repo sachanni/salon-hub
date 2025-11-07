@@ -44,25 +44,63 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
     }
 
     // Setup invisible reCAPTCHA
-    const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-      size: 'invisible',
-      callback: () => {
-        console.log('reCAPTCHA solved');
-      },
-      'expired-callback': () => {
-        console.log('reCAPTCHA expired');
+    let verifier: RecaptchaVerifier | null = null;
+    
+    try {
+      // Clear any existing reCAPTCHA widgets from the container first
+      const container = document.getElementById('recaptcha-container');
+      if (container) {
+        container.innerHTML = '';
+      }
+
+      verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {
+          console.log('reCAPTCHA solved');
+        },
+        'expired-callback': () => {
+          console.log('reCAPTCHA expired');
+          toast({
+            title: "Verification expired",
+            description: "Please try sending OTP again.",
+            variant: "destructive",
+          });
+        }
+      });
+
+      setRecaptchaVerifier(verifier);
+    } catch (error: any) {
+      console.error('Error initializing reCAPTCHA:', error);
+      
+      // If the error is about already being rendered, clear and retry once
+      if (error.message && error.message.includes('already been rendered')) {
+        const container = document.getElementById('recaptcha-container');
+        if (container) {
+          container.innerHTML = '';
+        }
         toast({
-          title: "Verification expired",
-          description: "Please try sending OTP again.",
+          title: "Please try again",
+          description: "Click 'Send OTP' to verify your phone number.",
+        });
+      } else {
+        toast({
+          title: "Verification setup failed",
+          description: "Please refresh the page and try again.",
           variant: "destructive",
         });
       }
-    });
-
-    setRecaptchaVerifier(verifier);
+    }
 
     return () => {
-      verifier.clear();
+      // Cleanup: safely clear the verifier
+      if (verifier) {
+        try {
+          verifier.clear();
+        } catch (error) {
+          // Silently handle cleanup errors to avoid console spam
+          console.debug('reCAPTCHA cleanup skipped:', error);
+        }
+      }
     };
   }, [toast]);
 
@@ -163,11 +201,37 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
       });
 
       // Reset reCAPTCHA on error
-      recaptchaVerifier.clear();
-      const newVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible',
-      });
-      setRecaptchaVerifier(newVerifier);
+      try {
+        recaptchaVerifier.clear();
+        
+        // Clear the container before creating a new verifier
+        const container = document.getElementById('recaptcha-container');
+        if (container) {
+          container.innerHTML = '';
+        }
+        
+        const newVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible',
+          callback: () => {
+            console.log('reCAPTCHA solved');
+          },
+          'expired-callback': () => {
+            console.log('reCAPTCHA expired');
+          }
+        });
+        setRecaptchaVerifier(newVerifier);
+      } catch (resetError) {
+        console.error('Failed to reset reCAPTCHA:', resetError);
+        // If reset fails, clear container and ask user to try again
+        const container = document.getElementById('recaptcha-container');
+        if (container) {
+          container.innerHTML = '';
+        }
+        toast({
+          title: "Please try again",
+          description: "Click 'Send OTP' again to verify your phone number.",
+        });
+      }
     } finally {
       setIsSending(false);
     }

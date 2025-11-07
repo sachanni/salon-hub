@@ -7,6 +7,8 @@ export interface User {
   email: string;
   firstName?: string;
   lastName?: string;
+  phone?: string;
+  phoneVerified?: boolean;
   profileImageUrl?: string;
   workPreference?: string;
   businessCategory?: string;

@@ -5,10 +5,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Clock, CreditCard, User, Star, UserCheck, Users } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Calendar, Clock, CreditCard, User, Star, UserCheck, Users, Info, LogIn } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { useUserVerification } from "@/hooks/useUserVerification";
+import { useAuth } from "@/contexts/AuthContext";
 import type { Service } from "@shared/schema";
 
 interface BookingModalProps {
@@ -35,9 +38,14 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
   const [isGuestMode, setIsGuestMode] = useState(true); // Default to guest mode
   const [guestSessionId, setGuestSessionId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'pay_now' | 'pay_at_salon'>('pay_now');
+  
+  // User verification state
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
 
   const { toast } = useToast();
+  const { isAuthenticated, user } = useAuth();
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const { checkUserExists, isChecking, userExistsCheck } = useUserVerification();
 
   // Fetch salon staff using React Query (same pattern as SalonProfile)
   const { data: staff = [], isLoading: isLoadingStaff, error: staffError } = useQuery({
@@ -213,9 +221,18 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
     }
   }, [isOpen, salonId, toast]);
 
-  // Load guest data when modal opens
+  // Auto-populate user details for authenticated users
   useEffect(() => {
-    if (isOpen && isGuestMode) {
+    if (isOpen && isAuthenticated && user) {
+      // Authenticated user - auto-populate their details
+      setIsGuestMode(false);
+      const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || '';
+      setCustomerName(fullName);
+      setCustomerEmail(user.email || "");
+      setCustomerPhone(user.phone || "");
+      console.log('Auto-populated authenticated user:', { fullName, email: user.email, phone: user.phone });
+    } else if (isOpen && !isAuthenticated && isGuestMode) {
+      // Guest user - load saved guest data if available
       const guestData = loadGuestData();
       if (guestData) {
         setCustomerEmail(guestData.email || "");
@@ -226,7 +243,33 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
         });
       }
     }
-  }, [isOpen, isGuestMode, toast]);
+  }, [isOpen, isAuthenticated, user, isGuestMode, toast]);
+
+  // Show login prompt when user exists check updates
+  useEffect(() => {
+    if (userExistsCheck && userExistsCheck.exists && userExistsCheck.hasAccount && !isAuthenticated) {
+      setShowLoginPrompt(true);
+    } else {
+      setShowLoginPrompt(false);
+    }
+  }, [userExistsCheck, isAuthenticated]);
+
+  // Handle email change with debounced user verification
+  const handleEmailChange = (email: string) => {
+    setCustomerEmail(email);
+    setShowLoginPrompt(false);
+
+    // Skip verification if already authenticated
+    if (isAuthenticated) {
+      return;
+    }
+
+    // Only check if email is valid format
+    // The hook will debounce the actual API call by 500ms
+    if (email && email.includes('@') && email.length > 5) {
+      checkUserExists(email);
+    }
+  };
 
   const handleBooking = async () => {
     // Debug logging to track salon ID issues
@@ -719,15 +762,62 @@ export default function BookingModal({ isOpen, onClose, salonName, salonId, staf
                   />
                 </div>
               )}
+              
+              {/* Existing User Login Prompt */}
+              {showLoginPrompt && userExistsCheck && !isAuthenticated && (
+                <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950/20">
+                  <LogIn className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-sm text-blue-700 dark:text-blue-300">
+                    <div className="flex flex-col gap-2">
+                      <p className="font-medium">Welcome back! We found your account.</p>
+                      <p className="text-xs">Log in to see your booking history and earn rewards.</p>
+                      <div className="flex gap-2 mt-1">
+                        <Button 
+                          size="sm" 
+                          variant="default"
+                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => {
+                            // Navigate to login - will be handled by header login button
+                            window.location.href = '#login';
+                            toast({
+                              title: "Please log in",
+                              description: "After logging in, you can continue with your booking.",
+                            });
+                          }}
+                        >
+                          <LogIn className="h-3 w-3 mr-1" />
+                          Log In
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => setShowLoginPrompt(false)}
+                        >
+                          Continue as Guest
+                        </Button>
+                      </div>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">
+                  Email {isChecking && <span className="text-xs text-muted-foreground">(checking...)</span>}
+                </Label>
                 <Input
                   data-testid="input-customer-email"
                   type="email"
                   placeholder="Enter your email"
                   value={customerEmail}
-                  onChange={(e) => setCustomerEmail(e.target.value)}
+                  onChange={(e) => handleEmailChange(e.target.value)}
+                  disabled={isAuthenticated}
                 />
+                {isAuthenticated && user?.email && (
+                  <p className="text-xs text-muted-foreground">
+                    Logged in as {user.email}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone Number</Label>

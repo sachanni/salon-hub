@@ -268,6 +268,7 @@ export const salons = pgTable("salons", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description"),
+  shopNumber: text("shop_number"), // Shop/unit/suite number (e.g., "Shop 12", "Suite 3B")
   address: text("address").notNull(),
   city: text("city").notNull(),
   state: text("state").notNull(),
@@ -285,6 +286,10 @@ export const salons = pgTable("salons", {
   acceptGroup: integer("accept_group").notNull().default(0), // 1 if salon accepts group bookings, 0 otherwise
   rating: decimal("rating", { precision: 3, scale: 2 }).default('0.00'),
   reviewCount: integer("review_count").notNull().default(0),
+  googlePlaceId: text("google_place_id"), // Google Places API Place ID for syncing
+  googleRating: decimal("google_rating", { precision: 3, scale: 2 }), // Rating from Google (0.00-5.00)
+  googleReviewCount: integer("google_review_count").default(0), // Total review count on Google
+  googleRatingSyncedAt: timestamp("google_rating_synced_at"), // Last time Google rating was synced
   imageUrl: text("image_url"),
   imageUrls: text("image_urls").array(), // Array of image URLs for carousel
   openTime: text("open_time"), // e.g., "9:00 AM" (legacy - kept for backward compatibility)
@@ -302,6 +307,8 @@ export const salons = pgTable("salons", {
 }, (table) => [
   // Spatial index for geospatial queries (lat/lng proximity search)
   index("salons_lat_lng_idx").on(table.latitude, table.longitude),
+  // Index for Google Place ID lookups
+  index("salons_google_place_id_idx").on(table.googlePlaceId),
 ]);
 
 export const insertSalonSchema = createInsertSchema(salons).omit({
@@ -313,6 +320,73 @@ export const insertSalonSchema = createInsertSchema(salons).omit({
 
 export type InsertSalon = z.infer<typeof insertSalonSchema>;
 export type Salon = typeof salons.$inferSelect;
+
+// Salon Reviews table - stores both Google-imported and SalonHub native reviews
+export const salonReviews = pgTable("salon_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").references(() => users.id, { onDelete: "set null" }), // Null for Google reviews
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }), // Null for Google reviews
+  rating: integer("rating").notNull(), // 1-5 stars
+  comment: text("comment"),
+  source: varchar("source", { length: 20 }).notNull().default('salonhub'), // 'salonhub' or 'google'
+  googleAuthorName: text("google_author_name"), // Author name from Google (for Google reviews)
+  googleAuthorPhoto: text("google_author_photo"), // Author photo URL from Google
+  googleReviewId: text("google_review_id"), // Unique Google review ID for deduplication
+  isVerified: integer("is_verified").notNull().default(0), // 1 if review is from completed booking
+  createdAt: timestamp("created_at").defaultNow(),
+  googlePublishedAt: timestamp("google_published_at"), // Original publish date from Google
+}, (table) => [
+  // Index for fetching reviews by salon
+  index("salon_reviews_salon_id_idx").on(table.salonId),
+  // Index for filtering by source
+  index("salon_reviews_source_idx").on(table.source),
+  // Index for checking Google review duplicates
+  index("salon_reviews_google_review_id_idx").on(table.googleReviewId),
+  // Unique constraint to prevent duplicate Google reviews
+  uniqueIndex("salon_reviews_google_unique").on(table.salonId, table.googleReviewId)
+    .where(sql`${table.source} = 'google' AND ${table.googleReviewId} IS NOT NULL`),
+  // Constraint to validate rating range
+  check("salon_reviews_rating_check", sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
+  // Constraint to validate source values
+  check("salon_reviews_source_check", sql`${table.source} IN ('salonhub', 'google')`),
+]);
+
+export const insertSalonReviewSchema = createInsertSchema(salonReviews).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSalonReview = z.infer<typeof insertSalonReviewSchema>;
+export type SalonReview = typeof salonReviews.$inferSelect;
+
+// Google Places Cache table - stores Google Places API results for 30 days
+export const googlePlacesCache = pgTable("google_places_cache", {
+  placeId: text("place_id").primaryKey(), // Google Place ID
+  businessName: text("business_name").notNull(),
+  address: text("address").notNull(),
+  latitude: decimal("latitude", { precision: 9, scale: 6 }).notNull(),
+  longitude: decimal("longitude", { precision: 9, scale: 6 }).notNull(),
+  rating: decimal("rating", { precision: 3, scale: 2 }),
+  reviewCount: integer("review_count").default(0),
+  payload: jsonb("payload").notNull(), // Full API response for place details
+  fetchedAt: timestamp("fetched_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(), // 30 days from fetchedAt
+}, (table) => [
+  // Index for coordinate-based proximity search
+  index("google_places_cache_lat_lng_idx").on(table.latitude, table.longitude),
+  // Index for finding expired cache entries
+  index("google_places_cache_expires_at_idx").on(table.expiresAt),
+  // Index for business name search
+  index("google_places_cache_business_name_idx").on(table.businessName),
+]);
+
+export const insertGooglePlacesCacheSchema = createInsertSchema(googlePlacesCache).omit({
+  fetchedAt: true,
+});
+
+export type InsertGooglePlacesCache = z.infer<typeof insertGooglePlacesCacheSchema>;
+export type GooglePlacesCache = typeof googlePlacesCache.$inferSelect;
 
 // User relations
 export const usersRelations = relations(users, ({ many }) => ({
@@ -341,6 +415,7 @@ export const salonsRelations = relations(salons, ({ one, many }) => ({
   staff: many(staff),
   availabilityPatterns: many(availabilityPatterns),
   timeSlots: many(timeSlots),
+  reviews: many(salonReviews),
 }));
 
 // Services table - defines available salon services with fixed pricing
@@ -642,6 +717,7 @@ export const bookings = pgTable("bookings", {
   serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }), // Auto-delete bookings when service is deleted
   staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }),
   timeSlotId: varchar("time_slot_id").references(() => timeSlots.id, { onDelete: "restrict" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }), // Link to authenticated user (null for guests)
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone").notNull(),
@@ -653,7 +729,7 @@ export const bookings = pgTable("bookings", {
   currency: varchar("currency", { length: 3 }).notNull().default('USD'),
   paymentMethod: varchar("payment_method", { length: 20 }).notNull().default('pay_now'), // pay_now, pay_at_salon
   notes: text("notes"), // Special requests or notes
-  guestSessionId: text("guest_session_id"), // For tracking guest user sessions
+  guestSessionId: text("guest_session_id"), // For tracking guest user sessions (null for authenticated users)
   // Offer-related fields (snapshot at booking time for audit trail)
   offerId: varchar("offer_id").references(() => platformOffers.id, { onDelete: "set null" }), // Applied offer (if any)
   offerTitle: text("offer_title"), // Snapshot of offer title at booking time
@@ -3595,24 +3671,6 @@ export type UserWallet = typeof userWallets.$inferSelect;
 export type WalletTransaction = typeof walletTransactions.$inferSelect;
 export type UserOfferUsage = typeof userOfferUsage.$inferSelect;
 export type LaunchOffer = typeof launchOffers.$inferSelect;
-
-// OTP Verification for Phone Numbers
-export const otpVerifications = pgTable("otp_verifications", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
-  otp: varchar("otp", { length: 6 }).notNull(),
-  expiresAt: timestamp("expires_at").notNull(),
-  verified: integer("verified").notNull().default(0), // 0 = not verified, 1 = verified
-  attempts: integer("attempts").notNull().default(0), // Track OTP verification attempts
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const insertOtpVerificationSchema = createInsertSchema(otpVerifications).omit({
-  id: true,
-  createdAt: true,
-});
-
-export type OtpVerification = typeof otpVerifications.$inferSelect;
 
 // Password Reset OTP for Phone Numbers
 export const passwordResetOtps = pgTable("password_reset_otps", {

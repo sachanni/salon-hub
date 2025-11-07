@@ -82,6 +82,21 @@ export const communicationRateLimits = {
       const userId = (req as any).user?.id;
       return `places:${userId || ipKeyGenerator(req.ip || 'unknown-ip')}`;
     }
+  }),
+
+  // User existence checks - strict limit to prevent enumeration attacks
+  strict: rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10, // 10 requests per minute
+    message: {
+      error: 'Too many requests. Please try again later.',
+      retryAfter: '1 minute'
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: Request) => {
+      return ipKeyGenerator(req.ip || 'unknown-ip'); // Rate limit by IP only for security
+    }
   })
 };
 

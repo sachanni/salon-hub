@@ -17,7 +17,7 @@ export interface SendMessageRequest {
   customerId?: string;
   bookingId?: string;
   campaignId?: string;
-  type: 'transactional' | 'marketing' | 'booking_confirmation' | 'booking_reminder' | 'campaign';
+  type: 'transactional' | 'marketing' | 'booking_confirmation' | 'booking_reminder' | 'booking_rescheduled' | 'campaign';
 }
 
 export interface SendMessageResponse {
@@ -444,6 +444,58 @@ export async function sendBookingReminder(
         bookingId,
         customContent: {
           body: `Reminder: You have an appointment at {{salon_name}} tomorrow at {{booking_time}} for {{service_name}} with {{staff_name}}. Looking forward to seeing you!`
+        },
+        variables
+      });
+      results.push(smsResult);
+    }
+  }
+  
+  return results;
+}
+
+export async function sendRescheduleNotification(
+  salonId: string,
+  bookingId: string,
+  customerEmail: string,
+  customerPhone?: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse[]> {
+  const results: SendMessageResponse[] = [];
+  
+  // Get customer communication preferences
+  const preferences = await storage.getCommunicationPreferences(customerEmail, salonId);
+  
+  if (preferences?.bookingNotifications !== false) {
+    const preferredChannel = preferences?.preferredChannel || 'email';
+    
+    if (preferredChannel === 'email' || !customerPhone) {
+      const emailResult = await communicationService.sendMessage({
+        to: customerEmail,
+        channel: 'email',
+        type: 'booking_rescheduled',
+        salonId,
+        customerId: customerEmail,
+        bookingId,
+        customContent: {
+          subject: 'Booking Rescheduled - {{salon_name}}',
+          body: `Hi {{customer_name}},\n\nYour booking has been rescheduled.\n\n❌ Previous Time:\nDate: {{old_date}}\nTime: {{old_time}}\n\n✅ New Time:\nDate: {{new_date}}\nTime: {{new_time}}\n\nService: {{service_name}}\nStaff: {{staff_name}}\nTotal: ₹{{total_amount}}\n\nThank you for your flexibility!\n\n{{salon_name}}`
+        },
+        variables
+      });
+      results.push(emailResult);
+    }
+    
+    if (preferredChannel === 'sms' && customerPhone) {
+      const smsResult = await communicationService.sendMessage({
+        to: customerPhone,
+        channel: 'sms',
+        type: 'booking_rescheduled',
+        salonId,
+        customerId: customerEmail,
+        bookingId,
+        customContent: {
+          body: `Hi {{customer_name}}! Your booking at {{salon_name}} has been rescheduled from {{old_date}} {{old_time}} to {{new_date}} {{new_time}}. Service: {{service_name}}.`
         },
         variables
       });

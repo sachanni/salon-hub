@@ -26,6 +26,8 @@ interface Salon {
   openTime?: string;
   image?: string;
   distance?: number; // Distance in kilometers for proximity search results
+  hasPackages?: boolean; // India-specific: Package deals availability
+  hasGoogleReviews?: boolean; // India-specific: Google Reviews verification
 }
 
 interface SearchParams {
@@ -139,7 +141,10 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
     reviewCount: salon.reviewCount || salon.review_count || 0,
     // Pass operating hours for open/closed status
     openTime: salon.openTime,
-    closeTime: salon.closeTime
+    closeTime: salon.closeTime,
+    // India-specific features for differentiation badges
+    hasPackages: salon.hasPackages || false,
+    hasGoogleReviews: salon.hasGoogleReviews || false
   })) : rawData || [];
 
   // NEVER use mock data - production apps should show real data or proper error states
@@ -159,12 +164,12 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
           )}
         </div>
         
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {isLoading ? (
             // Loading skeleton state
             Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="bg-muted rounded-lg p-6 animate-pulse" data-testid={`salon-skeleton-${index}`}>
-                <div className="h-48 bg-muted-foreground/20 rounded mb-4"></div>
+              <div key={index} className="bg-muted rounded-lg p-4 sm:p-6 animate-pulse" data-testid={`salon-skeleton-${index}`}>
+                <div className="h-48 sm:h-56 bg-muted-foreground/20 rounded mb-4"></div>
                 <div className="h-6 bg-muted-foreground/20 rounded mb-2"></div>
                 <div className="h-4 bg-muted-foreground/20 rounded mb-2"></div>
                 <div className="h-10 bg-muted-foreground/20 rounded"></div>

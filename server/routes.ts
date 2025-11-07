@@ -10,6 +10,8 @@ import express from "express";
 import { verifyFirebaseToken, getPhoneNumberFromToken } from "./firebaseAdmin";
 import { createClient } from 'redis';
 import { OfferCalculator } from "./offerCalculator";
+import { getGooglePlacesService } from "./services/googlePlaces";
+import { z } from "zod";
 import { 
   createPaymentOrderSchema, 
   verifyPaymentSchema,
@@ -99,10 +101,11 @@ import {
   toggleOfferStatusSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
-import { communicationService, sendBookingConfirmation, sendBookingReminder } from "./communicationService";
+import { communicationService, sendBookingConfirmation, sendBookingReminder, sendRescheduleNotification } from "./communicationService";
 import { schedulingService } from "./schedulingService";
 import { communicationRateLimits, businessTierLimits, checkBusinessLimits, spikeProtection } from "./middleware/rateLimiting";
 import { analyticsService } from "./analyticsService";
+import rateLimit from 'express-rate-limit';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database services
@@ -110,7 +113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   
   // Setup session-based authentication
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+  const sessionTtl = 30 * 24 * 60 * 60 * 1000; // 30 days
   const MemoryStoreSession = MemoryStore(session);
   const sessionStore = new MemoryStoreSession({
     checkPeriod: 86400000, // Prune expired entries every 24h
@@ -383,6 +386,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        phone: user.phone,
+        phoneVerified: user.phoneVerified === 1,
         profileImageUrl: user.profileImageUrl,
         workPreference: user.workPreference,
         businessCategory: user.businessCategory,
@@ -764,95 +769,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // OTP Verification Routes
-  // Send OTP to phone number
-  app.post('/api/otp/send', async (req, res) => {
+  // ===============================================
+  // USER EXISTENCE CHECK API (Public with Rate Limiting)
+  // ===============================================
+  
+  // Check if a user exists with given email/phone
+  // Used during booking to identify existing users vs guests
+  // Rate limited to prevent user enumeration attacks
+  app.post('/api/auth/check-user-exists', communicationRateLimits.strict, async (req, res) => {
     try {
-      const { phoneNumber } = req.body;
+      const { email, phone } = req.body;
 
-      if (!phoneNumber || phoneNumber.length < 10) {
-        return res.status(400).json({ error: "Valid phone number is required" });
+      // Require at least one identifier
+      if (!email && !phone) {
+        return res.status(400).json({ 
+          error: "Email or phone number is required" 
+        });
       }
 
-      // Generate 6-digit OTP
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // Set OTP expiry (5 minutes from now)
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      // Security: Add a small delay to prevent timing attacks
+      await new Promise(resolve => setTimeout(resolve, 200));
 
-      // Store OTP in database
-      await storage.createOtpVerification({
-        phoneNumber,
-        otp,
-        expiresAt,
-        verified: 0,
-        attempts: 0
-      });
+      let userExists = false;
+      let hasAccount = false;
 
-      // TODO: Integrate with SMS provider (Twilio, AWS SNS, etc.)
-      // For now, log OTP to console for development
-      console.log(`[OTP SENT] Phone: ${phoneNumber}, OTP: ${otp}`);
-      console.log(`NOTE: Integrate with SMS provider to send OTP via SMS`);
+      // Check by email first (most common)
+      if (email) {
+        const user = await storage.getUserByEmail(email);
+        if (user) {
+          userExists = true;
+          // Check if user has a password (not just OAuth/phone-only account)
+          hasAccount = !!user.password || user.emailVerified === 1;
+        }
+      }
 
+      // Check by phone if email didn't find a user
+      if (!userExists && phone) {
+        const user = await storage.getUserByPhone(phone);
+        if (user) {
+          userExists = true;
+          hasAccount = !!user.password || user.phoneVerified === 1;
+        }
+      }
+
+      // Return limited information to prevent enumeration
+      // Only indicate if user "can log in" (has account credentials)
       res.json({ 
-        success: true, 
-        message: "OTP sent successfully",
-        // Remove this in production - OTP should only be sent via SMS
-        devOtp: process.env.NODE_ENV === 'development' ? otp : undefined
+        exists: userExists,
+        hasAccount: hasAccount,
+        // Suggest action based on account status
+        suggestedAction: hasAccount ? 'login' : 'guest'
       });
 
     } catch (error) {
-      console.error("Error sending OTP:", error);
-      res.status(500).json({ error: "Failed to send OTP. Please try again." });
-    }
-  });
-
-  // Verify OTP
-  app.post('/api/otp/verify', async (req, res) => {
-    try {
-      const { phoneNumber, otp } = req.body;
-
-      if (!phoneNumber || !otp) {
-        return res.status(400).json({ error: "Phone number and OTP are required" });
-      }
-
-      // Get the latest OTP for this phone number
-      const otpRecord = await storage.getLatestOtpVerification(phoneNumber);
-
-      if (!otpRecord) {
-        return res.status(400).json({ error: "No OTP found for this phone number" });
-      }
-
-      // Check if already verified
-      if (otpRecord.verified === 1) {
-        return res.json({ success: true, message: "Phone number already verified" });
-      }
-
-      // Check if expired
-      if (new Date() > new Date(otpRecord.expiresAt)) {
-        return res.status(400).json({ error: "OTP has expired. Please request a new one." });
-      }
-
-      // Check if too many attempts (max 5)
-      if (otpRecord.attempts >= 5) {
-        return res.status(400).json({ error: "Too many attempts. Please request a new OTP." });
-      }
-
-      // Verify OTP
-      if (otpRecord.otp !== otp) {
-        // Increment attempt count
-        await storage.incrementOtpAttempts(otpRecord.id);
-        return res.status(400).json({ error: "Invalid OTP. Please try again." });
-      }
-
-      // Mark OTP as verified
-      await storage.markOtpAsVerified(otpRecord.id);
-
-      res.json({ success: true, message: "Phone number verified successfully" });
-
-    } catch (error) {
-      console.error("Error verifying OTP:", error);
-      res.status(500).json({ error: "Failed to verify OTP. Please try again." });
+      console.error("Error checking user existence:", error);
+      // Return generic response on error to avoid information leakage
+      res.json({ 
+        exists: false,
+        hasAccount: false,
+        suggestedAction: 'guest'
+      });
     }
   });
 
@@ -4738,7 +4714,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             imageUrl: service.imageUrl || null
           }));
           
-          console.log(`Salon ${salon.name}: Found ${mediaAssets.length} media assets, ${services.length} services, primary: ${primaryImage?.url || 'none'}`);
+          // Check if salon has active packages for India-specific badge
+          const packages = await storage.getPackagesBySalonId(salon.id);
+          const hasPackages = packages.some((pkg: any) => pkg.isActive === 1);
+          
+          // Check if salon has Google reviews for verification badge
+          const reviews = await storage.getReviewsBySalonId(salon.id, 'google');
+          const hasGoogleReviews = reviews.length > 0;
+          
+          console.log(`Salon ${salon.name}: Found ${mediaAssets.length} media assets, ${services.length} services, ${packages.length} packages, ${reviews.length} Google reviews, primary: ${primaryImage?.url || 'none'}`);
           
           // Parse category if it's a JSON string
           let categoryDisplay = salon.category;
@@ -4765,7 +4749,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             latitude: salon.latitude,
             longitude: salon.longitude,
             services: serviceDetails, // Add services array
-            distance_km: salon.distance ? Math.max(0.01, Number(salon.distance.toFixed(2))) : undefined // ACTUAL driving distance
+            distance_km: salon.distance ? Math.max(0.01, Number(salon.distance.toFixed(2))) : undefined, // ACTUAL driving distance
+            hasPackages, // India-specific: Package deals availability
+            hasGoogleReviews // India-specific: Google Reviews verification
           };
         } catch (error) {
           console.error(`Error fetching media for salon ${salon.id}:`, error);
@@ -4795,7 +4781,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             latitude: salon.latitude,
             longitude: salon.longitude,
             services: [], // Empty services on error
-            distance_km: salon.distance ? Math.max(0.01, Number(salon.distance.toFixed(2))) : undefined // ACTUAL driving distance
+            distance_km: salon.distance ? Math.max(0.01, Number(salon.distance.toFixed(2))) : undefined, // ACTUAL driving distance
+            hasPackages: false, // Safe default on error
+            hasGoogleReviews: false // Safe default on error
           };
         }
       }));
@@ -5086,6 +5074,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bookingTime: input.bookingTime,
         staffId: input.staffId
       });
+
+      // Send reschedule notification
+      try {
+        const salon = await storage.getSalon(salonId);
+        const service = await storage.getService(updatedBooking.serviceId);
+        const staff = updatedBooking.staffId ? await storage.getStaff(updatedBooking.staffId) : null;
+        
+        const variables = {
+          customer_name: updatedBooking.customerName || 'Valued Customer',
+          salon_name: salon?.name || 'Your Salon',
+          service_name: service?.name || 'Service',
+          staff_name: staff?.name || 'Our team',
+          old_date: new Date(currentBooking.bookingDate).toLocaleDateString(),
+          old_time: currentBooking.bookingTime,
+          new_date: new Date(updatedBooking.bookingDate).toLocaleDateString(),
+          new_time: updatedBooking.bookingTime,
+          total_amount: (updatedBooking.totalAmountPaisa / 100).toFixed(2)
+        };
+        
+        await sendRescheduleNotification(
+          updatedBooking.salonId,
+          updatedBooking.id,
+          updatedBooking.customerEmail,
+          updatedBooking.customerPhone || undefined,
+          variables
+        );
+      } catch (commError) {
+        console.error('Error sending reschedule notification:', commError);
+        // Don't fail the reschedule if communication fails
+      }
 
       res.json({ 
         success: true, 
@@ -5740,23 +5758,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Phone number is required' });
       }
 
-      // Verify that the phone number was verified via OTP
-      const otpRecord = await storage.getLatestOtpVerification(customerPhone);
-      if (!otpRecord || otpRecord.verified !== 1) {
-        return res.status(400).json({ 
-          error: 'Phone number not verified',
-          details: 'Please verify your phone number with OTP before booking'
-        });
-      }
-
-      // Check if OTP verification is still valid (within 1 hour)
-      const verificationAge = Date.now() - new Date(otpRecord.createdAt).getTime();
-      if (verificationAge > 60 * 60 * 1000) { // 1 hour
-        return res.status(400).json({ 
-          error: 'Phone verification expired',
-          details: 'Please verify your phone number again'
-        });
-      }
+      // Note: Phone verification is now handled by Firebase Phone Auth on the frontend
+      // The PhoneVerification component ensures phones are verified before booking
+      console.log(`📞 Booking request for phone: ${customerPhone}`);
 
       // Fetch all services from database for SERVER-SIDE PRICE VALIDATION
       const services = await Promise.all(
@@ -5927,6 +5931,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`✅ Booking created: ${booking.id} with ${serviceIds.length} services${offerId ? ' and offer applied' : ''}`);
 
+      // Send booking confirmation notification (email + SMS)
+      try {
+        const salon = await storage.getSalon(salonId);
+        const service = services[0]; // Primary service
+        const staff = staffId ? await storage.getStaff(staffId) : null;
+        
+        await sendBookingConfirmation(
+          salonId,
+          booking.id,
+          customerEmail,
+          customerPhone || undefined,
+          {
+            customer_name: customerName || 'Valued Customer',
+            salon_name: salon?.businessName || 'Our Salon',
+            service_name: serviceIds.length > 1 
+              ? `${services.map(s => s!.name).join(', ')}` 
+              : service!.name,
+            booking_date: date,
+            booking_time: time,
+            staff_name: staff?.name || 'Our Team',
+            total_amount: (finalAmountInPaisa / 100).toFixed(0)
+          }
+        );
+        console.log(`✅ Booking confirmation notification sent for booking ${booking.id}`);
+      } catch (notificationError) {
+        console.error('Failed to send booking confirmation notification:', notificationError);
+        // Don't fail the booking if notification fails
+      }
+
       res.json({
         success: true,
         bookingId: booking.id,
@@ -6066,6 +6099,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const booking = await storage.createBooking({
         salonId: input.salonId,
         serviceId: input.serviceId,
+        userId: userId || null, // Link to authenticated user (null for guests)
         customerName: input.booking.customer.name || '', // Empty string for guest bookings
         customerEmail: input.booking.customer.email,
         customerPhone: input.booking.customer.phone || '', // Empty string for guest bookings
@@ -6076,7 +6110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currency: service.currency,
         paymentMethod: input.booking.paymentMethod || 'pay_now', // Include payment method
         notes: input.booking.notes,
-        guestSessionId: input.booking.guestSessionId, // Store guest session ID if provided
+        guestSessionId: userId ? null : (input.booking.guestSessionId || null), // Only use guest session for non-authenticated users
         // Offer-related fields
         offerId: input.booking.offerId || null,
         originalAmountPaisa: input.booking.offerId ? service.priceInPaisa : null,
@@ -11001,6 +11035,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error deleting salon offer:', error);
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ===============================================
+  // GOOGLE PLACES API ENDPOINTS (Authenticated)
+  // ===============================================
+
+  // Rate limiter for Google Places (10 requests per minute per user)
+  const googlePlacesRateLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10, // 10 requests per minute
+    message: 'Too many requests to Google Places API. Please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Search for nearby businesses using Google Places API
+  app.post('/api/google-places/search', isAuthenticated, googlePlacesRateLimiter, async (req: any, res) => {
+    try {
+      const schema = z.object({
+        latitude: z.number(),
+        longitude: z.number(),
+        businessName: z.string().min(1),
+        radius: z.number().optional().default(50),
+      });
+
+      const validatedData = schema.parse(req.body);
+      
+      const googlePlacesService = getGooglePlacesService();
+      const results = await googlePlacesService.searchNearby(validatedData);
+      
+      res.json({ results });
+    } catch (error: any) {
+      console.error('Google Places search error:', error);
+      res.status(500).json({ error: error.message || 'Failed to search nearby businesses' });
+    }
+  });
+
+  // Import Google reviews for a salon
+  app.post('/api/salons/:salonId/google-places/import', isAuthenticated, requireSalonAccess(), googlePlacesRateLimiter, async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      const schema = z.object({
+        placeId: z.string().min(1),
+      });
+
+      const validatedData = schema.parse(req.body);
+      
+      const googlePlacesService = getGooglePlacesService();
+      const result = await googlePlacesService.importReviews({
+        placeId: validatedData.placeId,
+        salonId,
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error('Google reviews import error:', error);
+      res.status(500).json({ error: error.message || 'Failed to import Google reviews' });
+    }
+  });
+
+  // ===============================================
+  // REVIEW API ENDPOINTS
+  // ===============================================
+
+  // Get reviews for a salon (with optional source filtering)
+  app.get('/api/salons/:salonId/reviews', async (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const { source } = req.query;
+      
+      const sourceFilter = source === 'google' || source === 'salonhub' ? source : undefined;
+      const reviews = await storage.getReviewsBySalonId(salonId, sourceFilter);
+      
+      res.json({ reviews });
+    } catch (error) {
+      console.error('Get reviews error:', error);
+      res.status(500).json({ error: 'Failed to get reviews' });
+    }
+  });
+
+  // Create a new review (verified bookings only)
+  app.post('/api/salons/:salonId/reviews', isAuthenticated, async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const userId = req.user.id;
+      
+      const schema = z.object({
+        bookingId: z.string().uuid(),
+        rating: z.number().min(1).max(5),
+        comment: z.string().optional(),
+      });
+
+      const validatedData = schema.parse(req.body);
+      
+      // Verify booking belongs to user and is completed
+      const booking = await storage.getBooking(validatedData.bookingId);
+      
+      if (!booking) {
+        return res.status(404).json({ error: 'Booking not found' });
+      }
+      
+      if (booking.customerEmail !== req.user.email) {
+        return res.status(403).json({ error: 'You can only review your own bookings' });
+      }
+      
+      if (booking.status !== 'completed') {
+        return res.status(400).json({ error: 'You can only review completed bookings' });
+      }
+      
+      // Create review
+      const review = await storage.createReview({
+        salonId,
+        customerId: userId,
+        bookingId: validatedData.bookingId,
+        rating: validatedData.rating,
+        comment: validatedData.comment || null,
+        source: 'salonhub',
+        isVerified: 1,
+        googleAuthorName: null,
+        googleAuthorPhoto: null,
+        googleReviewId: null,
+        googlePublishedAt: null,
+      });
+      
+      // Update salon rating
+      await storage.updateSalonRating(salonId);
+      
+      res.json({ review });
+    } catch (error: any) {
+      console.error('Create review error:', error);
+      res.status(500).json({ error: error.message || 'Failed to create review' });
     }
   });
 

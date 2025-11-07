@@ -11,7 +11,6 @@ import {
   type Salon, type InsertSalon,
   type Role, type InsertRole,
   type Organization, type InsertOrganization,
-  type OtpVerification, type InsertOtpVerification,
   type UserRole, type InsertUserRole,
   type OrgUser, type InsertOrgUser,
   type Staff, type InsertStaff,
@@ -73,10 +72,16 @@ import {
   // Geocoding cache types
   type GeocodeLocation, type InsertGeocodeLocation,
   type LocationAlias, type InsertLocationAlias,
+  // Review system types
+  type SalonReview, type InsertSalonReview,
+  // Google Places cache types
+  type GooglePlacesCache, type InsertGooglePlacesCache,
   users, userSavedLocations, services, serviceTemplates, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
   geocodeLocations, locationAliases,
+  // Review and cache tables
+  salonReviews, googlePlacesCache,
   // Financial system tables
   expenseCategories, expenses, commissionRates, commissions, budgets, financialReports, taxSettings,
   // Communication system tables
@@ -93,9 +98,7 @@ import {
   // Platform admin tables
   platformConfig, platformCommissions, platformPayouts, platformOffers,
   // Wallet and launch offer tables
-  userWallets, walletTransactions, userOfferUsage, launchOffers,
-  // OTP verification table
-  otpVerifications
+  userWallets, walletTransactions, userOfferUsage, launchOffers
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne } from "drizzle-orm";
@@ -162,12 +165,6 @@ export interface IStorage {
   getUserByPasswordResetToken(token: string): Promise<User | undefined>;
   clearPasswordResetToken(userId: string): Promise<void>;
   updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
-  
-  // OTP verification operations
-  createOtpVerification(otp: InsertOtpVerification): Promise<OtpVerification>;
-  getLatestOtpVerification(phoneNumber: string): Promise<OtpVerification | undefined>;
-  incrementOtpAttempts(id: string): Promise<void>;
-  markOtpAsVerified(id: string): Promise<void>;
   
   // Salon operations
   getSalon(id: string): Promise<Salon | undefined>;
@@ -3483,33 +3480,6 @@ export class DatabaseStorage implements IStorage {
     await db.update(users)
       .set({ password: hashedPassword })
       .where(eq(users.id, userId));
-  }
-
-  // OTP verification operations
-  async createOtpVerification(otp: InsertOtpVerification): Promise<OtpVerification> {
-    const [newOtp] = await db.insert(otpVerifications).values(otp).returning();
-    return newOtp;
-  }
-
-  async getLatestOtpVerification(phoneNumber: string): Promise<OtpVerification | undefined> {
-    const [otpRecord] = await db.select()
-      .from(otpVerifications)
-      .where(eq(otpVerifications.phoneNumber, phoneNumber))
-      .orderBy(desc(otpVerifications.createdAt))
-      .limit(1);
-    return otpRecord || undefined;
-  }
-
-  async incrementOtpAttempts(id: string): Promise<void> {
-    await db.update(otpVerifications)
-      .set({ attempts: sql`${otpVerifications.attempts} + 1` })
-      .where(eq(otpVerifications.id, id));
-  }
-
-  async markOtpAsVerified(id: string): Promise<void> {
-    await db.update(otpVerifications)
-      .set({ verified: 1 })
-      .where(eq(otpVerifications.id, id));
   }
 
   // Business Profile Setup Implementation
@@ -7584,6 +7554,131 @@ export class DatabaseStorage implements IStorage {
       .limit(1);
     
     return results[0] || null;
+  }
+
+  // ==================== REVIEW MANAGEMENT ====================
+  
+  /**
+   * Create a new review (Google or SalonHub)
+   */
+  async createReview(review: InsertSalonReview): Promise<SalonReview> {
+    const [newReview] = await db.insert(salonReviews).values(review).returning();
+    return newReview;
+  }
+
+  /**
+   * Get reviews for a salon with optional source filtering
+   */
+  async getReviewsBySalonId(salonId: string, source?: 'google' | 'salonhub'): Promise<SalonReview[]> {
+    if (source) {
+      return await db.select().from(salonReviews)
+        .where(and(eq(salonReviews.salonId, salonId), eq(salonReviews.source, source)))
+        .orderBy(desc(salonReviews.createdAt));
+    }
+    return await db.select().from(salonReviews)
+      .where(eq(salonReviews.salonId, salonId))
+      .orderBy(desc(salonReviews.createdAt));
+  }
+
+  /**
+   * Update salon's overall rating by computing weighted average of all reviews
+   */
+  async updateSalonRating(salonId: string): Promise<void> {
+    // Get all reviews for this salon
+    const reviews = await db.select().from(salonReviews)
+      .where(eq(salonReviews.salonId, salonId));
+
+    if (reviews.length === 0) {
+      // No reviews - reset to 0
+      await db.update(salons)
+        .set({ rating: '0.00', reviewCount: 0 })
+        .where(eq(salons.id, salonId));
+      return;
+    }
+
+    // Calculate weighted average rating
+    const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
+    const averageRating = (totalRating / reviews.length).toFixed(2);
+
+    await db.update(salons)
+      .set({ 
+        rating: averageRating,
+        reviewCount: reviews.length 
+      })
+      .where(eq(salons.id, salonId));
+  }
+
+  // ==================== GOOGLE PLACES CACHE ====================
+  
+  /**
+   * Search for cached Google Places within radius
+   */
+  async searchCachedPlaces(latitude: number, longitude: number, businessName: string): Promise<GooglePlacesCache[]> {
+    const radiusMeters = 100; // Search within 100 meters
+    const now = new Date();
+
+    // Find cached places within radius that haven't expired
+    const results = await db
+      .select()
+      .from(googlePlacesCache)
+      .where(
+        and(
+          sql`
+            (
+              6371000 * acos(
+                cos(radians(${latitude})) * 
+                cos(radians(CAST(${googlePlacesCache.latitude} AS FLOAT))) * 
+                cos(radians(CAST(${googlePlacesCache.longitude} AS FLOAT)) - radians(${longitude})) + 
+                sin(radians(${latitude})) * 
+                sin(radians(CAST(${googlePlacesCache.latitude} AS FLOAT)))
+              )
+            ) <= ${radiusMeters}
+          `,
+          sql`LOWER(${googlePlacesCache.businessName}) LIKE LOWER(${'%' + businessName + '%'})`,
+          sql`${googlePlacesCache.expiresAt} > ${now.toISOString()}`
+        )
+      )
+      .limit(5);
+
+    return results;
+  }
+
+  /**
+   * Cache a Google Place result
+   */
+  async cacheGooglePlace(place: InsertGooglePlacesCache): Promise<void> {
+    try {
+      await db.insert(googlePlacesCache).values(place)
+        .onConflictDoUpdate({
+          target: googlePlacesCache.placeId,
+          set: {
+            businessName: place.businessName,
+            address: place.address,
+            latitude: place.latitude,
+            longitude: place.longitude,
+            rating: place.rating,
+            reviewCount: place.reviewCount,
+            payload: place.payload,
+            fetchedAt: sql`CURRENT_TIMESTAMP`,
+            expiresAt: place.expiresAt,
+          }
+        });
+    } catch (error) {
+      console.error('Error caching Google Place:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up expired cache entries
+   */
+  async cleanExpiredCache(): Promise<number> {
+    const now = new Date();
+    const result = await db.delete(googlePlacesCache)
+      .where(sql`${googlePlacesCache.expiresAt} < ${now.toISOString()}`)
+      .returning();
+    
+    return result.length;
   }
 }
 

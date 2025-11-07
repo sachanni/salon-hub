@@ -46,7 +46,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
   // Scroll functions
   const scrollLeft = () => {
     if (!scrollContainerRef.current) return;
-    const cardWidth = 300; // Approximate card width including gap
+    const cardWidth = 400; // Updated to match new card width (350-384px + gap)
     scrollContainerRef.current.scrollBy({
       left: -cardWidth * 2, // Scroll by 2 cards
       behavior: 'smooth'
@@ -55,7 +55,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
 
   const scrollRight = () => {
     if (!scrollContainerRef.current) return;
-    const cardWidth = 300; // Approximate card width including gap
+    const cardWidth = 400; // Updated to match new card width (350-384px + gap)
     scrollContainerRef.current.scrollBy({
       left: cardWidth * 2, // Scroll by 2 cards
       behavior: 'smooth'
@@ -126,7 +126,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
             {recentSalons.map((salon) => (
               <div 
                 key={salon.id} 
-                className="flex-none w-72 snap-start"
+                className="flex-none w-[350px] sm:w-96 snap-start"
                 data-testid={`item-recently-viewed-${salon.id}`}
               >
                 <SalonCard
