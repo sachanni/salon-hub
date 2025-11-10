@@ -18,7 +18,14 @@ export default function BusinessSetup() {
     refetchOnMount: 'always'
   });
 
-  const currentSalon = Array.isArray(userSalons) && userSalons.length > 0 ? userSalons[0] : null;
+  // Get the selected salon ID from localStorage or use first salon
+  const selectedSalonId = typeof window !== 'undefined' ? localStorage.getItem('selectedSalonId') : null;
+  
+  const currentSalon = Array.isArray(userSalons) && userSalons.length > 0
+    ? (selectedSalonId 
+        ? userSalons.find((s: any) => s.id === selectedSalonId) || userSalons[0]
+        : userSalons[0])
+    : null;
 
   // Redirect if not authenticated
   useEffect(() => {

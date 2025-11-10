@@ -14,12 +14,12 @@ import * as schema from "@shared/schema";
 // Enable WebSocket constructor to avoid fetch issues
 neonConfig.webSocketConstructor = ws;
 
-// Use EXTERNAL_DATABASE_URL from .env for external Neon database
-const databaseUrl = process.env.EXTERNAL_DATABASE_URL;
+// Prefer EXTERNAL_DATABASE_URL (persistent Neon DB), fallback to built-in DATABASE_URL
+const databaseUrl = process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error(
-    "EXTERNAL_DATABASE_URL must be set in .env file. Please add your external database connection string.",
+    "EXTERNAL_DATABASE_URL or DATABASE_URL must be set. Please add your database connection string.",
   );
 }
 

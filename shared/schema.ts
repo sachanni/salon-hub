@@ -3754,3 +3754,132 @@ export type GeocodeLocation = typeof geocodeLocations.$inferSelect;
 export type LocationAlias = typeof locationAliases.$inferSelect;
 export type InsertGeocodeLocation = z.infer<typeof insertGeocodeLocationSchema>;
 export type InsertLocationAlias = z.infer<typeof insertLocationAliasSchema>;
+
+// ===============================================
+// AI PERSONAL LOOK ADVISOR - Premium Feature
+// ===============================================
+
+// Beauty Products Database - Curated catalog of 60+ premium beauty products
+export const beautyProducts = pgTable("beauty_products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  brand: text("brand").notNull(),
+  productLine: text("product_line"),
+  name: text("name").notNull(),
+  category: varchar("category", { length: 50 }).notNull(), // foundation, lipstick, eyeshadow, etc
+  shade: text("shade"),
+  sku: text("sku").notNull(),
+  finishType: text("finish_type"), // matte, satin, shimmer, etc
+  skinToneCompatibility: text("skin_tone_compatibility"), // fair, medium, deep, etc
+  price: integer("price").notNull(), // Price in paisa
+  imageUrl: text("image_url"),
+  description: text("description"),
+  gender: varchar("gender", { length: 20 }).default('unisex'), // male, female, unisex
+  createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  unique("beauty_products_sku_unique").on(table.sku),
+]);
+
+// AR Effect Presets - DeepAR effect configurations for virtual try-on
+export const effectPresets = pgTable("effect_presets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: varchar("slug", { length: 100 }).notNull().unique(), // Canonical slug matching Gemini categories
+  name: text("name").notNull(),
+  category: varchar("category", { length: 50 }).notNull(), // makeup, hair, beard
+  deeparEffectFile: text("deepar_effect_file"),
+  lookTags: text("look_tags"), // glamorous, natural, bold, etc
+  associatedProducts: text("associated_products"), // Product IDs as JSON array
+  createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Salon Inventory - Tracks which products are available at each salon
+export const salonInventory = pgTable("salon_inventory", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id),
+  productId: varchar("product_id").notNull().references(() => beautyProducts.id),
+  quantity: integer("quantity").notNull().default(0),
+  lowStockThreshold: integer("low_stock_threshold").default(5),
+  lastRestockedAt: timestamp("last_restocked_at", { mode: 'string' }),
+  createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  unique("salon_inventory_salon_product_unique").on(table.salonId, table.productId),
+]);
+
+// AI Look Sessions - Customer consultation history with AI recommendations
+export const aiLookSessions = pgTable("ai_look_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id),
+  customerName: text("customer_name").notNull(),
+  customerPhotoUrl: text("customer_photo_url"),
+  gender: varchar("gender", { length: 20 }), // male, female, prefer_not_to_say
+  eventType: varchar("event_type", { length: 50 }), // wedding, party, casual, etc
+  weather: varchar("weather", { length: 50 }),
+  location: varchar("location", { length: 50 }),
+  skinTone: varchar("skin_tone", { length: 50 }),
+  hairType: varchar("hair_type", { length: 50 }),
+  staffUserId: varchar("staff_user_id").references(() => users.id),
+  createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+});
+
+// AI Look Options - Different look variations generated for each session
+export const aiLookOptions = pgTable("ai_look_options", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => aiLookSessions.id),
+  lookName: text("look_name").notNull(),
+  description: text("description"),
+  presetIds: text("preset_ids"), // JSON array of preset IDs
+  aiConfidenceScore: decimal("ai_confidence_score", { precision: 5, scale: 2 }),
+  isSelected: integer("is_selected").notNull().default(0),
+  previewImageUrl: text("preview_image_url"),
+  createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+});
+
+// AI Look Products - Product recommendations for each look option
+export const aiLookProducts = pgTable("ai_look_products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  lookOptionId: varchar("look_option_id").notNull().references(() => aiLookOptions.id),
+  productId: varchar("product_id").notNull().references(() => beautyProducts.id),
+  applicationArea: text("application_area"), // face, eyes, lips, etc
+  applicationInstructions: text("application_instructions"),
+  quantityNeeded: text("quantity_needed"), // "1 pump", "2 dots", etc
+  isInStock: integer("is_in_stock").notNull().default(1),
+  substituteProductId: varchar("substitute_product_id").references(() => beautyProducts.id),
+  createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Schemas
+export const insertBeautyProductSchema = createInsertSchema(beautyProducts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertEffectPresetSchema = createInsertSchema(effectPresets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertSalonInventorySchema = createInsertSchema(salonInventory).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAiLookSessionSchema = createInsertSchema(aiLookSessions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAiLookOptionSchema = createInsertSchema(aiLookOptions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAiLookProductSchema = createInsertSchema(aiLookProducts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type BeautyProduct = typeof beautyProducts.$inferSelect;
+export type EffectPreset = typeof effectPresets.$inferSelect;
+export type SalonInventory = typeof salonInventory.$inferSelect;
+export type AiLookSession = typeof aiLookSessions.$inferSelect;
+export type AiLookOption = typeof aiLookOptions.$inferSelect;
+export type AiLookProduct = typeof aiLookProducts.$inferSelect;

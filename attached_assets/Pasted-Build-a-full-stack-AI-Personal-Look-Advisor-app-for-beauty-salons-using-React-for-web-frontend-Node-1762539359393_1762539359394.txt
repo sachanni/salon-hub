@@ -1,0 +1,27 @@
+Build a full-stack AI Personal Look Advisor app for beauty salons using React for web frontend, Node.js/Express for backend, and DeepAR SDK for real-time AR try-on. The app lets users upload/take a real-time pic (selfie via webcam), input event (wedding/party/office/casual), weather (sunny/rainy/humid/cold), location (beach/urban/mountain), skin tone (fair/wheatish/dusky), and hair type (curly/straight/long/short). AI suggests and applies personalized hairstyle (e.g., soft curls for wedding), beard style (e.g., French beard for party), makeup (e.g., matte red lips for dusky skin in humid weather), with real-time AR preview. Integrate with salon booking (save look to Firebase, send email via SendGrid).
+
+Tech Stack:
+- Frontend: React (use hooks for state, html2canvas for snapshot save).
+- Backend: Node.js/Express (handle API calls, use Axios for external APIs).
+- AR Core: DeepAR Web SDK (npm install deepar) for real-time camera try-on—load effects for hair color/style (e.g., golden brown curls), beard overlays, makeup (lipstick/eyeshadow/foundation with skin adaptation).
+- Personalization Logic: Use Google Gemini API (free tier) or OpenAI GPT-4o for suggestions (prompt: "Suggest hairstyle, beard, makeup for [event], [weather], [location], [skin tone], [hair type]. Recommend Lakme/L'Oreal shades with steps."). Fetch weather via OpenWeatherMap API (free key).
+- Database/Storage: Firebase (Firestore for user looks, Storage for pics).
+- Email: SendGrid for booking confirmations with preview pic and product guide.
+- Deployment: Vercel for frontend, Render for backend.
+
+Key Features (Implement in Order):
+1. User Input Form: React form with dropdowns (events: wedding/party/office/casual; weather: sunny/rainy/humid/cold; location: beach/urban/mountain; skin: fair/wheatish/dusky; hair: curly/straight/long/short). Webcam button to capture real-time pic (use getUserMedia).
+2. AI Suggestion Backend: POST /suggest endpoint—send inputs + base64 pic to Gemini/OpenAI. Return JSON: {hairstyle: "soft_curls", hairColor: "golden_brown", beard: "french", makeup: {lipstick: "matte_red (Lakme)", eyeshadow: "golden_smokey"}, instructions: "Apply 2 layers for humid weather"}. Factor weather/location (e.g., light makeup for sunny beach).
+3. AR Try-On Frontend: DeepAR init with license key. On submit: Detect skin/hair via Mediapipe (@mediapipe/face_mesh npm). Load/switch DeepAR effects: /effects/hairstyles/soft_curls.deepar, /effects/beard/french.deepar, /effects/makeup/matte_red.deepar (adapt color/intensity for skin). Real-time preview with buttons to tweak (e.g., "Try Next Shade").
+4. Snapshot & Booking: Button to capture AR view (DeepAR.takeSnapshot()). Save to Firebase. POST /book: Generate PDF/email with pic, suggestions, products (e.g., "Use Lakme Rose Line Peach"), steps, and salon slot.
+5. Error Handling: Webcam permissions, API fallbacks, mobile responsiveness.
+
+Files to Create/Modify:
+- package.json: Add deepar, @mediapipe/face_mesh, three, axios, express, firebase-admin, @sendgrid/mail, dotenv.
+- server.js: Express server with /suggest and /book endpoints.
+- src/App.js: Main React component with form, webcam, AR container.
+- src/DeepARTryOn.js: Component for DeepAR init, effect loading, skin detection.
+- .env: Keys.
+- public/effects/: Folder for sample .deepar files (download from DeepAR Studio; use placeholders if needed).
+
+Output: Working prototype with live demo link. Test: Sunny wedding on wheatish skin → Suggests light golden curls, dewy makeup. Ensure commercial license compliance. Plan first, then implement step-by-step.

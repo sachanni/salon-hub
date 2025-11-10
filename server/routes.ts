@@ -1,6 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
+import { db } from "./db";
+import { eq, and, or, inArray, sql } from "drizzle-orm";
+import * as schema from "@shared/schema";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { requireSalonAccess, requireStaffAccess, requireSuperAdmin, populateUserFromSession, type AuthenticatedRequest } from "./middleware/auth";
@@ -12,6 +15,7 @@ import { createClient } from 'redis';
 import { OfferCalculator } from "./offerCalculator";
 import { getGooglePlacesService } from "./services/googlePlaces";
 import { z } from "zod";
+import aiLookRoutes from "./routes/ai-look.routes";
 import { 
   createPaymentOrderSchema, 
   verifyPaymentSchema,
@@ -11509,6 +11513,248 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // ===== Beauty Products Catalog API =====
+  
+  // Get all beauty products with filters (for product catalog)
+  app.get('/api/beauty-products', async (req, res) => {
+    try {
+      const { 
+        brand, 
+        category, 
+        search, 
+        skinTone, 
+        gender,
+        limit = '100',
+        offset = '0' 
+      } = req.query;
+
+      // Build filter conditions
+      const conditions = [];
+      
+      if (brand) {
+        const brands = (brand as string).split(',').map(b => b.trim());
+        conditions.push(inArray(schema.beautyProducts.brand, brands));
+      }
+      
+      if (category) {
+        conditions.push(eq(schema.beautyProducts.category, category as string));
+      }
+      
+      if (search) {
+        const searchTerm = `%${search}%`;
+        conditions.push(
+          or(
+            sql`${schema.beautyProducts.name} ILIKE ${searchTerm}`,
+            sql`${schema.beautyProducts.brand} ILIKE ${searchTerm}`,
+            sql`${schema.beautyProducts.productLine} ILIKE ${searchTerm}`
+          )
+        );
+      }
+      
+      if (skinTone) {
+        const skinTonePattern = `%${skinTone}%`;
+        conditions.push(sql`${schema.beautyProducts.skinToneCompatibility} ILIKE ${skinTonePattern}`);
+      }
+      
+      if (gender) {
+        conditions.push(
+          or(
+            eq(schema.beautyProducts.gender, gender as string),
+            eq(schema.beautyProducts.gender, 'unisex')
+          )
+        );
+      }
+
+      // Build base query
+      let query = db.select().from(schema.beautyProducts);
+      
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions));
+      }
+
+      // Add pagination
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+      query = query.limit(limitNum).offset(offsetNum);
+
+      const products = await query;
+      
+      // Get total count for pagination (reuse same where clause)
+      const totalCountResult = await db
+        .select({ count: sql`count(*)::int` })
+        .from(schema.beautyProducts)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+      
+      const totalCount = totalCountResult[0]?.count || 0;
+
+      // Inject fallback image for products with missing images
+      const DEFAULT_PLACEHOLDER_IMAGE = 'https://placehold.co/400x400/f3f4f6/94a3b8?text=No+Image';
+      const productsWithImages = products.map(product => ({
+        ...product,
+        image_url: product.image_url || DEFAULT_PLACEHOLDER_IMAGE
+      }));
+
+      res.json({
+        products: productsWithImages,
+        pagination: {
+          limit: limitNum,
+          offset: offsetNum,
+          total: totalCount,
+          hasMore: offsetNum + products.length < totalCount
+        }
+      });
+    } catch (error: any) {
+      console.error('Error fetching beauty products:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get salon's beauty product inventory (products they stock)
+  app.get('/api/salons/:salonId/inventory', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+
+      const inventory = await db
+        .select({
+          inventoryId: schema.salonInventory.id,
+          productId: schema.salonInventory.productId,
+          quantity: schema.salonInventory.quantity,
+          lowStockThreshold: schema.salonInventory.lowStockThreshold,
+          lastRestockedAt: schema.salonInventory.lastRestockedAt,
+          createdAt: schema.salonInventory.createdAt,
+          product: {
+            id: schema.beautyProducts.id,
+            brand: schema.beautyProducts.brand,
+            productLine: schema.beautyProducts.productLine,
+            name: schema.beautyProducts.name,
+            category: schema.beautyProducts.category,
+            shade: schema.beautyProducts.shade,
+            sku: schema.beautyProducts.sku,
+            finishType: schema.beautyProducts.finishType,
+            price: schema.beautyProducts.price,
+            imageUrl: schema.beautyProducts.imageUrl,
+            description: schema.beautyProducts.description,
+          }
+        })
+        .from(schema.salonInventory)
+        .innerJoin(
+          schema.beautyProducts,
+          eq(schema.salonInventory.productId, schema.beautyProducts.id)
+        )
+        .where(eq(schema.salonInventory.salonId, salonId))
+        .orderBy(schema.beautyProducts.category, schema.beautyProducts.brand);
+
+      res.json(inventory);
+    } catch (error: any) {
+      console.error('Error fetching salon inventory:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Add product to salon inventory
+  app.post('/api/salons/:salonId/inventory', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const { productId, quantity, lowStockThreshold = 5 } = req.body;
+
+      if (!productId) {
+        return res.status(400).json({ error: 'productId is required' });
+      }
+
+      if (quantity === undefined || quantity < 0) {
+        return res.status(400).json({ error: 'Valid quantity is required' });
+      }
+
+      // Check if product exists
+      const product = await db
+        .select()
+        .from(schema.beautyProducts)
+        .where(eq(schema.beautyProducts.id, productId))
+        .limit(1);
+
+      if (product.length === 0) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      // Check if product already in inventory
+      const existing = await db
+        .select()
+        .from(schema.salonInventory)
+        .where(
+          and(
+            eq(schema.salonInventory.salonId, salonId),
+            eq(schema.salonInventory.productId, productId)
+          )
+        )
+        .limit(1);
+
+      let result;
+
+      if (existing.length > 0) {
+        // Update existing inventory
+        result = await db
+          .update(schema.salonInventory)
+          .set({
+            quantity,
+            lowStockThreshold,
+            lastRestockedAt: sql`CURRENT_TIMESTAMP`
+          })
+          .where(
+            and(
+              eq(schema.salonInventory.salonId, salonId),
+              eq(schema.salonInventory.productId, productId)
+            )
+          )
+          .returning();
+      } else {
+        // Insert new inventory item
+        result = await db
+          .insert(schema.salonInventory)
+          .values({
+            salonId,
+            productId,
+            quantity,
+            lowStockThreshold,
+            lastRestockedAt: sql`CURRENT_TIMESTAMP`
+          })
+          .returning();
+      }
+
+      res.json({
+        success: true,
+        inventory: result[0],
+        message: existing.length > 0 ? 'Inventory updated successfully' : 'Product added to inventory successfully'
+      });
+    } catch (error: any) {
+      console.error('Error adding product to inventory:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Remove product from salon inventory
+  app.delete('/api/salons/:salonId/inventory/:productId', isAuthenticated, requireSalonAccess(), async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, productId } = req.params;
+
+      await db
+        .delete(schema.salonInventory)
+        .where(
+          and(
+            eq(schema.salonInventory.salonId, salonId),
+            eq(schema.salonInventory.productId, productId)
+          )
+        );
+
+      res.json({ success: true, message: 'Product removed from inventory' });
+    } catch (error: any) {
+      console.error('Error removing product from inventory:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // AI Personal Look Advisor routes (Premium feature)
+  app.use('/api/premium/ai-look', isAuthenticated, aiLookRoutes);
 
   const httpServer = createServer(app);
 

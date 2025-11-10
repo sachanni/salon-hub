@@ -30,6 +30,7 @@ import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
 import EmailVerified from "@/pages/EmailVerified";
 import EmailVerificationExpired from "@/pages/EmailVerificationExpired";
 import ResetPassword from "@/pages/ResetPassword";
+import AILookAdvisor from "@/pages/AILookAdvisor";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -46,6 +47,7 @@ function Router() {
         <Route path="/login/business" component={LoginBusiness} />
         <Route path="/business/setup" component={BusinessSetup} />
         <Route path="/dashboard" component={BusinessDashboard} />
+        <Route path="/business" component={BusinessDashboard} />
         <Route path="/business/dashboard" component={BusinessDashboard} />
         <Route path="/business/settings/:salonId">
           {(params) => <BusinessSettings key={params.salonId} salonId={params.salonId!} />}
@@ -72,6 +74,9 @@ function Router() {
         <Route path="/email-verified" component={EmailVerified} />
         <Route path="/email-verification-expired" component={EmailVerificationExpired} />
         <Route path="/reset-password" component={ResetPassword} />
+        
+        {/* Premium Features */}
+        <Route path="/premium/ai-look" component={AILookAdvisor} />
         
         {/* Super Admin Routes */}
         <Route path="/admin/:rest*" component={SuperAdminDashboard} />

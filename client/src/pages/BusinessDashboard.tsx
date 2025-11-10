@@ -69,6 +69,7 @@ import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard"
 import FinancialReportingDashboard from "@/components/FinancialReportingDashboard";
 import CustomerCommunicationDashboard from "@/components/CustomerCommunicationDashboard";
 import InventoryManagementDashboard from "@/components/InventoryManagementDashboard";
+import BeautyProductCatalog from "@/pages/BeautyProductCatalog";
 import CalendarManagement from "@/pages/CalendarManagement";
 import PackageManagement from "@/components/business-dashboard/PackageManagement";
 import BusinessOffers from "@/pages/BusinessOffers";
@@ -169,6 +170,48 @@ export default function BusinessDashboard() {
     staleTime: 60000
   });
 
+  // Create new salon mutation
+  const createSalonMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest('POST', '/api/salons', {
+        name: 'New Salon',
+        description: 'My new salon location',
+        address: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        phone: '',
+        email: user?.email || '',
+        category: 'hair_salon',
+        priceRange: '$$'
+      });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/my/salons'] });
+      
+      // Store the new salon ID and redirect to setup
+      const newSalonId = data.salon?.id || data.id;
+      if (newSalonId) {
+        localStorage.setItem('selectedSalonId', newSalonId);
+        toast({
+          title: "New Salon Created",
+          description: "Let's set up your new salon location",
+        });
+        // Small delay to ensure state is updated
+        setTimeout(() => {
+          setLocation('/business/setup');
+        }, 100);
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create new salon. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Delete salon mutation
   const deleteSalonMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -205,19 +248,20 @@ export default function BusinessDashboard() {
   // Set salon ID with localStorage persistence
   useEffect(() => {
     if (Array.isArray(salons) && salons.length > 0) {
-      // Check if stored salon ID is valid
+      // Check if stored salon ID is valid (normalize to string for comparison)
       const storedId = localStorage.getItem('selectedSalonId');
-      const isValidStoredId = storedId && salons.some(s => s.id === storedId);
+      const isValidStoredId = storedId && salons.some(s => String(s.id) === String(storedId));
       
       if (!salonId) {
         // Use stored ID if valid, otherwise use first salon
-        const idToUse = isValidStoredId ? storedId : salons[0].id;
+        const idToUse = isValidStoredId ? storedId : String(salons[0].id);
         setSalonId(idToUse);
         localStorage.setItem('selectedSalonId', idToUse);
-      } else if (!isValidStoredId && salonId !== salons[0].id) {
+      } else if (!isValidStoredId && String(salonId) !== String(salons[0].id)) {
         // If current salon is not in the list, switch to first salon
-        setSalonId(salons[0].id);
-        localStorage.setItem('selectedSalonId', salons[0].id);
+        const firstSalonId = String(salons[0].id);
+        setSalonId(firstSalonId);
+        localStorage.setItem('selectedSalonId', firstSalonId);
       }
     }
   }, [salons, salonId]);
@@ -225,8 +269,8 @@ export default function BusinessDashboard() {
   // Handler for salon switching
   const handleSalonSwitch = (value: string) => {
     if (value === '__create_new__') {
-      // Redirect to business setup to create new salon
-      setLocation('/business/setup');
+      // Create a new salon via API
+      createSalonMutation.mutate();
       return;
     }
     
@@ -421,6 +465,7 @@ export default function BusinessDashboard() {
       items: [
         { id: "calendar", label: "Bookings & Calendar", icon: Calendar },
         { id: "inventory", label: "Inventory Management", icon: Package },
+        { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles },
         { id: "offers", label: "Offers & Promotions", icon: Gift }
       ]
     },
@@ -874,6 +919,61 @@ export default function BusinessDashboard() {
               </CardContent>
             </Card>
           )}
+
+          {/* AI Look Advisor - Premium Feature */}
+          <Card className="border-purple-200 bg-gradient-to-br from-purple-50 via-pink-50 to-violet-50 shadow-lg">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-md">
+                  <Sparkles className="h-6 w-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-purple-900">AI Personal Look Advisor</CardTitle>
+                    <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0">
+                      <Crown className="h-3 w-3 mr-1" />
+                      Premium
+                    </Badge>
+                  </div>
+                  <p className="text-purple-700 text-sm mt-1">
+                    AI-powered beauty consultation with AR try-on and smart product matching
+                  </p>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Camera className="h-4 w-4" />
+                    <span>Photo Analysis</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Zap className="h-4 w-4" />
+                    <span>AI Recommendations</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Package className="h-4 w-4" />
+                    <span>Inventory Matching</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Star className="h-4 w-4" />
+                    <span>AR Preview</span>
+                  </div>
+                </div>
+                <Link href="/premium/ai-look">
+                  <Button 
+                    className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-md"
+                    size="lg"
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Launch AI Look Advisor
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Location Set Successfully Alert */}
           {salonData?.latitude != null && salonData?.longitude != null && (
@@ -1437,6 +1537,13 @@ export default function BusinessDashboard() {
         <div className="p-6">
           <InventoryManagementDashboard salonId={salonId || ''} />
         </div>
+      );
+    }
+
+    // Handle beauty catalog tab
+    if (activeTab === "beauty-catalog") {
+      return (
+        <BeautyProductCatalog salonId={salonId || ''} />
       );
     }
 

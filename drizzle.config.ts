@@ -4,8 +4,11 @@ import { config } from "dotenv";
 // Load .env file explicitly
 config();
 
-if (!process.env.EXTERNAL_DATABASE_URL) {
-  throw new Error("EXTERNAL_DATABASE_URL must be set in .env file");
+// Prefer EXTERNAL_DATABASE_URL (persistent Neon DB)
+const databaseUrl = process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  throw new Error("EXTERNAL_DATABASE_URL or DATABASE_URL must be set");
 }
 
 export default defineConfig({
@@ -13,6 +16,6 @@ export default defineConfig({
   schema: "./shared/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.EXTERNAL_DATABASE_URL,
+    url: databaseUrl,
   },
 });
