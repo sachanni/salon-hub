@@ -9,13 +9,15 @@ import AIAnalysisLoader from '@/components/ai-look/AIAnalysisLoader';
 import LookCarousel from '@/components/ai-look/LookCarousel';
 import ProductChecklist from '@/components/ai-look/ProductChecklist';
 import SessionHistory from '@/components/ai-look/SessionHistory';
+import HairTransformControls from '@/components/ai-look/HairTransformControls';
 import { useToast } from '@/hooks/use-toast';
 
-type AnalysisStep = 'intake' | 'analyzing' | 'reviewing-looks' | 'finalizing';
+type AnalysisStep = 'intake' | 'analyzing' | 'reviewing-looks' | 'hair-transform' | 'finalizing';
 
 interface AILookSession {
   customerName: string;
   customerPhoto: string;
+  finalPhoto?: string;
   eventType?: string;
   weather?: string;
   location?: string;
@@ -42,6 +44,7 @@ export default function AILookAdvisor() {
   const [showHistory, setShowHistory] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSubmitTime, setLastSubmitTime] = useState<number>(0);
+  const [makeupAppliedPhoto, setMakeupAppliedPhoto] = useState<string>('');
   
   const salonId = localStorage.getItem('selectedSalonId');
   const MIN_SUBMIT_INTERVAL = 10000;
@@ -131,10 +134,11 @@ export default function AILookAdvisor() {
     }
   };
 
-  const handleLookSelected = async () => {
+  const handleLookSelected = async (makeupPhoto: string) => {
     if (!sessionData || !lookOptions[selectedLookIndex]) return;
     
-    setCurrentStep('finalizing');
+    setMakeupAppliedPhoto(makeupPhoto);
+    setCurrentStep('hair-transform');
 
     try {
       const response = await fetch('/api/premium/ai-look/save-session', {
@@ -198,6 +202,76 @@ export default function AILookAdvisor() {
     setCurrentStep('intake');
     setLookOptions([]);
     setCustomerAnalysis(null);
+    setMakeupAppliedPhoto('');
+  };
+
+  const handleHairTransformComplete = async (finalPhoto: string) => {
+    if (!sessionData) return;
+    
+    setCurrentStep('finalizing');
+
+    try {
+      const response = await fetch('/api/premium/ai-look/save-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          salonId,
+          customerName: sessionData.customerName,
+          customerPhotoUrl: finalPhoto,
+          eventType: sessionData.eventType,
+          weather: sessionData.weather,
+          location: sessionData.location,
+          skinTone: sessionData.skinTone,
+          hairType: sessionData.hairType,
+          selectedLookIndex,
+          looks: lookOptions.map(look => ({
+            lookName: look.lookName,
+            description: look.description,
+            confidenceScore: look.confidenceScore,
+            presetIds: look.presetIds,
+            products: look.products.map(p => ({
+              productId: p.product.id,
+              applicationArea: p.applicationArea,
+              quantityNeeded: p.quantityNeeded,
+              isInStock: p.product.isInStock,
+              substituteProductId: p.product.substituteProduct?.id,
+            })),
+          })),
+        }),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save session');
+      }
+
+      const result = await response.json();
+      
+      toast({
+        title: 'Look saved! ✨',
+        description: `${sessionData.customerName}'s complete transformation has been saved`,
+      });
+
+      setTimeout(() => {
+        setCurrentStep('intake');
+        setSessionData(null);
+        setLookOptions([]);
+        setSelectedLookIndex(0);
+        setCustomerAnalysis(null);
+        setMakeupAppliedPhoto('');
+      }, 1500);
+    } catch (error: any) {
+      toast({
+        title: 'Save failed',
+        description: error.message || 'Failed to save session. Please try again.',
+        variant: 'destructive',
+      });
+      setCurrentStep('hair-transform');
+    }
+  };
+
+  const handleSkipHairTransform = () => {
+    handleHairTransformComplete(makeupAppliedPhoto || sessionData?.customerPhoto || '');
   };
 
   return (

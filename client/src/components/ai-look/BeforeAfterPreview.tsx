@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import CircularScore from './CircularScore';
 import ProductOverlay from './ProductOverlay';
-import { applyMakeupEffects, getProductColor, type MakeupEffect } from '@/utils/imageEffects';
+import MakeupCustomizer, { type MakeupCustomization } from './MakeupCustomizer';
+import { initializeMediaPipe, applyMakeupWithMediaPipe, type MediaPipeRenderResult } from '@/services/mediaPipeRenderer';
 import { Loader2, Sparkles } from 'lucide-react';
 
 export interface EffectOverride {
@@ -10,6 +11,7 @@ export interface EffectOverride {
   enabled: boolean;
   intensity: number;
   color?: string;
+  style?: string; // For eyeliner styles or lip liner option
 }
 
 interface BeforeAfterPreviewProps {
@@ -46,49 +48,100 @@ export default function BeforeAfterPreview({
 }: BeforeAfterPreviewProps) {
   const [enhancedImage, setEnhancedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(true);
+  const [processingStatus, setProcessingStatus] = useState<string>('Loading AI models...');
+  const [faceDetected, setFaceDetected] = useState<boolean>(true);
+  const [isMediaPipeReady, setIsMediaPipeReady] = useState(false);
+  
+  // Makeup customization state
+  const [customization, setCustomization] = useState<MakeupCustomization>({
+    eyelinerStyle: 'basic',
+    lipLiner: false,
+  });
+  
+  // Check if products include eyeliner or lipstick
+  const hasEyeliner = products.some(p => p.applicationArea.toLowerCase() === 'eyeliner');
+  const hasLipstick = products.some(p => ['lipstick', 'lips'].includes(p.applicationArea.toLowerCase()));
 
+  // Initialize MediaPipe Face Mesh on mount
   useEffect(() => {
+    async function initMediaPipe() {
+      try {
+        setProcessingStatus('Initializing face detection...');
+        await initializeMediaPipe();
+        console.log('[BeforeAfterPreview] ✅ MediaPipe initialized');
+        setIsMediaPipeReady(true);
+      } catch (error) {
+        console.error('[BeforeAfterPreview] Failed to initialize MediaPipe:', error);
+        setIsMediaPipeReady(false);
+        setIsProcessing(false);
+        setEnhancedImage(originalImage);
+        setFaceDetected(false);
+        setProcessingStatus('');
+      }
+    }
+    initMediaPipe();
+  }, [originalImage]);
+
+  // Generate preview only after MediaPipe is ready
+  useEffect(() => {
+    if (!isMediaPipeReady) {
+      console.log('[BeforeAfterPreview] Waiting for MediaPipe to initialize...');
+      return;
+    }
+
     async function generateEnhancedPreview() {
       try {
         setIsProcessing(true);
+        setProcessingStatus('Detecting facial features...');
         
-        console.log('[BeforeAfterPreview] Generating preview with overrides:', effectOverrides);
+        console.log('[BeforeAfterPreview] Generating preview with MediaPipe');
+        console.log('[BeforeAfterPreview] Products:', products.length);
         
-        const effects: MakeupEffect[] = products.slice(0, 10).map(p => {
-          const categoryLower = p.applicationArea.toLowerCase();
-          const override = effectOverrides?.find(o => o.category.toLowerCase() === categoryLower);
-          
-          console.log(`[BeforeAfterPreview] Product: ${p.applicationArea}, Override:`, override);
-          
-          if (override && !override.enabled) {
-            console.log(`[BeforeAfterPreview] Skipping ${p.applicationArea} - disabled`);
-            return null;
-          }
-          
-          const defaultIntensity = getCategoryDefaultIntensity(p.applicationArea);
-          const effect = {
-            type: mapCategoryToEffectType(p.applicationArea),
-            color: override?.color || getProductColor(p.applicationArea, p.attributes.shade),
-            intensity: override?.intensity !== undefined ? override.intensity : defaultIntensity,
-          };
-          
-          console.log(`[BeforeAfterPreview] Creating effect for ${p.applicationArea}:`, effect);
-          return effect;
-        }).filter((e): e is MakeupEffect => e !== null);
-
-        console.log('[BeforeAfterPreview] Final effects array:', effects);
-        const enhanced = await applyMakeupEffects(originalImage, effects);
-        setEnhancedImage(enhanced);
+        setProcessingStatus('Applying natural makeup rendering...');
+        
+        // Merge customization with effectOverrides
+        const customOverrides: EffectOverride[] = [];
+        
+        if (hasEyeliner) {
+          customOverrides.push({
+            category: 'eyeliner',
+            enabled: true,
+            intensity: 1,
+            style: customization.eyelinerStyle,
+          });
+        }
+        
+        if (hasLipstick) {
+          customOverrides.push({
+            category: 'lipstick',
+            enabled: true,
+            intensity: 1,
+            style: customization.lipLiner ? 'with-liner' : undefined,
+          });
+        }
+        
+        const allOverrides = [...(effectOverrides || []), ...customOverrides];
+        
+        const result: MediaPipeRenderResult = await applyMakeupWithMediaPipe(
+          originalImage, 
+          products,
+          allOverrides
+        );
+        
+        setEnhancedImage(result.imageData);
+        setFaceDetected(result.faceDetected);
       } catch (error) {
-        console.error('Failed to generate preview:', error);
+        console.error('[BeforeAfterPreview] Failed to generate preview:', error);
         setEnhancedImage(originalImage);
+        setFaceDetected(false);
       } finally {
         setIsProcessing(false);
+        setProcessingStatus('');
       }
     }
 
     generateEnhancedPreview();
-  }, [originalImage, products, effectOverrides]);
+  }, [isMediaPipeReady, originalImage, products, effectOverrides, customization, hasEyeliner, hasLipstick]);
 
   const scores = useMemo(() => {
     const skinToneScore = calculateSkinToneScore(customerAnalysis.skinTone);
@@ -107,13 +160,29 @@ export default function BeforeAfterPreview({
   const topProducts = products.slice(0, 4);
 
   return (
-    <div className="relative w-full h-[600px] rounded-2xl overflow-hidden bg-gradient-to-br from-purple-900 via-purple-800 to-pink-900 shadow-2xl">
+    <div className="space-y-4">
+      {/* Makeup customization controls */}
+      <MakeupCustomizer
+        customization={customization}
+        onCustomizationChange={setCustomization}
+        hasEyeliner={hasEyeliner}
+        hasLipstick={hasLipstick}
+      />
+      
+      <div className="relative w-full h-[600px] rounded-2xl overflow-hidden bg-gradient-to-br from-purple-900 via-purple-800 to-pink-900 shadow-2xl">
       {isProcessing && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="h-12 w-12 text-white animate-spin" />
-            <p className="text-white font-medium">Applying AI recommendations...</p>
+            <p className="text-white font-medium">{processingStatus}</p>
+            <p className="text-white/70 text-sm">Using AI face detection for natural makeup</p>
           </div>
+        </div>
+      )}
+      
+      {!faceDetected && !isProcessing && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-30 bg-yellow-500/90 backdrop-blur-sm px-4 py-2 rounded-lg">
+          <p className="text-white text-sm font-medium">⚠️ Face detection unavailable - using approximate positioning</p>
         </div>
       )}
 
@@ -122,7 +191,7 @@ export default function BeforeAfterPreview({
           <img
             src={originalImage}
             alt="Original"
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain bg-gray-900"
           />
           <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-full">
             <span className="text-sm font-medium text-gray-900">Before</span>
@@ -139,7 +208,7 @@ export default function BeforeAfterPreview({
               <img
                 src={enhancedImage}
                 alt="Enhanced"
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain bg-gray-900"
               />
 
               {topProducts[0] && (
@@ -192,7 +261,7 @@ export default function BeforeAfterPreview({
       </div>
 
       <motion.div
-        className="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur-md rounded-2xl px-8 py-4 shadow-2xl"
+        className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 translate-y-full bg-white/95 backdrop-blur-md rounded-2xl px-8 py-4 shadow-2xl mt-4"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1, duration: 0.5 }}
@@ -207,65 +276,9 @@ export default function BeforeAfterPreview({
           <CircularScore label="Color type" score={Math.round(scores.colorType)} size={60} strokeWidth={5} delay={1500} />
         </div>
       </motion.div>
+      </div>
     </div>
   );
-}
-
-function getCategoryDefaultIntensity(category: string): number {
-  const categoryLower = category.toLowerCase();
-  
-  // Eyes - DRAMATIC for visibility
-  if (categoryLower.includes('eyeshadow')) return 0.85;
-  if (categoryLower.includes('eyeliner')) return 0.95;
-  if (categoryLower.includes('mascara')) return 0.9;
-  
-  // Face color - STRONG for contouring/highlighting
-  if (categoryLower.includes('highlighter')) return 0.8;
-  if (categoryLower.includes('bronzer')) return 0.6;
-  if (categoryLower.includes('blush')) return 0.7;
-  
-  // Lips - BOLD color
-  if (categoryLower.includes('lip')) return 0.8;
-  
-  // Face base - Natural but visible
-  if (categoryLower.includes('foundation')) return 0.5;
-  if (categoryLower.includes('concealer')) return 0.5;
-  if (categoryLower.includes('powder')) return 0.4;
-  
-  // Hair - Subtle tint
-  if (categoryLower.includes('hair')) return 0.6;
-  
-  // Default
-  return 0.6;
-}
-
-function mapCategoryToEffectType(category: string): MakeupEffect['type'] {
-  const categoryLower = category.toLowerCase();
-  
-  // Lips
-  if (categoryLower.includes('lip')) return 'lipstick';
-  
-  // Face base
-  if (categoryLower.includes('foundation')) return 'foundation';
-  if (categoryLower.includes('concealer')) return 'concealer';
-  if (categoryLower.includes('powder')) return 'powder';
-  
-  // Face color
-  if (categoryLower.includes('blush')) return 'blush';
-  if (categoryLower.includes('bronzer')) return 'bronzer';
-  if (categoryLower.includes('highlighter')) return 'highlighter';
-  
-  // Eyes
-  if (categoryLower.includes('eyeshadow')) return 'eyeshadow';
-  if (categoryLower.includes('eyeliner')) return 'eyeliner';
-  if (categoryLower.includes('mascara')) return 'mascara';
-  
-  // Hair
-  if (categoryLower.includes('hair')) return 'hair';
-  
-  // Default fallback
-  console.warn(`[mapCategoryToEffectType] Unknown category: ${category}, defaulting to foundation`);
-  return 'foundation';
 }
 
 function calculateSkinToneScore(skinTone: string): number {

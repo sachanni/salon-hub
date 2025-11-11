@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { buildInventoryContextForAI, type InventoryContext } from './inventory-context.service';
+import { analyzeBeautyImageWithOpenAI } from './openai.service';
 
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
@@ -46,8 +47,8 @@ export interface BeautyAnalysisResponse {
 
 async function retryWithExponentialBackoff<T>(
   fn: () => Promise<T>,
-  maxRetries = 5,
-  baseDelay = 3000
+  maxRetries = 3,
+  baseDelay = 2000
 ): Promise<T> {
   let lastError: Error | null = null;
 
@@ -57,15 +58,53 @@ async function retryWithExponentialBackoff<T>(
     } catch (error: any) {
       lastError = error;
 
-      if (error.status === 429 && attempt < maxRetries - 1) {
-        const jitter = Math.random() * 1000;
+      // Normalize error fields (Google SDK uses different structures)
+      const status = error.status || error.error?.code || error.code;
+      const message = error.message || error.error?.message || '';
+      const errorCode = typeof error.code === 'string' ? error.code : '';
+      
+      // Don't retry on quota/permission errors - fail fast for OpenAI fallback
+      // Check status codes, error codes, and message strings
+      const isQuotaOrPermissionError = 
+        status === 429 || status === 403 || status === 'RESOURCE_EXHAUSTED' || status === 'PERMISSION_DENIED' ||
+        errorCode === 'RESOURCE_EXHAUSTED' || errorCode === 'PERMISSION_DENIED' ||
+        message.includes('quota') || message.includes('RESOURCE_EXHAUSTED') || 
+        message.includes('PERMISSION_DENIED') || message.includes('exceeded your current quota');
+      
+      if (isQuotaOrPermissionError) {
+        console.log(`[No Retry] Quota/permission error detected. Failing fast for OpenAI fallback.`);
+        throw error;
+      }
+
+      // Retry on transient errors (temporary failures that might succeed on retry)
+      const isRetryableError = 
+        // HTTP transient status codes
+        status === 408 || status === 500 || status === 502 || 
+        status === 503 || status === 504 || status === 509 ||
+        // Google SDK status strings
+        status === 'UNAVAILABLE' || status === 'ABORTED' || 
+        status === 'DEADLINE_EXCEEDED' || status === 'INTERNAL' ||
+        // Error code strings
+        errorCode === 'UNAVAILABLE' || errorCode === 'ABORTED' || 
+        errorCode === 'DEADLINE_EXCEEDED' || errorCode === 'INTERNAL' ||
+        // Network errors
+        errorCode === 'ECONNRESET' || errorCode === 'ETIMEDOUT' || 
+        errorCode === 'ENOTFOUND' || errorCode === 'ECONNREFUSED' ||
+        // Message-based detection (fallback)
+        message.includes('UNAVAILABLE') || message.includes('ABORTED') ||
+        message.includes('DEADLINE_EXCEEDED') || message.includes('INTERNAL');
+      
+      if (isRetryableError && attempt < maxRetries - 1) {
+        const jitter = Math.random() * 500;
         const delay = (Math.pow(2, attempt) * baseDelay) + jitter;
         
-        console.log(`[Retry ${attempt + 1}/${maxRetries - 1}] Rate limit hit (429). Waiting ${Math.round(delay / 1000)}s before retry...`);
+        console.log(`[Retry ${attempt + 1}/${maxRetries - 1}] Transient error (status: ${status}, code: ${errorCode}). Waiting ${Math.round(delay / 1000)}s before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
 
+      // For non-retryable errors or max retries reached, fail immediately
+      console.log(`[No Retry] Non-retryable error or max retries reached (status: ${status}, code: ${errorCode})`);
       throw error;
     }
   }
@@ -74,10 +113,11 @@ async function retryWithExponentialBackoff<T>(
 }
 
 export async function analyzeBeautyImage(input: BeautyAnalysisInput): Promise<BeautyAnalysisResponse> {
-  const model = 'gemini-2.0-flash-exp';
+  const model = 'gemini-2.5-flash'; // Latest stable model (replaces retired 1.5-flash)
 
   // Fetch salon's actual product inventory (filtered by preferred brands if specified)
-  const inventoryContext = await buildInventoryContextForAI(input.salonId, 10, input.preferredBrands);
+  // Reduced to 5 products per category to save tokens for response
+  const inventoryContext = await buildInventoryContextForAI(input.salonId, 5, input.preferredBrands);
   const brandContext = input.preferredBrands && input.preferredBrands.length > 0 
     ? ` (filtered to: ${input.preferredBrands.join(', ')})` 
     : '';
@@ -123,11 +163,12 @@ ANALYSIS STEPS:
    - Skin tone preference: ${input.skinTone || 'auto-detect'}
    - Hair type: ${input.hairType || 'auto-detect'}
 
-3. Generate 3-5 distinct look options:
+3. Generate EXACTLY 2 distinct look options:
    - Each look should have a creative name and compelling description
    - Include confidence score (0-100) based on how well it suits the customer
    - List preset categories needed for AR preview (makeup + optional hair/beard)
    - Recommend specific product types with attributes (shade, finish, etc.)
+   - Keep it concise: 6-8 products per look (focus on essentials)
 
 PRODUCT CATEGORIES (use these exactly):
 - foundation (attributes: shade, finish: matte/dewy/natural)
@@ -193,11 +234,12 @@ RESPONSE FORMAT (JSON) - **IMPORTANT: You MUST include productId from the INVENT
 
 QUALITY GUIDELINES:
 - Be specific and actionable (not "natural lipstick" but "Nude Rose matte lipstick")
-- Ensure each look is distinctly different (natural vs. glamorous vs. bold)
+- Ensure each look is distinctly different (natural vs. glamorous)
 - Confidence scores should reflect genuine suitability (don't give everything 95+)
-- Include 8-12 products per look (complete face)
+- Include 6-8 essential products per look (foundation, concealer, eyes, lips, cheeks)
 - Provide clear reasons for each product choice
-- Consider color theory (complementary shades, undertones)`;
+- Consider color theory (complementary shades, undertones)
+- **IMPORTANT**: Keep responses concise to avoid truncation`;
 
   try {
     const imagePart = {
@@ -239,15 +281,19 @@ ${inventoryContext.productsByCategoryFormatted}
           temperature: 0.7,
           topP: 0.95,
           topK: 40,
-          maxOutputTokens: 4096,
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
         },
-      }),
-      5,
-      3000
+      })
+      // Using default params: maxRetries=3, baseDelay=2000 (defined in function signature)
     );
 
-    const text = result.text;
+    const text = result.text || '';
+    
+    if (!text) {
+      console.error('[Gemini] Empty response - may be due to safety filters or MAX_TOKENS limit');
+      throw new Error('Gemini returned empty response. This may be due to safety filters or content blocks.');
+    }
     
     let analysis: BeautyAnalysisResponse;
     try {
@@ -289,11 +335,79 @@ ${inventoryContext.productsByCategoryFormatted}
   }
 }
 
+export interface BeautyAnalysisResponseWithProvider extends BeautyAnalysisResponse {
+  provider: 'gemini' | 'openai';
+}
+
+export async function analyzeBeautyImageWithFallback(
+  input: BeautyAnalysisInput
+): Promise<BeautyAnalysisResponseWithProvider> {
+  console.log(`[AI Look] Starting analysis for ${input.customerName} at salon ${input.salonId}`);
+
+  try {
+    console.log('[AI Look] Attempting primary provider: Gemini');
+    const geminiResult = await analyzeBeautyImage(input);
+    console.log('[AI Look] ✓ Gemini analysis successful');
+    return {
+      ...geminiResult,
+      provider: 'gemini'
+    };
+  } catch (geminiError: any) {
+    console.log(`[AI Look] ✗ Gemini failed: ${geminiError.message}`);
+    
+    const isOpenAIConfigured = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 0;
+    
+    // Don't fallback if it's an inventory/business logic error (not an AI provider error)
+    const isInventoryError = geminiError.message?.includes('no products in inventory') || 
+                             geminiError.message?.includes('does not stock any products');
+    
+    if (isInventoryError) {
+      console.log('[AI Look] Inventory error detected, not attempting fallback');
+      throw geminiError;
+    }
+    
+    // Attempt OpenAI fallback for any Gemini failure (quota, malformed response, etc.)
+    if (isOpenAIConfigured) {
+      const errorType = geminiError.status === 429 || geminiError.message?.includes('quota') || geminiError.message?.includes('RESOURCE_EXHAUSTED')
+        ? 'quota/rate limit'
+        : 'provider error';
+      
+      console.log(`[AI Look] Gemini ${errorType} detected. Attempting fallback to OpenAI...`);
+      
+      try {
+        const openaiResult = await analyzeBeautyImageWithOpenAI(input);
+        console.log('[AI Look] ✓ OpenAI fallback successful');
+        return {
+          ...openaiResult,
+          provider: 'openai'
+        };
+      } catch (openaiError: any) {
+        console.error('[AI Look] ✗ OpenAI fallback also failed:', openaiError.message);
+        
+        // Return a more helpful error message
+        const errorMessage = geminiError.status === 429 || geminiError.message?.includes('quota')
+          ? 'Both AI providers are currently unavailable. Gemini quota exhausted and OpenAI also failed. Please try again in a few minutes.'
+          : `AI analysis failed with both providers. Gemini: ${geminiError.message}. OpenAI: ${openaiError.message}`;
+        
+        throw new Error(errorMessage);
+      }
+    } else {
+      // OpenAI not configured, provide helpful message based on error type
+      if (geminiError.status === 429 || geminiError.message?.includes('quota') || geminiError.message?.includes('RESOURCE_EXHAUSTED')) {
+        throw new Error('Gemini quota exhausted and OpenAI backup is not configured. Please add OPENAI_API_KEY to your secrets or wait for Gemini quota to reset.');
+      }
+      
+      // For other errors, just rethrow the original Gemini error
+      throw geminiError;
+    }
+  }
+}
+
 export async function generateApplicationInstructions(
   lookDescription: string,
   products: Array<{ category: string; attributes: any; productName: string; brand: string }>
 ): Promise<string> {
-  const model = 'gemini-2.0-flash-exp';
+  const model = 'gemini-1.5-flash'; // Using same stable model for consistency
 
   const prompt = `You are a professional makeup artist providing step-by-step application instructions.
 
@@ -340,7 +454,7 @@ GUIDELINES:
         maxOutputTokens: 2048,
       },
     });
-    return result.text;
+    return result.text || 'Application instructions could not be generated. Please follow standard makeup application techniques.';
   } catch (error: any) {
     console.error('Error generating application instructions:', error);
     return 'Application instructions could not be generated. Please follow standard makeup application techniques.';

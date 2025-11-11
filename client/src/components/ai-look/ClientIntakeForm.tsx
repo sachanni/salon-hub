@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,8 @@ export default function ClientIntakeForm({ onComplete }: ClientIntakeFormProps) 
   const [preferredBrands, setPreferredBrands] = useState<string[]>([]);
   const [showWebcam, setShowWebcam] = useState(false);
   const [isDetectingContext, setIsDetectingContext] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const availableBrands = ['Lakme', 'L\'Oreal Paris', 'Maybelline', 'MAC', 'NYX', 'Sugar', 'Faces Canada'];
 
@@ -143,8 +145,28 @@ export default function ClientIntakeForm({ onComplete }: ClientIntakeFormProps) 
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (submitTimerRef.current) {
+        clearTimeout(submitTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Debounced submit handler to prevent rapid clicks / double submissions
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent rapid clicks - throttle to max 1 request per 2 seconds
+    if (isSubmitting) {
+      toast({
+        title: 'Analysis in progress',
+        description: 'Please wait for the current analysis to complete',
+        variant: 'default',
+      });
+      return;
+    }
 
     if (!customerName.trim()) {
       toast({
@@ -164,6 +186,10 @@ export default function ClientIntakeForm({ onComplete }: ClientIntakeFormProps) 
       return;
     }
 
+    // Set submitting state immediately (leading execution)
+    setIsSubmitting(true);
+
+    // Execute analysis
     onComplete({
       customerName,
       gender,
@@ -175,7 +201,12 @@ export default function ClientIntakeForm({ onComplete }: ClientIntakeFormProps) 
       hairType: hairType || 'auto-detect',
       preferredBrands: preferredBrands.length > 0 ? preferredBrands : undefined,
     });
-  };
+
+    // Reset after 2 seconds to allow retries (but prevent rapid clicking)
+    submitTimerRef.current = setTimeout(() => {
+      setIsSubmitting(false);
+    }, 2000);
+  }, [customerName, customerPhoto, gender, eventType, weather, location, skinTone, hairType, preferredBrands, isSubmitting, onComplete, toast]);
 
   if (showWebcam) {
     return (

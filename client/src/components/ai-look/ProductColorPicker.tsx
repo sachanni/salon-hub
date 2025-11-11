@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card';
 import { Check, ThumbsUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { getProductColor } from '@/utils/imageEffects';
+import { getProductColor } from '@/utils/colors';
 
 interface ProductOption {
   productId: string;

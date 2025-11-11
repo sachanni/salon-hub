@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Sparkles, RotateCcw, Sliders, Eye, Palette, 
 import BeforeAfterPreview, { type EffectOverride } from './BeforeAfterPreview';
 import MakeupControlsPanel, { type MakeupCategoryControl } from './MakeupControlsPanel';
 import ProductColorPicker from './ProductColorPicker';
-import { getProductColor } from '@/utils/imageEffects';
+import { getProductColor } from '@/utils/colors';
 
 interface LookCarouselProps {
   looks: any[];
@@ -376,6 +376,13 @@ export default function LookCarousel({
                     )}
                   </div>
                 </div>
+                
+                {/* Makeup Controls Panel - Full Width Below */}
+                <MakeupControlsPanel
+                  controls={makeupControls}
+                  onControlChange={handleControlChange}
+                  onReset={handleReset}
+                />
               </TabsContent>
             </Tabs>
 

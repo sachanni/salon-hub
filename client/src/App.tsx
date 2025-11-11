@@ -31,6 +31,7 @@ import EmailVerified from "@/pages/EmailVerified";
 import EmailVerificationExpired from "@/pages/EmailVerificationExpired";
 import ResetPassword from "@/pages/ResetPassword";
 import AILookAdvisor from "@/pages/AILookAdvisor";
+import TestMakeupRender from "@/pages/TestMakeupRender";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -76,7 +77,11 @@ function Router() {
         <Route path="/reset-password" component={ResetPassword} />
         
         {/* Premium Features */}
+        <Route path="/ai-look-advisor" component={AILookAdvisor} />
         <Route path="/premium/ai-look" component={AILookAdvisor} />
+        
+        {/* Test/Debug Routes */}
+        <Route path="/test/makeup-render" component={TestMakeupRender} />
         
         {/* Super Admin Routes */}
         <Route path="/admin/:rest*" component={SuperAdminDashboard} />

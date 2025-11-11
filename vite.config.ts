@@ -16,6 +16,10 @@ export default defineConfig({
         ]
       : []),
   ],
+  define: {
+    // Expose Banuba client token to frontend (safe - it's a public client-side token)
+    'import.meta.env.VITE_BANUBA_CLIENT_TOKEN': JSON.stringify(process.env.BANUBA_CLIENT_TOKEN || ''),
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),

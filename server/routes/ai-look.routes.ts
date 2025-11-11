@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { storage } from '../storage';
-import { analyzeBeautyImage, generateApplicationInstructions, type BeautyAnalysisInput } from '../services/gemini.service';
+import { analyzeBeautyImageWithFallback, generateApplicationInstructions, type BeautyAnalysisInput } from '../services/gemini.service';
 import { matchProductsForLook, resolvePresetsToEffects, decrementInventory, getProductsBySalon } from '../services/product-matcher.service';
 import { db } from '../db';
 import { aiLookSessions, aiLookOptions, aiLookProducts, salonInventory, beautyProducts } from '@shared/schema';
@@ -116,8 +116,8 @@ router.post('/analyze', aiAnalysisLimiter, async (req: AuthenticatedRequest, res
     };
 
     console.log(`[AI Look] Starting analysis for ${validatedData.customerName} at salon ${salon.name}`);
-    const aiResponse = await analyzeBeautyImage(analysisInput);
-    console.log(`[AI Look] Gemini returned ${aiResponse.looks.length} looks`);
+    const aiResponse = await analyzeBeautyImageWithFallback(analysisInput);
+    console.log(`[AI Look] AI provider (${aiResponse.provider}) returned ${aiResponse.looks.length} looks`);
 
     const matchedLooks = [];
     for (const look of aiResponse.looks) {
@@ -151,6 +151,7 @@ router.post('/analyze', aiAnalysisLimiter, async (req: AuthenticatedRequest, res
       success: true,
       customerAnalysis: aiResponse.customerAnalysis,
       looks: matchedLooks,
+      provider: aiResponse.provider,
     });
   } catch (error: any) {
     console.error('[AI Look] Analysis error:', error);
@@ -484,6 +485,136 @@ router.get('/inventory/:salonId', async (req: AuthenticatedRequest, res) => {
     console.error('[AI Look] Get inventory error:', error);
     return res.status(500).json({ 
       message: 'Failed to retrieve inventory',
+      error: error.message 
+    });
+  }
+});
+
+const hairColorSchema = z.object({
+  imageUrl: z.string().url().or(z.string().startsWith('data:image/')),
+  textPrompt: z.string().min(1).max(200),
+});
+
+const hairstyleSchema = z.object({
+  imageUrl: z.string().url().or(z.string().startsWith('data:image/')),
+  textPrompt: z.string().min(1).max(200),
+});
+
+router.post('/hair-color', aiAnalysisLimiter, async (req: AuthenticatedRequest, res) => {
+  try {
+    const validatedData = hairColorSchema.parse(req.body);
+    
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    
+    const apiKey = process.env.LIGHTX_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ message: 'LightX API key not configured' });
+    }
+
+    console.log('[Hair Color] Processing request with prompt:', validatedData.textPrompt);
+
+    const response = await fetch('https://api.lightxeditor.com/external/api/v2/haircolor/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        imageUrl: validatedData.imageUrl,
+        textPrompt: validatedData.textPrompt,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Hair Color] LightX API error:', response.status, errorText);
+      return res.status(response.status).json({ 
+        message: 'Hair color transformation failed',
+        error: errorText 
+      });
+    }
+
+    const result = await response.json();
+    console.log('[Hair Color] Transformation successful');
+
+    return res.json({
+      success: true,
+      imageData: result,
+    });
+  } catch (error: any) {
+    console.error('[Hair Color] Error:', error);
+    
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ 
+        message: 'Invalid request data', 
+        errors: error.errors 
+      });
+    }
+
+    return res.status(500).json({ 
+      message: 'Hair color transformation failed',
+      error: error.message 
+    });
+  }
+});
+
+router.post('/hairstyle', aiAnalysisLimiter, async (req: AuthenticatedRequest, res) => {
+  try {
+    const validatedData = hairstyleSchema.parse(req.body);
+    
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    
+    const apiKey = process.env.LIGHTX_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ message: 'LightX API key not configured' });
+    }
+
+    console.log('[Hairstyle] Processing request with prompt:', validatedData.textPrompt);
+
+    const response = await fetch('https://api.lightxeditor.com/external/api/v1/hairstyle', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        imageUrl: validatedData.imageUrl,
+        textPrompt: validatedData.textPrompt,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Hairstyle] LightX API error:', response.status, errorText);
+      return res.status(response.status).json({ 
+        message: 'Hairstyle transformation failed',
+        error: errorText 
+      });
+    }
+
+    const result = await response.json();
+    console.log('[Hairstyle] Transformation successful');
+
+    return res.json({
+      success: true,
+      imageData: result,
+    });
+  } catch (error: any) {
+    console.error('[Hairstyle] Error:', error);
+    
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ 
+        message: 'Invalid request data', 
+        errors: error.errors 
+      });
+    }
+
+    return res.status(500).json({ 
+      message: 'Hairstyle transformation failed',
       error: error.message 
     });
   }
