@@ -8,6 +8,8 @@ import { aiLookSessions, aiLookOptions, aiLookProducts, salonInventory, beautyPr
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthenticatedRequest } from '../middleware/auth';
+import { tempImageStorage } from '../services/tempImageStorage';
+import multer from 'multer';
 
 const router = Router();
 
@@ -490,13 +492,266 @@ router.get('/inventory/:salonId', async (req: AuthenticatedRequest, res) => {
   }
 });
 
+// Configure multer for in-memory file storage
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, PNG, and WebP are allowed.'));
+    }
+  },
+});
+
+// Upload endpoint: Receives image file, stores temporarily, returns public URL
+router.post('/uploads', aiAnalysisLimiter, upload.single('image'), async (req: AuthenticatedRequest, res) => {
+  try {
+    // Authentication required
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required to upload images.' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image file provided' });
+    }
+
+    // Build public URL from request headers (works in production and dev)
+    const protocol = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+
+    const { publicUrl, imageId, expiresAt } = tempImageStorage.uploadImage(
+      req.file.buffer,
+      req.file.mimetype,
+      baseUrl
+    );
+
+    console.log('[Upload] Image uploaded successfully:', imageId, 'by user:', req.user.id, 'public URL:', publicUrl);
+
+    return res.status(201).json({
+      success: true,
+      publicUrl,
+      imageId,
+      expiresAt,
+    });
+  } catch (error: any) {
+    console.error('[Upload] Error:', error);
+    return res.status(500).json({ 
+      message: 'Image upload failed',
+      error: error.message 
+    });
+  }
+});
+
+// Note: The public temp-images endpoint has been moved to server/routes.ts
+// as a top-level route (/api/temp-images/:id) without authentication
+// so that LightX API can access uploaded images.
+
+// ===============================================
+// LIGHTX ASYNC POLLING UTILITY
+// ===============================================
+
+interface LightXJobResult {
+  success: true;
+  output_url: string;
+  orderId: string;
+}
+
+interface LightXJobError {
+  success: false;
+  message: string;
+  orderId?: string;
+  statusCode: number;
+}
+
+type LightXJobResponse = LightXJobResult | LightXJobError;
+
+/**
+ * Helper function to wait/delay for specified milliseconds
+ */
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Runs a LightX transformation job with automatic polling
+ * @param apiUrl - The LightX API endpoint URL (v1 or v2)
+ * @param apiKey - LightX API key
+ * @param payload - Request payload (imageUrl, textPrompt)
+ * @param jobType - Job type for logging ("Hair Color" or "Hairstyle")
+ * @returns Promise with output_url or error details
+ */
+async function runLightXJob(
+  apiUrl: string,
+  apiKey: string,
+  payload: { imageUrl: string; textPrompt: string },
+  jobType: string
+): Promise<LightXJobResponse> {
+  const POLL_INTERVAL_MS = 5000; // 5 seconds
+  const MAX_RETRIES = 12; // 12 retries × 5s = 60 seconds max wait
+  const REQUEST_TIMEOUT_MS = 15000; // 15 second timeout per request
+
+  try {
+    // Step 1: Submit the transformation job
+    console.log(`[${jobType}] Submitting job with prompt:`, payload.textPrompt);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    const submitResponse = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!submitResponse.ok) {
+      const errorText = await submitResponse.text();
+      console.error(`[${jobType}] LightX API submission error:`, submitResponse.status, errorText);
+      return {
+        success: false,
+        message: `${jobType} transformation failed: ${errorText}`,
+        statusCode: submitResponse.status,
+      };
+    }
+
+    const submitResult = await submitResponse.json();
+    
+    console.log(`[${jobType}] Raw API response:`, JSON.stringify(submitResult));
+    
+    // Check if result is available immediately (synchronous response)
+    const immediateOutputUrl = submitResult.body?.output_url || submitResult.output_url;
+    if (immediateOutputUrl) {
+      console.log(`[${jobType}] Job completed synchronously, output_url:`, immediateOutputUrl);
+      return {
+        success: true,
+        output_url: immediateOutputUrl,
+        orderId: submitResult.body?.orderId || submitResult.orderId || 'sync-response',
+      };
+    }
+    
+    // Extract orderId for async polling
+    const orderId = submitResult.body?.orderId || submitResult.orderId;
+    if (!orderId) {
+      console.error(`[${jobType}] No orderId in response:`, JSON.stringify(submitResult));
+      return {
+        success: false,
+        message: `${jobType} transformation failed: No order ID received`,
+        statusCode: 502,
+      };
+    }
+
+    console.log(`[${jobType}] Job submitted async, orderId: ${orderId}, polling for completion...`);
+
+    // Step 2: Poll for completion using /orders/ endpoint
+    const statusUrl = apiUrl.includes('/v2/') 
+      ? `https://api.lightxeditor.com/external/api/v2/orders/${orderId}`
+      : `https://api.lightxeditor.com/external/api/v1/orders/${orderId}`;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      await delay(POLL_INTERVAL_MS);
+
+      console.log(`[${jobType}] Polling attempt ${attempt}/${MAX_RETRIES} for orderId: ${orderId}`);
+
+      const statusController = new AbortController();
+      const statusTimeoutId = setTimeout(() => statusController.abort(), REQUEST_TIMEOUT_MS);
+
+      try {
+        const statusResponse = await fetch(statusUrl, {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey,
+          },
+          signal: statusController.signal,
+        });
+
+        clearTimeout(statusTimeoutId);
+
+        if (!statusResponse.ok) {
+          console.error(`[${jobType}] Status check failed:`, statusResponse.status);
+          continue; // Retry on error
+        }
+
+        const statusResult = await statusResponse.json();
+        const status = statusResult.body?.status || statusResult.status;
+        const outputUrl = statusResult.body?.output_url || statusResult.output_url;
+
+        console.log(`[${jobType}] Status check result:`, { status, hasOutputUrl: !!outputUrl });
+
+        // Check if job completed successfully
+        if (status === 'completed' && outputUrl) {
+          console.log(`[${jobType}] Job completed successfully after ${attempt} attempts`);
+          return {
+            success: true,
+            output_url: outputUrl,
+            orderId,
+          };
+        }
+
+        // Check if job failed
+        if (status === 'failed') {
+          console.error(`[${jobType}] Job failed, orderId: ${orderId}`);
+          return {
+            success: false,
+            message: `${jobType} transformation failed: Processing error`,
+            orderId,
+            statusCode: 502,
+          };
+        }
+
+        // Job still processing, continue polling
+        console.log(`[${jobType}] Job still processing (status: ${status}), will retry...`);
+
+      } catch (pollError: any) {
+        clearTimeout(statusTimeoutId);
+        console.error(`[${jobType}] Polling error on attempt ${attempt}:`, pollError.message);
+        // Continue to next retry on network errors
+      }
+    }
+
+    // Max retries exceeded - timeout
+    console.error(`[${jobType}] Timeout: Job did not complete within ${(MAX_RETRIES * POLL_INTERVAL_MS) / 1000}s`);
+    return {
+      success: false,
+      message: `${jobType} transformation timed out. Please try again with a different image or simpler prompt.`,
+      orderId,
+      statusCode: 504,
+    };
+
+  } catch (error: any) {
+    console.error(`[${jobType}] Unexpected error:`, error);
+    
+    if (error.name === 'AbortError') {
+      return {
+        success: false,
+        message: `${jobType} transformation request timed out`,
+        statusCode: 504,
+      };
+    }
+
+    return {
+      success: false,
+      message: `${jobType} transformation failed: ${error.message}`,
+      statusCode: 500,
+    };
+  }
+}
+
 const hairColorSchema = z.object({
-  imageUrl: z.string().url().or(z.string().startsWith('data:image/')),
+  imageUrl: z.string().url(),
   textPrompt: z.string().min(1).max(200),
 });
 
 const hairstyleSchema = z.object({
-  imageUrl: z.string().url().or(z.string().startsWith('data:image/')),
+  imageUrl: z.string().url(),
   textPrompt: z.string().min(1).max(200),
 });
 
@@ -504,8 +759,9 @@ router.post('/hair-color', aiAnalysisLimiter, async (req: AuthenticatedRequest, 
   try {
     const validatedData = hairColorSchema.parse(req.body);
     
+    // Authentication required: allow both business users and customers
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+      return res.status(401).json({ message: 'Authentication required. Please login to use hair transformations.' });
     }
     
     const apiKey = process.env.LIGHTX_API_KEY;
@@ -513,35 +769,28 @@ router.post('/hair-color', aiAnalysisLimiter, async (req: AuthenticatedRequest, 
       return res.status(500).json({ message: 'LightX API key not configured' });
     }
 
-    console.log('[Hair Color] Processing request with prompt:', validatedData.textPrompt);
-
-    const response = await fetch('https://api.lightxeditor.com/external/api/v2/haircolor/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
+    // Run the LightX job with automatic polling
+    const result = await runLightXJob(
+      'https://api.lightxeditor.com/external/api/v2/haircolor/',
+      apiKey,
+      {
         imageUrl: validatedData.imageUrl,
         textPrompt: validatedData.textPrompt,
-      }),
-    });
+      },
+      'Hair Color'
+    );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[Hair Color] LightX API error:', response.status, errorText);
-      return res.status(response.status).json({ 
-        message: 'Hair color transformation failed',
-        error: errorText 
+    if (!result.success) {
+      return res.status(result.statusCode).json({ 
+        message: result.message,
+        orderId: result.orderId,
       });
     }
 
-    const result = await response.json();
-    console.log('[Hair Color] Transformation successful');
-
     return res.json({
       success: true,
-      imageData: result,
+      output_url: result.output_url,
+      orderId: result.orderId,
     });
   } catch (error: any) {
     console.error('[Hair Color] Error:', error);
@@ -564,8 +813,9 @@ router.post('/hairstyle', aiAnalysisLimiter, async (req: AuthenticatedRequest, r
   try {
     const validatedData = hairstyleSchema.parse(req.body);
     
+    // Authentication required: allow both business users and customers
     if (!req.user) {
-      return res.status(401).json({ message: 'Authentication required' });
+      return res.status(401).json({ message: 'Authentication required. Please login to use hairstyle transformations.' });
     }
     
     const apiKey = process.env.LIGHTX_API_KEY;
@@ -573,35 +823,28 @@ router.post('/hairstyle', aiAnalysisLimiter, async (req: AuthenticatedRequest, r
       return res.status(500).json({ message: 'LightX API key not configured' });
     }
 
-    console.log('[Hairstyle] Processing request with prompt:', validatedData.textPrompt);
-
-    const response = await fetch('https://api.lightxeditor.com/external/api/v1/hairstyle', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify({
+    // Run the LightX job with automatic polling
+    const result = await runLightXJob(
+      'https://api.lightxeditor.com/external/api/v1/hairstyle/',
+      apiKey,
+      {
         imageUrl: validatedData.imageUrl,
         textPrompt: validatedData.textPrompt,
-      }),
-    });
+      },
+      'Hairstyle'
+    );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[Hairstyle] LightX API error:', response.status, errorText);
-      return res.status(response.status).json({ 
-        message: 'Hairstyle transformation failed',
-        error: errorText 
+    if (!result.success) {
+      return res.status(result.statusCode).json({ 
+        message: result.message,
+        orderId: result.orderId,
       });
     }
 
-    const result = await response.json();
-    console.log('[Hairstyle] Transformation successful');
-
     return res.json({
       success: true,
-      imageData: result,
+      output_url: result.output_url,
+      orderId: result.orderId,
     });
   } catch (error: any) {
     console.error('[Hairstyle] Error:', error);

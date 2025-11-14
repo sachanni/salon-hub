@@ -37,6 +37,7 @@ interface BeforeAfterPreviewProps {
   }>;
   confidenceScore: number;
   effectOverrides?: EffectOverride[];
+  onRenderedImage?: (imageData: string) => void;
 }
 
 export default function BeforeAfterPreview({
@@ -45,6 +46,7 @@ export default function BeforeAfterPreview({
   products,
   confidenceScore,
   effectOverrides,
+  onRenderedImage,
 }: BeforeAfterPreviewProps) {
   const [enhancedImage, setEnhancedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(true);
@@ -142,6 +144,14 @@ export default function BeforeAfterPreview({
 
     generateEnhancedPreview();
   }, [isMediaPipeReady, originalImage, products, effectOverrides, customization, hasEyeliner, hasLipstick]);
+
+  // Notify parent when rendered image is ready
+  useEffect(() => {
+    if (enhancedImage && !isProcessing && onRenderedImage) {
+      console.log('[BeforeAfterPreview] Emitting rendered image to parent');
+      onRenderedImage(enhancedImage);
+    }
+  }, [enhancedImage, isProcessing, onRenderedImage]);
 
   const scores = useMemo(() => {
     const skinToneScore = calculateSkinToneScore(customerAnalysis.skinTone);

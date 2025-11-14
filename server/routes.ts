@@ -16,6 +16,7 @@ import { OfferCalculator } from "./offerCalculator";
 import { getGooglePlacesService } from "./services/googlePlaces";
 import { z } from "zod";
 import aiLookRoutes from "./routes/ai-look.routes";
+import { tempImageStorage } from "./services/tempImageStorage";
 import { 
   createPaymentOrderSchema, 
   verifyPaymentSchema,
@@ -11750,6 +11751,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error removing product from inventory:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===============================================
+  // PUBLIC TEMP IMAGES ENDPOINT (No Auth Required)
+  // Used by LightX API to fetch uploaded images
+  // ===============================================
+  app.get('/api/temp-images/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const image = tempImageStorage.getImage(id);
+
+      if (!image) {
+        return res.status(404).json({ message: 'Image not found or expired' });
+      }
+
+      // Set content type and send the image buffer
+      res.setHeader('Content-Type', image.mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+      res.send(image.buffer);
+    } catch (error: any) {
+      console.error('[TempImages] Error serving image:', error);
+      res.status(500).json({ message: 'Failed to serve image' });
     }
   });
 

@@ -9,7 +9,7 @@ import AIAnalysisLoader from '@/components/ai-look/AIAnalysisLoader';
 import LookCarousel from '@/components/ai-look/LookCarousel';
 import ProductChecklist from '@/components/ai-look/ProductChecklist';
 import SessionHistory from '@/components/ai-look/SessionHistory';
-import HairTransformControls from '@/components/ai-look/HairTransformControls';
+import HairTransformations from '@/components/ai-look/HairTransformations';
 import { useToast } from '@/hooks/use-toast';
 
 type AnalysisStep = 'intake' | 'analyzing' | 'reviewing-looks' | 'hair-transform' | 'finalizing';
@@ -134,68 +134,11 @@ export default function AILookAdvisor() {
     }
   };
 
-  const handleLookSelected = async (makeupPhoto: string) => {
+  const handleLookSelected = (makeupPhoto: string) => {
     if (!sessionData || !lookOptions[selectedLookIndex]) return;
     
     setMakeupAppliedPhoto(makeupPhoto);
     setCurrentStep('hair-transform');
-
-    try {
-      const response = await fetch('/api/premium/ai-look/save-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          salonId,
-          customerName: sessionData.customerName,
-          customerPhotoUrl: sessionData.customerPhoto,
-          eventType: sessionData.eventType,
-          weather: sessionData.weather,
-          location: sessionData.location,
-          skinTone: sessionData.skinTone,
-          hairType: sessionData.hairType,
-          selectedLookIndex,
-          looks: lookOptions.map(look => ({
-            lookName: look.lookName,
-            description: look.description,
-            confidenceScore: look.confidenceScore,
-            presetIds: look.presetIds,
-            products: look.products.map(p => ({
-              productId: p.product.id,
-              applicationArea: p.applicationArea,
-              quantityNeeded: p.quantityNeeded,
-              isInStock: p.product.isInStock,
-              substituteProductId: p.product.substituteProduct?.id,
-            })),
-          })),
-        }),
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save session');
-      }
-
-      const result = await response.json();
-      
-      toast({
-        title: 'Look saved! ✨',
-        description: `${sessionData.customerName}'s personalized look has been saved`,
-      });
-
-      setTimeout(() => {
-        setCurrentStep('intake');
-        setSessionData(null);
-        setLookOptions([]);
-        setSelectedLookIndex(0);
-        setCustomerAnalysis(null);
-      }, 1500);
-    } catch (error: any) {
-      toast({
-        title: 'Save failed',
-        description: error.message || 'Failed to save session. Please try again.',
-        variant: 'destructive',
-      });
-    }
   };
 
   const handleRetry = () => {
@@ -245,7 +188,7 @@ export default function AILookAdvisor() {
         throw new Error('Failed to save session');
       }
 
-      const result = await response.json();
+      await response.json();
       
       toast({
         title: 'Look saved! ✨',
@@ -270,8 +213,8 @@ export default function AILookAdvisor() {
     }
   };
 
-  const handleSkipHairTransform = () => {
-    handleHairTransformComplete(makeupAppliedPhoto || sessionData?.customerPhoto || '');
+  const handleBackToMakeup = () => {
+    setCurrentStep('reviewing-looks');
   };
 
   return (
@@ -379,6 +322,15 @@ export default function AILookAdvisor() {
                   onConfirm={handleLookSelected}
                 />
               </div>
+            )}
+            
+            {currentStep === 'hair-transform' && sessionData && customerAnalysis && (
+              <HairTransformations
+                originalPhoto={makeupAppliedPhoto || sessionData.customerPhoto}
+                customerAnalysis={customerAnalysis}
+                onComplete={handleHairTransformComplete}
+                onBack={handleBackToMakeup}
+              />
             )}
             
             {currentStep === 'finalizing' && (
