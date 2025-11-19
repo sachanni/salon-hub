@@ -47,9 +47,18 @@ export default function SalonCard({
   hasPackages = false,
   hasGoogleReviews = false,
   availableTimeSlots = [],
+  onBookingClick,
 }: SalonCardProps) {
   const [imageError, setImageError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Call onBookingClick when card is clicked to track recently viewed
+  const handleCardClick = () => {
+    if (onBookingClick) {
+      console.log('🔵 SalonCard clicked - calling onBookingClick for:', name, id);
+      onBookingClick(name, id);
+    }
+  };
 
   // Format category to Title Case (remove snake_case)
   const formatCategory = (cat: string) => {
@@ -84,7 +93,7 @@ export default function SalonCard({
     .map(slot => slot.time) || [];
 
   return (
-    <Link href={`/salon/${id}`}>
+    <Link href={`/salon/${id}`} onClick={handleCardClick}>
       <Card 
         data-testid={`card-salon-${id}`}
         className="overflow-hidden hover:shadow-lg transition-shadow duration-200 cursor-pointer border border-gray-200 bg-white group"

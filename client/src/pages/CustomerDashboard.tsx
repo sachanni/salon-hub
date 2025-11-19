@@ -59,7 +59,10 @@ import {
   Bell,
   Smartphone,
   MessageSquare,
-  CheckCircle
+  CheckCircle,
+  Sun,
+  Moon,
+  Monitor
 } from "lucide-react";
 
 // Server response types (what the backend actually returns)
@@ -217,6 +220,7 @@ export default function CustomerDashboard() {
 
   // Profile management state
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isDarkTheme, setIsDarkTheme] = useState(false);
   const [preferencesData, setPreferencesData] = useState({
     emailNotifications: true,
     smsNotifications: false,
@@ -225,6 +229,15 @@ export default function CustomerDashboard() {
     preferredDays: [] as string[],
     preferredCommunicationMethod: 'email' as 'email' | 'sms' | 'both'
   });
+
+  // Initialize theme from localStorage
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+      setIsDarkTheme(true);
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
 
   // History filtering and search state
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
@@ -1661,8 +1674,52 @@ export default function CustomerDashboard() {
               </Card>
             </div>
 
-            {/* Communication Preferences */}
+            {/* Preferences Section */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Display Preferences */}
+              <Card data-testid="card-display-preferences">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Monitor className="h-5 w-5" />
+                    Display Preferences
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Customize your app appearance
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex items-center justify-between" data-testid="toggle-theme">
+                    <div className="space-y-0.5">
+                      <Label className="flex items-center gap-2 text-base font-medium">
+                        {isDarkTheme ? (
+                          <Moon className="h-4 w-4" />
+                        ) : (
+                          <Sun className="h-4 w-4" />
+                        )}
+                        Theme
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        {isDarkTheme ? 'Dark mode enabled' : 'Light mode enabled'}
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={isDarkTheme}
+                      onCheckedChange={(checked) => {
+                        setIsDarkTheme(checked);
+                        if (checked) {
+                          document.documentElement.classList.add('dark');
+                          localStorage.setItem('theme', 'dark');
+                        } else {
+                          document.documentElement.classList.remove('dark');
+                          localStorage.setItem('theme', 'light');
+                        }
+                      }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Communication Preferences */}
               <Card data-testid="card-communication-preferences">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">

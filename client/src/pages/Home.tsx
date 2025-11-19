@@ -114,7 +114,14 @@ export default function Home() {
   const handleBookingClick = (salonName: string, salonId: string) => {
     // Track salon view for recently viewed feature
     const salonData = salonsData.find(salon => salon.id === salonId);
+    console.log('📝 handleBookingClick - salonId:', salonId);
+    console.log('📝 handleBookingClick - found salonData:', salonData);
     if (salonData) {
+      console.log('✅ Adding to recently viewed:', {
+        id: salonData.id,
+        name: salonData.name,
+        image: salonData.image
+      });
       addRecentlyViewed({
         id: salonData.id,
         name: salonData.name,
@@ -125,6 +132,9 @@ export default function Home() {
         priceRange: salonData.priceRange,
         image: salonData.image
       });
+      console.log('💾 Recently viewed after add:', localStorage.getItem('salonhub_recently_viewed'));
+    } else {
+      console.error('❌ Could not find salon data for ID:', salonId);
     }
     // Close modal first if it's open to force a clean state reset
     if (isBookingOpen) {

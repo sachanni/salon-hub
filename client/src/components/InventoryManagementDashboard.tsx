@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -352,10 +352,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
 
   // Mutations
   const createVendorMutation = useMutation({
-    mutationFn: (data: any) => apiRequest(`/api/salons/${salonId}/vendors`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    mutationFn: (data: any) => apiRequest('POST', `/api/salons/${salonId}/vendors`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'vendors'] });
       setIsVendorDialogOpen(false);
@@ -369,10 +366,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
 
   const updateVendorMutation = useMutation({
     mutationFn: ({ vendorId, data }: { vendorId: string; data: any }) => 
-      apiRequest(`/api/salons/${salonId}/vendors/${vendorId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
+      apiRequest('PUT', `/api/salons/${salonId}/vendors/${vendorId}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'vendors'] });
       setIsVendorDialogOpen(false);
@@ -385,10 +379,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
   });
 
   const createCategoryMutation = useMutation({
-    mutationFn: (data: any) => apiRequest(`/api/salons/${salonId}/product-categories`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    mutationFn: (data: any) => apiRequest('POST', `/api/salons/${salonId}/product-categories`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'product-categories'] });
       setIsCategoryDialogOpen(false);
@@ -401,10 +392,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
   });
 
   const createProductMutation = useMutation({
-    mutationFn: (data: any) => apiRequest(`/api/salons/${salonId}/products`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    mutationFn: (data: any) => apiRequest('POST', `/api/salons/${salonId}/products`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'products'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'inventory/dashboard'] });
@@ -419,10 +407,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
 
   const updateProductMutation = useMutation({
     mutationFn: ({ productId, data }: { productId: string; data: any }) => 
-      apiRequest(`/api/salons/${salonId}/products/${productId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
+      apiRequest('PUT', `/api/salons/${salonId}/products/${productId}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'products'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'inventory/dashboard'] });
@@ -436,9 +421,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
   });
 
   const createDefaultCategoriesMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/salons/${salonId}/product-categories/default`, {
-      method: 'POST',
-    }),
+    mutationFn: () => apiRequest('POST', `/api/salons/${salonId}/product-categories/default`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'product-categories'] });
       toast({ title: "Success", description: "Default categories created successfully" });
@@ -472,7 +455,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
     defaultValues: {
       name: "",
       description: "",
-      parentCategoryId: "",
+      parentCategoryId: "none",
       sortOrder: 0,
     }
   });
@@ -797,8 +780,8 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                   <AlertDescription>
                     <strong>{metrics.lowStockCount} products</strong> are running low on stock and need attention.
                     <Button 
-                      variant="link" 
-                      className="p-0 h-auto font-normal"
+                      variant="ghost" 
+                      className="p-0 h-auto font-normal underline text-primary"
                       onClick={() => {
                         setActiveTab("products");
                         setShowLowStockOnly(true);
@@ -816,8 +799,8 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                   <AlertDescription>
                     <strong>{metrics.reorderRequiredCount} products</strong> have reached their reorder point.
                     <Button 
-                      variant="link" 
-                      className="p-0 h-auto font-normal"
+                      variant="ghost" 
+                      className="p-0 h-auto font-normal underline text-primary"
                       onClick={() => setActiveTab("orders")}
                     >
                       Create purchase orders
@@ -832,8 +815,8 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                   <AlertDescription>
                     <strong>{metrics.expiringProductsCount} products</strong> are expiring in the next 30 days.
                     <Button 
-                      variant="link" 
-                      className="p-0 h-auto font-normal"
+                      variant="ghost" 
+                      className="p-0 h-auto font-normal underline text-primary"
                       onClick={() => setActiveTab("products")}
                     >
                       Review expiring items
@@ -942,7 +925,10 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Parent Category</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select 
+                              onValueChange={field.onChange} 
+                              value={field.value || "none"}
+                            >
                               <FormControl>
                                 <SelectTrigger data-testid="select-parent-category">
                                   <SelectValue placeholder="Select parent category (optional)" />
@@ -950,13 +936,18 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                               </FormControl>
                               <SelectContent>
                                 <SelectItem value="none">None</SelectItem>
-                                {categories?.map((category) => (
+                                {safeCategories.map((category) => (
                                   <SelectItem key={category.id} value={category.id}>
                                     {category.name}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
+                            <FormDescription className="text-xs">
+                              {safeCategories.length === 0 
+                                ? "Create your first category without a parent, then add subcategories later." 
+                                : "Optionally select a parent to create a subcategory."}
+                            </FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -983,7 +974,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                 </DialogContent>
               </Dialog>
 
-              {(!categories || categories.length === 0) && (
+              {(safeCategories.length === 0) && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1066,7 +1057,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  {categories?.map((category) => (
+                                  {safeCategories.map((category) => (
                                     <SelectItem key={category.id} value={category.id}>
                                       {category.name}
                                     </SelectItem>
@@ -1090,7 +1081,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  {vendors?.map((vendor) => (
+                                  {safeVendors.map((vendor) => (
                                     <SelectItem key={vendor.id} value={vendor.id}>
                                       {vendor.name}
                                     </SelectItem>
@@ -1514,7 +1505,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                   Add Vendor
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-2xl">
+              <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{editingItem ? 'Edit' : 'Add'} Vendor</DialogTitle>
                 </DialogHeader>
@@ -1720,8 +1711,8 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
               <div className="col-span-full text-center py-8">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
               </div>
-            ) : vendors && vendors.length > 0 ? (
-              vendors.map((vendor) => (
+            ) : safeVendors.length > 0 ? (
+              safeVendors.map((vendor) => (
                 <Card key={vendor.id} data-testid={`card-vendor-${vendor.id}`}>
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between">

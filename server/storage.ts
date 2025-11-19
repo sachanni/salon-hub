@@ -6575,21 +6575,727 @@ export class DatabaseStorage implements IStorage {
 
   // Add hundreds of minimal stubs to satisfy interface - basic empty implementations
 
-  // Inventory management minimal stubs
-  async getVendor(id: string): Promise<Vendor | undefined> { return undefined; }
-  async getVendorsBySalonId(salonId: string): Promise<Vendor[]> { return []; }
-  async getProductCategory(id: string): Promise<ProductCategory | undefined> { return undefined; }
-  async getProductCategoriesBySalonId(salonId: string): Promise<ProductCategory[]> { return []; }
-  async getProduct(id: string): Promise<Product | undefined> { return undefined; }
-  async getProductsBySalonId(salonId: string, filters?: any): Promise<Product[]> { return []; }
-  async getProductsByCategory(salonId: string, categoryId: string): Promise<Product[]> { return []; }
-  async getLowStockProducts(salonId: string): Promise<Product[]> { return []; }
-  async getStockMovement(id: string): Promise<StockMovement | undefined> { return undefined; }
-  async getStockMovementsByProduct(productId: string): Promise<StockMovement[]> { return []; }
-  async getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined> { return undefined; }
-  async getPurchaseOrdersBySalonId(salonId: string, filters?: any): Promise<PurchaseOrder[]> { return []; }
-  async approvePurchaseOrder(id: string, approvedBy: string): Promise<void> { }
-  async receivePurchaseOrder(id: string, receivedBy: string, receivedItems: any[]): Promise<void> { }
+  // Inventory management implementations
+  
+  // =================================
+  // PRODUCT CATEGORY OPERATIONS
+  // =================================
+  
+  async getProductCategory(id: string, salonId?: string): Promise<ProductCategory | undefined> {
+    if (salonId) {
+      // Salon-scoped lookup for multi-tenant security
+      const [category] = await db.select().from(productCategories)
+        .where(and(
+          eq(productCategories.id, id),
+          eq(productCategories.salonId, salonId)
+        ));
+      return category || undefined;
+    } else {
+      // Unscoped lookup (for system/admin operations only)
+      const [category] = await db.select().from(productCategories).where(eq(productCategories.id, id));
+      return category || undefined;
+    }
+  }
+
+  async getProductCategoriesBySalonId(salonId: string): Promise<ProductCategory[]> {
+    return await db.select().from(productCategories)
+      .where(and(
+        eq(productCategories.salonId, salonId),
+        eq(productCategories.isActive, 1)
+      ))
+      .orderBy(productCategories.sortOrder, productCategories.name);
+  }
+
+  async createProductCategory(category: InsertProductCategory): Promise<ProductCategory> {
+    const [newCategory] = await db.insert(productCategories).values(category).returning();
+    return newCategory;
+  }
+
+  async updateProductCategory(id: string, salonId: string, updates: Partial<InsertProductCategory>): Promise<void> {
+    // Remove immutable fields to prevent ownership tampering
+    const { salonId: _, ...safeUpdates } = updates;
+    
+    // Validate parentCategoryId belongs to same salon if provided
+    if (safeUpdates.parentCategoryId) {
+      const parentCategory = await db.select().from(productCategories)
+        .where(and(
+          eq(productCategories.id, safeUpdates.parentCategoryId),
+          eq(productCategories.salonId, salonId)
+        ))
+        .limit(1);
+      
+      if (parentCategory.length === 0) {
+        throw new Error('Parent category not found or does not belong to this salon');
+      }
+    }
+
+    await db.update(productCategories)
+      .set(safeUpdates)
+      .where(and(
+        eq(productCategories.id, id),
+        eq(productCategories.salonId, salonId)
+      ));
+  }
+
+  async deleteProductCategory(id: string, salonId: string): Promise<void> {
+    // Check if any products are using this category (with salon scope for security)
+    const productsWithCategory = await db.select().from(products)
+      .where(and(
+        eq(products.categoryId, id),
+        eq(products.salonId, salonId),
+        eq(products.isActive, 1)
+      ))
+      .limit(1);
+    
+    if (productsWithCategory.length > 0) {
+      throw new Error('Cannot delete category that has active products. Please reassign or delete products first.');
+    }
+
+    // Soft delete by setting is_active to 0 (with salon scope for security)
+    await db.update(productCategories)
+      .set({ isActive: 0 })
+      .where(and(
+        eq(productCategories.id, id),
+        eq(productCategories.salonId, salonId)
+      ));
+  }
+
+  async createDefaultProductCategories(salonId: string): Promise<ProductCategory[]> {
+    const defaultCategories: InsertProductCategory[] = [
+      { salonId, name: 'Hair Care Products', description: 'Shampoos, conditioners, styling products', sortOrder: 1, isActive: 1 },
+      { salonId, name: 'Skin Care Products', description: 'Cleansers, moisturizers, serums', sortOrder: 2, isActive: 1 },
+      { salonId, name: 'Nail Care Products', description: 'Polishes, treatments, tools', sortOrder: 3, isActive: 1 },
+      { salonId, name: 'Hair Color & Treatments', description: 'Hair dyes, bleaches, treatments', sortOrder: 4, isActive: 1 },
+      { salonId, name: 'Styling Tools', description: 'Dryers, straighteners, curling irons', sortOrder: 5, isActive: 1 },
+      { salonId, name: 'Professional Tools', description: 'Scissors, razors, combs', sortOrder: 6, isActive: 1 },
+      { salonId, name: 'Salon Supplies', description: 'Towels, capes, foils, disposables', sortOrder: 7, isActive: 1 },
+      { salonId, name: 'Spa & Massage Products', description: 'Oils, lotions, aromatherapy', sortOrder: 8, isActive: 1 },
+    ];
+
+    const createdCategories = await db.insert(productCategories).values(defaultCategories).returning();
+    return createdCategories;
+  }
+
+  // =================================
+  // VENDOR OPERATIONS
+  // =================================
+  
+  async getVendor(id: string, salonId?: string): Promise<Vendor | undefined> {
+    if (salonId) {
+      // Salon-scoped lookup for multi-tenant security
+      const [vendor] = await db.select().from(vendors)
+        .where(and(
+          eq(vendors.id, id),
+          eq(vendors.salonId, salonId)
+        ));
+      return vendor || undefined;
+    } else {
+      // Unscoped lookup (for system/admin operations only)
+      const [vendor] = await db.select().from(vendors).where(eq(vendors.id, id));
+      return vendor || undefined;
+    }
+  }
+
+  async getVendorsBySalonId(salonId: string): Promise<Vendor[]> {
+    return await db.select().from(vendors)
+      .where(and(
+        eq(vendors.salonId, salonId),
+        eq(vendors.status, 'active')
+      ))
+      .orderBy(vendors.name);
+  }
+
+  async createVendor(vendor: InsertVendor): Promise<Vendor> {
+    const [newVendor] = await db.insert(vendors).values(vendor).returning();
+    return newVendor;
+  }
+
+  async updateVendor(id: string, salonId: string, updates: Partial<InsertVendor>): Promise<void> {
+    // Remove immutable fields to prevent ownership tampering
+    const { salonId: _, ...safeUpdates } = updates;
+
+    await db.update(vendors)
+      .set({
+        ...safeUpdates,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(vendors.id, id),
+        eq(vendors.salonId, salonId)
+      ));
+  }
+
+  async deleteVendor(id: string, salonId: string): Promise<void> {
+    // Check if any products are linked to this vendor (with salon scope for security)
+    const productsWithVendor = await db.select().from(products)
+      .where(and(
+        eq(products.vendorId, id),
+        eq(products.salonId, salonId),
+        eq(products.isActive, 1)
+      ))
+      .limit(1);
+    
+    if (productsWithVendor.length > 0) {
+      throw new Error('Cannot delete vendor that has active products. Please reassign or delete products first.');
+    }
+
+    // Check if any pending/draft purchase orders exist with this vendor
+    const pendingPOs = await db.select().from(purchaseOrders)
+      .where(and(
+        eq(purchaseOrders.vendorId, id),
+        eq(purchaseOrders.salonId, salonId),
+        or(
+          eq(purchaseOrders.status, 'draft'),
+          eq(purchaseOrders.status, 'approved')
+        )
+      ))
+      .limit(1);
+    
+    if (pendingPOs.length > 0) {
+      throw new Error('Cannot delete vendor with pending purchase orders. Please complete or cancel them first.');
+    }
+
+    // Soft delete by setting status to inactive (with salon scope for security)
+    await db.update(vendors)
+      .set({ 
+        status: 'inactive',
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(vendors.id, id),
+        eq(vendors.salonId, salonId)
+      ));
+  }
+
+  // =================================
+  // PRODUCT OPERATIONS
+  // =================================
+  
+  async getProduct(id: string, salonId?: string): Promise<Product | undefined> {
+    if (salonId) {
+      // Salon-scoped lookup for multi-tenant security
+      const [product] = await db.select().from(products)
+        .where(and(
+          eq(products.id, id),
+          eq(products.salonId, salonId)
+        ));
+      return product || undefined;
+    } else {
+      // Unscoped lookup (for system/admin operations only)
+      const [product] = await db.select().from(products).where(eq(products.id, id));
+      return product || undefined;
+    }
+  }
+
+  async getProductsBySalonId(salonId: string, filters?: any): Promise<Product[]> {
+    // Build filter conditions
+    const conditions: any[] = [eq(products.salonId, salonId)];
+
+    if (filters) {
+      if (filters.categoryId) {
+        conditions.push(eq(products.categoryId, filters.categoryId));
+      }
+      if (filters.vendorId) {
+        conditions.push(eq(products.vendorId, filters.vendorId));
+      }
+      if (filters.isActive !== undefined) {
+        conditions.push(eq(products.isActive, filters.isActive ? 1 : 0));
+      } else {
+        // Default to active products only
+        conditions.push(eq(products.isActive, 1));
+      }
+      if (filters.lowStock) {
+        conditions.push(sql`${products.currentStock} <= ${products.minimumStock}`);
+      }
+
+      // Apply search filter as additional AND condition
+      if (filters.search) {
+        const searchTerm = `%${filters.search}%`;
+        conditions.push(
+          or(
+            sql`${products.name} ILIKE ${searchTerm}`,
+            sql`${products.sku} ILIKE ${searchTerm}`,
+            sql`${products.brand} ILIKE ${searchTerm}`,
+            sql`${products.barcode} ILIKE ${searchTerm}`
+          )
+        );
+      }
+    } else {
+      // Default to active products only
+      conditions.push(eq(products.isActive, 1));
+    }
+
+    // Single combined where clause with all conditions
+    return await db.select().from(products)
+      .where(and(...conditions))
+      .orderBy(products.name);
+  }
+
+  async getProductsByCategory(salonId: string, categoryId: string): Promise<Product[]> {
+    return await db.select().from(products)
+      .where(and(
+        eq(products.salonId, salonId),
+        eq(products.categoryId, categoryId),
+        eq(products.isActive, 1)
+      ))
+      .orderBy(products.name);
+  }
+
+  async getLowStockProducts(salonId: string): Promise<Product[]> {
+    return await db.select().from(products)
+      .where(and(
+        eq(products.salonId, salonId),
+        eq(products.isActive, 1),
+        eq(products.lowStockAlert, 1),
+        sql`${products.currentStock} <= ${products.minimumStock}`
+      ))
+      .orderBy(products.name);
+  }
+
+  async getProductBySKU(sku: string, salonId: string): Promise<Product | undefined> {
+    const [product] = await db.select().from(products)
+      .where(and(
+        eq(products.sku, sku),
+        eq(products.salonId, salonId)
+      ))
+      .limit(1);
+    return product || undefined;
+  }
+
+  async createProduct(product: InsertProduct): Promise<Product> {
+    // Validate SKU uniqueness per salon
+    const existingProduct = await this.getProductBySKU(product.sku, product.salonId);
+    if (existingProduct) {
+      throw new Error(`Product with SKU '${product.sku}' already exists in this salon`);
+    }
+
+    const [newProduct] = await db.insert(products).values(product).returning();
+    return newProduct;
+  }
+
+  async updateProduct(id: string, salonId: string, updates: Partial<InsertProduct>): Promise<void> {
+    // Remove immutable fields to prevent ownership tampering and stock manipulation
+    const { salonId: _, currentStock, ...safeUpdates } = updates;
+
+    // If updating SKU, validate uniqueness
+    if (safeUpdates.sku) {
+      const existingProduct = await this.getProductBySKU(safeUpdates.sku, salonId);
+      if (existingProduct && existingProduct.id !== id) {
+        throw new Error(`Product with SKU '${safeUpdates.sku}' already exists in this salon`);
+      }
+    }
+
+    // Prevent direct stock changes - must use stock movements
+    if (currentStock !== undefined) {
+      throw new Error('Cannot update stock directly. Use stock movements instead.');
+    }
+
+    await db.update(products)
+      .set(safeUpdates)
+      .where(and(
+        eq(products.id, id),
+        eq(products.salonId, salonId)
+      ));
+  }
+
+  async deleteProduct(id: string, salonId: string): Promise<void> {
+    // Check if any pending/draft purchase order items reference this product (with salon scope)
+    const pendingPOItems = await db.select().from(purchaseOrderItems)
+      .innerJoin(purchaseOrders, eq(purchaseOrderItems.purchaseOrderId, purchaseOrders.id))
+      .where(and(
+        eq(purchaseOrderItems.productId, id),
+        eq(purchaseOrders.salonId, salonId),
+        or(
+          eq(purchaseOrders.status, 'draft'),
+          eq(purchaseOrders.status, 'approved')
+        )
+      ))
+      .limit(1);
+    
+    if (pendingPOItems.length > 0) {
+      throw new Error('Cannot delete product with pending purchase orders. Please complete or cancel them first.');
+    }
+
+    // Soft delete by setting is_active to 0 (with salon scope for security)
+    await db.update(products)
+      .set({ isActive: 0 })
+      .where(and(
+        eq(products.id, id),
+        eq(products.salonId, salonId)
+      ));
+  }
+  async getStockMovement(id: string, salonId?: string): Promise<StockMovement | undefined> {
+    if (salonId) {
+      // Salon-scoped lookup for multi-tenant security
+      const [movement] = await db.select().from(stockMovements)
+        .where(and(
+          eq(stockMovements.id, id),
+          eq(stockMovements.salonId, salonId)
+        ));
+      return movement || undefined;
+    } else {
+      // Unscoped lookup (for system/admin operations only)
+      const [movement] = await db.select().from(stockMovements).where(eq(stockMovements.id, id));
+      return movement || undefined;
+    }
+  }
+
+  async getStockMovementsByProduct(productId: string, salonId: string): Promise<StockMovement[]> {
+    return await db.select().from(stockMovements)
+      .where(and(
+        eq(stockMovements.productId, productId),
+        eq(stockMovements.salonId, salonId)
+      ))
+      .orderBy(desc(stockMovements.createdAt));
+  }
+
+  async getStockMovementsBySalonId(salonId: string, filters?: any): Promise<StockMovement[]> {
+    const conditions: any[] = [eq(stockMovements.salonId, salonId)];
+
+    if (filters) {
+      if (filters.productId) {
+        conditions.push(eq(stockMovements.productId, filters.productId));
+      }
+      if (filters.type) {
+        conditions.push(eq(stockMovements.type, filters.type));
+      }
+      if (filters.referenceType) {
+        conditions.push(eq(stockMovements.referenceType, filters.referenceType));
+      }
+      if (filters.staffId) {
+        conditions.push(eq(stockMovements.staffId, filters.staffId));
+      }
+      if (filters.startDate) {
+        conditions.push(sql`${stockMovements.createdAt} >= ${filters.startDate}`);
+      }
+      if (filters.endDate) {
+        conditions.push(sql`${stockMovements.createdAt} <= ${filters.endDate}`);
+      }
+    }
+
+    return await db.select().from(stockMovements)
+      .where(and(...conditions))
+      .orderBy(desc(stockMovements.createdAt))
+      .limit(filters?.limit || 100);
+  }
+
+  async createStockMovement(movement: InsertStockMovement, options?: { allowNegativeStock?: boolean }): Promise<StockMovement> {
+    const quantity = parseFloat(movement.quantity.toString());
+
+    // Determine if this is an increase or decrease
+    const isIncrease = ['purchase', 'return', 'adjustment-in'].includes(movement.type);
+    const isDecrease = ['usage', 'waste', 'adjustment-out', 'transfer'].includes(movement.type);
+    const isAdjustment = movement.type === 'adjustment';
+
+    if (!isIncrease && !isDecrease && !isAdjustment) {
+      throw new Error(`Invalid stock movement type: ${movement.type}`);
+    }
+
+    // Use transaction with row locking to prevent race conditions
+    return await db.transaction(async (tx) => {
+      // Lock the product row for this transaction to prevent concurrent updates
+      const [product] = await tx
+        .select()
+        .from(products)
+        .where(and(
+          eq(products.id, movement.productId),
+          eq(products.salonId, movement.salonId)
+        ))
+        .for('update'); // SELECT FOR UPDATE locks the row
+
+      if (!product) {
+        throw new Error('Product not found or does not belong to this salon');
+      }
+
+      // Calculate new stock level from locked row
+      const currentStock = parseFloat(product.currentStock);
+      const previousStock = currentStock;
+      let newStock: number;
+
+      if (isIncrease) {
+        newStock = currentStock + quantity;
+      } else if (isDecrease) {
+        newStock = currentStock - quantity;
+      } else {
+        // For generic adjustment, use quantity as-is (can be positive or negative)
+        newStock = currentStock + quantity;
+      }
+
+      // Prevent negative stock unless explicitly allowed
+      if (newStock < 0 && !options?.allowNegativeStock) {
+        throw new Error(`Insufficient stock. Current: ${currentStock}, Requested: ${Math.abs(quantity)}. Available: ${currentStock}`);
+      }
+
+      // Create stock movement record with audit trail
+      const [newMovement] = await tx.insert(stockMovements).values({
+        ...movement,
+        previousStock: previousStock.toString(),
+        newStock: newStock.toString(),
+      }).returning();
+
+      // Update product current stock atomically
+      await tx.update(products)
+        .set({ currentStock: newStock.toString() })
+        .where(and(
+          eq(products.id, movement.productId),
+          eq(products.salonId, movement.salonId)
+        ));
+
+      return newMovement;
+    });
+  }
+  async getPurchaseOrder(id: string, salonId?: string): Promise<PurchaseOrder | undefined> {
+    if (salonId) {
+      // Salon-scoped lookup for multi-tenant security
+      const [po] = await db.select().from(purchaseOrders)
+        .where(and(
+          eq(purchaseOrders.id, id),
+          eq(purchaseOrders.salonId, salonId)
+        ));
+      return po || undefined;
+    } else {
+      // Unscoped lookup (for system/admin operations only)
+      const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+      return po || undefined;
+    }
+  }
+
+  async getPurchaseOrdersBySalonId(salonId: string, filters?: any): Promise<PurchaseOrder[]> {
+    const conditions: any[] = [eq(purchaseOrders.salonId, salonId)];
+
+    if (filters) {
+      if (filters.status) {
+        conditions.push(eq(purchaseOrders.status, filters.status));
+      }
+      if (filters.vendorId) {
+        conditions.push(eq(purchaseOrders.vendorId, filters.vendorId));
+      }
+      if (filters.startDate) {
+        conditions.push(sql`${purchaseOrders.orderDate} >= ${filters.startDate}`);
+      }
+      if (filters.endDate) {
+        conditions.push(sql`${purchaseOrders.orderDate} <= ${filters.endDate}`);
+      }
+    }
+
+    return await db.select().from(purchaseOrders)
+      .where(and(...conditions))
+      .orderBy(desc(purchaseOrders.orderDate))
+      .limit(filters?.limit || 100);
+  }
+
+  async getPurchaseOrderItems(purchaseOrderId: string, salonId: string): Promise<PurchaseOrderItem[]> {
+    // Verify PO belongs to salon before returning items
+    const po = await this.getPurchaseOrder(purchaseOrderId, salonId);
+    if (!po) {
+      throw new Error('Purchase order not found or does not belong to this salon');
+    }
+
+    return await db.select().from(purchaseOrderItems)
+      .where(eq(purchaseOrderItems.purchaseOrderId, purchaseOrderId))
+      .orderBy(purchaseOrderItems.createdAt);
+  }
+
+  async createPurchaseOrder(po: InsertPurchaseOrder, items: InsertPurchaseOrderItem[]): Promise<{ po: PurchaseOrder, items: PurchaseOrderItem[] }> {
+    if (!items || items.length === 0) {
+      throw new Error('Purchase order must have at least one item');
+    }
+
+    // Validate vendor exists and belongs to the salon
+    const vendor = await this.getVendor(po.vendorId, po.salonId);
+    if (!vendor) {
+      throw new Error('Vendor not found or does not belong to this salon');
+    }
+
+    // Validate all products exist and belong to the same salon
+    for (const item of items) {
+      const product = await this.getProduct(item.productId, po.salonId);
+      if (!product) {
+        throw new Error(`Product ${item.productId} not found or does not belong to this salon`);
+      }
+    }
+
+    // Calculate totals from items
+    const subtotal = items.reduce((sum, item) => sum + parseInt(item.totalCostInPaisa.toString()), 0);
+    const tax = po.taxInPaisa || 0;
+    const shipping = po.shippingInPaisa || 0;
+    const discount = po.discountInPaisa || 0;
+    const total = subtotal + tax + shipping - discount;
+
+    // Use transaction to create PO and items atomically
+    return await db.transaction(async (tx) => {
+      // Create purchase order
+      const [newPO] = await tx.insert(purchaseOrders).values({
+        ...po,
+        subtotalInPaisa: subtotal,
+        totalInPaisa: total,
+        status: 'draft',
+      }).returning();
+
+      // Create purchase order items
+      const itemsWithPOId = items.map(item => ({
+        ...item,
+        purchaseOrderId: newPO.id,
+      }));
+
+      const newItems = await tx.insert(purchaseOrderItems)
+        .values(itemsWithPOId)
+        .returning();
+
+      return { po: newPO, items: newItems };
+    });
+  }
+
+  async updatePurchaseOrder(id: string, salonId: string, updates: Partial<InsertPurchaseOrder>): Promise<void> {
+    // Only allow updating draft POs
+    const po = await this.getPurchaseOrder(id, salonId);
+    if (!po) {
+      throw new Error('Purchase order not found or does not belong to this salon');
+    }
+    if (po.status !== 'draft') {
+      throw new Error('Only draft purchase orders can be updated');
+    }
+
+    // Remove immutable fields
+    const { salonId: _, createdBy, approvedBy, receivedBy, ...safeUpdates } = updates;
+
+    await db.update(purchaseOrders)
+      .set({ ...safeUpdates, updatedAt: new Date() })
+      .where(and(
+        eq(purchaseOrders.id, id),
+        eq(purchaseOrders.salonId, salonId)
+      ));
+  }
+
+  async approvePurchaseOrder(id: string, salonId: string, approvedBy: string): Promise<void> {
+    // Only allow approving draft POs
+    const po = await this.getPurchaseOrder(id, salonId);
+    if (!po) {
+      throw new Error('Purchase order not found or does not belong to this salon');
+    }
+    if (po.status !== 'draft') {
+      throw new Error('Only draft purchase orders can be approved');
+    }
+
+    await db.update(purchaseOrders)
+      .set({ 
+        status: 'approved',
+        approvedBy,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(purchaseOrders.id, id),
+        eq(purchaseOrders.salonId, salonId)
+      ));
+  }
+
+  async receivePurchaseOrder(id: string, salonId: string, receivedBy: string, receivedItems: { itemId: string, receivedQuantity: string }[]): Promise<void> {
+    // Validate PO exists and is approved
+    const po = await this.getPurchaseOrder(id, salonId);
+    if (!po) {
+      throw new Error('Purchase order not found or does not belong to this salon');
+    }
+    if (po.status !== 'approved') {
+      throw new Error('Only approved purchase orders can be received');
+    }
+
+    // Get PO items
+    const items = await this.getPurchaseOrderItems(id, salonId);
+
+    // Use transaction to update PO, items, and create stock movements
+    await db.transaction(async (tx) => {
+      // Update purchase order status
+      await tx.update(purchaseOrders)
+        .set({
+          status: 'received',
+          receivedBy,
+          actualDeliveryDate: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(purchaseOrders.id, id),
+          eq(purchaseOrders.salonId, salonId)
+        ));
+
+      // Process each received item
+      for (const receivedItem of receivedItems) {
+        const item = items.find(i => i.id === receivedItem.itemId);
+        if (!item) {
+          throw new Error(`Purchase order item ${receivedItem.itemId} not found`);
+        }
+
+        // Update item received quantity
+        await tx.update(purchaseOrderItems)
+          .set({ receivedQuantity: receivedItem.receivedQuantity })
+          .where(eq(purchaseOrderItems.id, receivedItem.itemId));
+
+        // Create stock movement for received quantity
+        if (parseFloat(receivedItem.receivedQuantity) > 0) {
+          // Lock product row for update
+          const [product] = await tx
+            .select()
+            .from(products)
+            .where(and(
+              eq(products.id, item.productId),
+              eq(products.salonId, salonId)
+            ))
+            .for('update');
+
+          if (!product) {
+            throw new Error(`Product ${item.productId} not found`);
+          }
+
+          const currentStock = parseFloat(product.currentStock);
+          const receivedQty = parseFloat(receivedItem.receivedQuantity);
+          const newStock = currentStock + receivedQty;
+
+          // Create stock movement
+          await tx.insert(stockMovements).values({
+            salonId,
+            productId: item.productId,
+            type: 'purchase',
+            quantity: receivedItem.receivedQuantity,
+            unit: item.unit,
+            unitCostInPaisa: item.unitCostInPaisa,
+            totalCostInPaisa: item.totalCostInPaisa,
+            previousStock: currentStock.toString(),
+            newStock: newStock.toString(),
+            reason: 'Purchase order received',
+            reference: po.orderNumber,
+            referenceId: po.id,
+            referenceType: 'purchase_order',
+            staffId: receivedBy,
+          });
+
+          // Update product stock
+          await tx.update(products)
+            .set({ currentStock: newStock.toString() })
+            .where(and(
+              eq(products.id, item.productId),
+              eq(products.salonId, salonId)
+            ));
+        }
+      }
+    });
+  }
+
+  async deletePurchaseOrder(id: string, salonId: string): Promise<void> {
+    // Only allow deleting draft POs
+    const po = await this.getPurchaseOrder(id, salonId);
+    if (!po) {
+      throw new Error('Purchase order not found or does not belong to this salon');
+    }
+    if (po.status !== 'draft') {
+      throw new Error('Only draft purchase orders can be deleted');
+    }
+
+    // Hard delete since it's draft (cascade will delete items)
+    await db.delete(purchaseOrders)
+      .where(and(
+        eq(purchaseOrders.id, id),
+        eq(purchaseOrders.salonId, salonId)
+      ));
+  }
   async getPurchaseOrderItem(id: string): Promise<PurchaseOrderItem | undefined> { return undefined; }
   async getPurchaseOrderItemsByOrderId(orderId: string): Promise<PurchaseOrderItem[]> { return []; }
   async getProductUsage(id: string): Promise<ProductUsage | undefined> { return undefined; }

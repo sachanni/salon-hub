@@ -1575,6 +1575,318 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =================================
+  // INVENTORY MANAGEMENT ROUTES
+  // =================================
+
+  // Product Categories
+  app.get('/api/salons/:salonId/product-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const categories = await storage.getProductCategoriesBySalonId(salonId);
+      res.json(categories);
+    } catch (error) {
+      console.error('Error fetching product categories:', error);
+      res.status(500).json({ error: 'Failed to fetch product categories' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/product-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const category = await storage.createProductCategory({ ...req.body, salonId });
+      res.status(201).json(category);
+    } catch (error: any) {
+      console.error('Error creating product category:', error);
+      res.status(400).json({ error: error.message || 'Failed to create product category' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/product-categories/:categoryId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, categoryId } = req.params;
+      await storage.updateProductCategory(categoryId, salonId, req.body);
+      res.json({ success: true, message: 'Category updated successfully' });
+    } catch (error: any) {
+      console.error('Error updating product category:', error);
+      res.status(400).json({ error: error.message || 'Failed to update product category' });
+    }
+  });
+
+  app.delete('/api/salons/:salonId/product-categories/:categoryId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, categoryId } = req.params;
+      await storage.deleteProductCategory(categoryId, salonId);
+      res.json({ success: true, message: 'Category deleted successfully' });
+    } catch (error: any) {
+      console.error('Error deleting product category:', error);
+      res.status(400).json({ error: error.message || 'Failed to delete product category' });
+    }
+  });
+
+  // Initialize default categories
+  app.post('/api/salons/:salonId/product-categories/init-defaults', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const categories = await storage.createDefaultProductCategories(salonId);
+      res.status(201).json({ success: true, categories, message: 'Default categories created successfully' });
+    } catch (error: any) {
+      console.error('Error creating default categories:', error);
+      res.status(400).json({ error: error.message || 'Failed to create default categories' });
+    }
+  });
+
+  // Vendors
+  app.get('/api/salons/:salonId/vendors', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const vendors = await storage.getVendorsBySalonId(salonId);
+      res.json(vendors);
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+      res.status(500).json({ error: 'Failed to fetch vendors' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/vendors', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const vendor = await storage.createVendor({ ...req.body, salonId });
+      res.status(201).json(vendor);
+    } catch (error: any) {
+      console.error('Error creating vendor:', error);
+      res.status(400).json({ error: error.message || 'Failed to create vendor' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/vendors/:vendorId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, vendorId } = req.params;
+      await storage.updateVendor(vendorId, salonId, req.body);
+      res.json({ success: true, message: 'Vendor updated successfully' });
+    } catch (error: any) {
+      console.error('Error updating vendor:', error);
+      res.status(400).json({ error: error.message || 'Failed to update vendor' });
+    }
+  });
+
+  app.delete('/api/salons/:salonId/vendors/:vendorId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, vendorId } = req.params;
+      await storage.deleteVendor(vendorId, salonId);
+      res.json({ success: true, message: 'Vendor deleted successfully' });
+    } catch (error: any) {
+      console.error('Error deleting vendor:', error);
+      res.status(400).json({ error: error.message || 'Failed to delete vendor' });
+    }
+  });
+
+  // Products
+  app.get('/api/salons/:salonId/products', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = {
+        categoryId: req.query.categoryId,
+        vendorId: req.query.vendorId,
+        lowStock: req.query.lowStock === 'true',
+        search: req.query.search,
+        isActive: req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined,
+      };
+      const products = await storage.getProductsBySalonId(salonId, filters);
+      res.json(products);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      res.status(500).json({ error: 'Failed to fetch products' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/products/low-stock', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const products = await storage.getLowStockProducts(salonId);
+      res.json(products);
+    } catch (error) {
+      console.error('Error fetching low stock products:', error);
+      res.status(500).json({ error: 'Failed to fetch low stock products' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/products', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const product = await storage.createProduct({ ...req.body, salonId });
+      res.status(201).json(product);
+    } catch (error: any) {
+      console.error('Error creating product:', error);
+      res.status(400).json({ error: error.message || 'Failed to create product' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/products/:productId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, productId } = req.params;
+      await storage.updateProduct(productId, salonId, req.body);
+      res.json({ success: true, message: 'Product updated successfully' });
+    } catch (error: any) {
+      console.error('Error updating product:', error);
+      res.status(400).json({ error: error.message || 'Failed to update product' });
+    }
+  });
+
+  app.delete('/api/salons/:salonId/products/:productId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, productId } = req.params;
+      await storage.deleteProduct(productId, salonId);
+      res.json({ success: true, message: 'Product deleted successfully' });
+    } catch (error: any) {
+      console.error('Error deleting product:', error);
+      res.status(400).json({ error: error.message || 'Failed to delete product' });
+    }
+  });
+
+  // Stock Movements
+  app.get('/api/salons/:salonId/stock-movements', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = {
+        productId: req.query.productId,
+        type: req.query.type,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate,
+        limit: req.query.limit ? parseInt(req.query.limit) : undefined,
+      };
+      const movements = await storage.getStockMovementsBySalonId(salonId, filters);
+      res.json(movements);
+    } catch (error) {
+      console.error('Error fetching stock movements:', error);
+      res.status(500).json({ error: 'Failed to fetch stock movements' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/products/:productId/stock-movements', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, productId } = req.params;
+      const movements = await storage.getStockMovementsByProduct(productId, salonId);
+      res.json(movements);
+    } catch (error) {
+      console.error('Error fetching product stock movements:', error);
+      res.status(500).json({ error: 'Failed to fetch product stock movements' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/stock-movements', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { allowNegativeStock, ...movementData } = req.body;
+      const movement = await storage.createStockMovement(
+        { ...movementData, salonId, staffId: req.user.id },
+        { allowNegativeStock }
+      );
+      res.status(201).json(movement);
+    } catch (error: any) {
+      console.error('Error creating stock movement:', error);
+      res.status(400).json({ error: error.message || 'Failed to create stock movement' });
+    }
+  });
+
+  // Purchase Orders
+  app.get('/api/salons/:salonId/purchase-orders', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const filters = {
+        status: req.query.status,
+        vendorId: req.query.vendorId,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate,
+        limit: req.query.limit ? parseInt(req.query.limit) : undefined,
+      };
+      const orders = await storage.getPurchaseOrdersBySalonId(salonId, filters);
+      res.json(orders);
+    } catch (error) {
+      console.error('Error fetching purchase orders:', error);
+      res.status(500).json({ error: 'Failed to fetch purchase orders' });
+    }
+  });
+
+  app.get('/api/salons/:salonId/purchase-orders/:orderId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      const [order, items] = await Promise.all([
+        storage.getPurchaseOrder(orderId, salonId),
+        storage.getPurchaseOrderItems(orderId, salonId),
+      ]);
+      
+      if (!order) {
+        return res.status(404).json({ error: 'Purchase order not found' });
+      }
+      
+      res.json({ ...order, items });
+    } catch (error) {
+      console.error('Error fetching purchase order:', error);
+      res.status(500).json({ error: 'Failed to fetch purchase order' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/purchase-orders', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId } = req.params;
+      const { items, ...orderData } = req.body;
+      
+      if (!items || items.length === 0) {
+        return res.status(400).json({ error: 'Purchase order must have at least one item' });
+      }
+      
+      const result = await storage.createPurchaseOrder(
+        { ...orderData, salonId, createdBy: req.user.id },
+        items
+      );
+      
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error('Error creating purchase order:', error);
+      res.status(400).json({ error: error.message || 'Failed to create purchase order' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/purchase-orders/:orderId/approve', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      await storage.approvePurchaseOrder(orderId, salonId, req.user.id);
+      res.json({ success: true, message: 'Purchase order approved successfully' });
+    } catch (error: any) {
+      console.error('Error approving purchase order:', error);
+      res.status(400).json({ error: error.message || 'Failed to approve purchase order' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/purchase-orders/:orderId/receive', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      const { receivedItems } = req.body;
+      
+      if (!receivedItems || receivedItems.length === 0) {
+        return res.status(400).json({ error: 'Received items are required' });
+      }
+      
+      await storage.receivePurchaseOrder(orderId, salonId, req.user.id, receivedItems);
+      res.json({ success: true, message: 'Purchase order received successfully' });
+    } catch (error: any) {
+      console.error('Error receiving purchase order:', error);
+      res.status(400).json({ error: error.message || 'Failed to receive purchase order' });
+    }
+  });
+
+  app.delete('/api/salons/:salonId/purchase-orders/:orderId', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      await storage.deletePurchaseOrder(orderId, salonId);
+      res.json({ success: true, message: 'Purchase order deleted successfully' });
+    } catch (error: any) {
+      console.error('Error deleting purchase order:', error);
+      res.status(400).json({ error: error.message || 'Failed to delete purchase order' });
+    }
+  });
+
   // Email verification endpoint
   app.get('/verify-email', async (req, res) => {
     try {

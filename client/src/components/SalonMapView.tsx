@@ -968,7 +968,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
 
       <div className="flex flex-1 overflow-hidden min-w-0">
         {/* Sidebar - Responsive: Full width on mobile, sidebar on desktop */}
-        <div className="w-full md:w-[400px] md:min-w-[360px] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
+        <div className="w-full md:w-[550px] md:min-w-[480px] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
           {/* Enhanced Header */}
           <div className="p-4 md:p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
             <div className="flex items-center justify-between mb-3">

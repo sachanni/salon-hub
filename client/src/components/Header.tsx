@@ -1,9 +1,10 @@
-import { User, Menu, Moon, Sun, ChevronDown, Building2, Scissors, Wallet, Gift, LayoutDashboard } from "lucide-react";
+import { User, Menu, LogOut, Settings as SettingsIcon, LayoutDashboard, Wallet, Gift, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect } from "react";
-import { useToast } from "@/hooks/use-toast";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,169 +13,372 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useState } from "react";
 
 export default function Header() {
-  const [isDark, setIsDark] = useState(false);
-  const { toast } = useToast();
-  const { user, isAuthenticated, login, logout } = useAuth();
-  const [, setLocation] = useLocation();
-
-  useEffect(() => {
-    const theme = localStorage.getItem('theme');
-    if (theme === 'dark') {
-      setIsDark(true);
-      document.documentElement.classList.add('dark');
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = !isDark;
-    setIsDark(newTheme);
-    if (newTheme) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  };
-
-  const handleLogin = () => {
-    console.log('Login clicked');
-    login(); // Redirects to /api/login for Replit Auth
-  };
+  const { user, isAuthenticated, logout } = useAuth();
+  const [location, setLocation] = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleLogout = () => {
-    console.log('Logout clicked');
-    logout(); // Redirects to /api/logout for Replit Auth
+    logout();
   };
+
+  const getInitials = () => {
+    if (user?.firstName && user?.lastName) {
+      return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
+    }
+    if (user?.firstName) {
+      return user.firstName.substring(0, 2).toUpperCase();
+    }
+    if (user?.email) {
+      return user.email.substring(0, 2).toUpperCase();
+    }
+    return "U";
+  };
+
+  const isCustomer = user?.roles?.includes('customer');
+  const isBusiness = user?.roles?.includes('business') || user?.roles?.includes('salon_owner');
+
+  const closeMobileMenu = () => setMobileMenuOpen(false);
 
   return (
     <header className="bg-background border-b border-border sticky top-0 z-50">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div className="flex items-center">
-            <h1 className="text-2xl font-bold text-primary">SalonHub</h1>
-          </div>
+          <Link href="/">
+            <div className="flex items-center gap-2 cursor-pointer hover-elevate px-3 py-2 rounded-md transition-all">
+              <Sparkles className="h-6 w-6 text-primary" />
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-primary via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                SalonHub
+              </h1>
+            </div>
+          </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center space-x-8">
-            <Link href="/" className="text-foreground hover:text-primary transition-colors">
-              Home
+          <nav className="hidden md:flex items-center gap-1">
+            <Link href="/">
+              <Button 
+                variant="ghost" 
+                className="text-foreground"
+                data-testid="link-home"
+              >
+                Home
+              </Button>
             </Link>
-            {isAuthenticated && user?.roles?.includes('customer') && (
-              <Link href="/customer/dashboard" className="text-foreground hover:text-primary transition-colors flex items-center gap-1" data-testid="link-dashboard">
-                <LayoutDashboard className="h-4 w-4" />
-                Dashboard
-              </Link>
-            )}
-            <a href="#" className="text-foreground hover:text-primary transition-colors">Find Salons</a>
-            <Link href="/all-offers" className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm" data-testid="link-all-offers">
-              <Gift className="h-4 w-4" />
-              Offers
-            </Link>
-            {isAuthenticated && user?.roles?.includes('customer') && (
-              <Link href="/wallet" className="text-foreground hover:text-primary transition-colors flex items-center gap-1" data-testid="link-wallet">
-                <Wallet className="h-4 w-4" />
-                Wallet
-              </Link>
-            )}
-            <Link href="/join/business" className="text-foreground hover:text-primary transition-colors">
-              For Business
+            <Link href="/all-offers">
+              <Button 
+                variant="ghost"
+                className="bg-green-600/10 text-green-700 dark:text-green-400 hover:bg-green-600/20"
+                data-testid="link-all-offers"
+              >
+                <Gift className="h-4 w-4 mr-2" />
+                Offers
+              </Button>
             </Link>
           </nav>
 
           {/* Right side actions */}
-          <div className="flex items-center gap-4">
-            <Button
-              data-testid="button-theme-toggle"
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-            >
-              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
+          <div className="flex items-center gap-3">
+            {!isAuthenticated && (
+              <>
+                {/* Business CTA - Hidden on mobile, shown on desktop */}
+                <Link href="/join/business">
+                  <Button 
+                    variant="outline" 
+                    className="hidden md:inline-flex"
+                    data-testid="button-list-salon"
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    List Your Salon
+                  </Button>
+                </Link>
 
-            <div className="hidden md:flex items-center gap-2">
-              {isAuthenticated ? (
-                <>
-                  <Button 
-                    data-testid="button-profile"
-                    variant="ghost" 
-                    size="icon"
-                    onClick={() => console.log('Profile clicked')}
-                  >
-                    <User className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    data-testid="button-logout"
-                    variant="ghost"
-                    onClick={handleLogout}
-                  >
-                    Log out
-                  </Button>
-                </>
-              ) : (
-                <>
+                {/* Auth buttons - Hidden on mobile */}
+                <div className="hidden md:flex items-center gap-2">
+                  <Link href="/join">
+                    <Button variant="ghost" data-testid="button-signup">
+                      Sign up
+                    </Button>
+                  </Link>
+                  <Link href="/login">
+                    <Button data-testid="button-login">
+                      Log in
+                    </Button>
+                  </Link>
+                </div>
+              </>
+            )}
+
+            {isAuthenticated && (
+              <>
+                {/* Wallet button for customers - desktop only */}
+                {isCustomer && (
+                  <Link href="/wallet">
+                    <Button 
+                      variant="outline" 
+                      className="hidden md:inline-flex"
+                      data-testid="button-wallet"
+                    >
+                      <Wallet className="h-4 w-4 mr-2" />
+                      Wallet
+                    </Button>
+                  </Link>
+                )}
+
+                {/* User Menu - desktop only */}
+                <div className="hidden md:block">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" data-testid="button-join">
-                        Join <ChevronDown className="ml-1 h-4 w-4" />
+                      <Button 
+                        variant="ghost" 
+                        className="relative h-9 w-9 rounded-full"
+                        data-testid="button-user-menu"
+                      >
+                        <Avatar className="h-9 w-9">
+                          <AvatarImage src={user?.profileImageUrl} alt={user?.firstName || 'User'} />
+                          <AvatarFallback className="bg-gradient-to-br from-primary to-purple-600 text-white">
+                            {getInitials()}
+                          </AvatarFallback>
+                        </Avatar>
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuLabel>Create Account</DropdownMenuLabel>
+                    <DropdownMenuContent className="w-56" align="end" forceMount>
+                      <DropdownMenuLabel className="font-normal">
+                        <div className="flex flex-col space-y-1">
+                          <p className="text-sm font-medium leading-none">
+                            {user?.firstName && user?.lastName 
+                              ? `${user.firstName} ${user.lastName}` 
+                              : user?.firstName || user?.email
+                            }
+                          </p>
+                          <p className="text-xs leading-none text-muted-foreground">
+                            {user?.email}
+                          </p>
+                        </div>
+                      </DropdownMenuLabel>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setLocation('/join/customer')}>
-                        <User className="mr-2 h-4 w-4" />
-                        Customer Account
+                      
+                      {isCustomer && (
+                        <DropdownMenuItem onClick={() => setLocation('/customer/dashboard')} data-testid="menu-dashboard">
+                          <LayoutDashboard className="mr-2 h-4 w-4" />
+                          Dashboard
+                        </DropdownMenuItem>
+                      )}
+                      
+                      {isBusiness && (
+                        <DropdownMenuItem onClick={() => setLocation('/business/dashboard')} data-testid="menu-business-dashboard">
+                          <LayoutDashboard className="mr-2 h-4 w-4" />
+                          Business Dashboard
+                        </DropdownMenuItem>
+                      )}
+                      
+                      {isCustomer && (
+                        <DropdownMenuItem onClick={() => setLocation('/wallet')} data-testid="menu-wallet">
+                          <Wallet className="mr-2 h-4 w-4" />
+                          Wallet
+                        </DropdownMenuItem>
+                      )}
+                      
+                      <DropdownMenuItem onClick={() => {
+                        if (isCustomer) {
+                          setLocation('/customer/dashboard');
+                        } else if (isBusiness) {
+                          const orgId = user?.orgMemberships?.[0]?.orgId;
+                          if (orgId) {
+                            setLocation('/business/settings/' + orgId);
+                          } else {
+                            setLocation('/business/dashboard');
+                          }
+                        }
+                      }} data-testid="menu-settings">
+                        <SettingsIcon className="mr-2 h-4 w-4" />
+                        Settings
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setLocation('/join/business')}>
-                        <Building2 className="mr-2 h-4 w-4" />
-                        Business Account
+                      
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Log out
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button data-testid="button-login">
-                        Login <ChevronDown className="ml-1 h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuLabel>Sign In</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setLocation('/login/customer')}>
-                        <User className="mr-2 h-4 w-4" />
-                        Customer Login
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setLocation('/login/business')}>
-                        <Building2 className="mr-2 h-4 w-4" />
-                        Business Login
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={handleLogin}>
-                        <Scissors className="mr-2 h-4 w-4" />
-                        Login with Replit
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </>
-              )}
-            </div>
+                </div>
+              </>
+            )}
 
-            {/* Mobile menu button */}
-            <Button 
-              data-testid="button-mobile-menu"
-              variant="ghost" 
-              size="icon" 
-              className="md:hidden"
-              onClick={() => console.log('Mobile menu clicked')}
-            >
-              <Menu className="h-4 w-4" />
-            </Button>
+            {/* Mobile menu */}
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <SheetTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="md:hidden"
+                  data-testid="button-mobile-menu"
+                >
+                  {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[300px] sm:w-[400px]">
+                <SheetHeader>
+                  <SheetTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    <span className="bg-gradient-to-r from-primary via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                      SalonHub
+                    </span>
+                  </SheetTitle>
+                </SheetHeader>
+                
+                <div className="flex flex-col gap-4 mt-6">
+                  {isAuthenticated && (
+                    <>
+                      {/* User Profile in Mobile */}
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-muted">
+                        <Avatar className="h-12 w-12">
+                          <AvatarImage src={user?.profileImageUrl} alt={user?.firstName || 'User'} />
+                          <AvatarFallback className="bg-gradient-to-br from-primary to-purple-600 text-white">
+                            {getInitials()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex flex-col">
+                          <p className="font-medium text-sm">
+                            {user?.firstName && user?.lastName 
+                              ? `${user.firstName} ${user.lastName}` 
+                              : user?.firstName || user?.email
+                            }
+                          </p>
+                          <p className="text-xs text-muted-foreground">{user?.email}</p>
+                        </div>
+                      </div>
+                      <Separator />
+                    </>
+                  )}
+
+                  {/* Navigation Links */}
+                  <div className="flex flex-col gap-2">
+                    <Link href="/" onClick={closeMobileMenu}>
+                      <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-home">
+                        Home
+                      </Button>
+                    </Link>
+                    <Link href="/all-offers" onClick={closeMobileMenu}>
+                      <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-offers">
+                        <Gift className="mr-2 h-4 w-4" />
+                        Offers
+                      </Button>
+                    </Link>
+
+                    {isAuthenticated && (
+                      <>
+                        <Separator className="my-2" />
+                        {isCustomer && (
+                          <>
+                            <Link href="/customer/dashboard" onClick={closeMobileMenu}>
+                              <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-dashboard">
+                                <LayoutDashboard className="mr-2 h-4 w-4" />
+                                Dashboard
+                              </Button>
+                            </Link>
+                            <Link href="/wallet" onClick={closeMobileMenu}>
+                              <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-wallet">
+                                <Wallet className="mr-2 h-4 w-4" />
+                                Wallet
+                              </Button>
+                            </Link>
+                          </>
+                        )}
+                        {isBusiness && (
+                          <>
+                            <Link href="/business/dashboard" onClick={closeMobileMenu}>
+                              <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-business-dashboard">
+                                <LayoutDashboard className="mr-2 h-4 w-4" />
+                                Business Dashboard
+                              </Button>
+                            </Link>
+                            <Button 
+                              variant="ghost" 
+                              className="w-full justify-start" 
+                              onClick={() => {
+                                const orgId = user?.orgMemberships?.[0]?.orgId;
+                                if (orgId) {
+                                  setLocation('/business/settings/' + orgId);
+                                } else {
+                                  setLocation('/business/dashboard');
+                                }
+                                closeMobileMenu();
+                              }}
+                              data-testid="mobile-button-business-settings"
+                            >
+                              <SettingsIcon className="mr-2 h-4 w-4" />
+                              Settings
+                            </Button>
+                          </>
+                        )}
+                        {isCustomer && (
+                          <Link href="/customer/dashboard" onClick={closeMobileMenu}>
+                            <Button variant="ghost" className="w-full justify-start" data-testid="mobile-button-customer-settings">
+                              <SettingsIcon className="mr-2 h-4 w-4" />
+                              Settings
+                            </Button>
+                          </Link>
+                        )}
+                        <Separator className="my-2" />
+                        <Button 
+                          variant="ghost" 
+                          className="w-full justify-start text-destructive hover:text-destructive" 
+                          onClick={() => {
+                            handleLogout();
+                            closeMobileMenu();
+                          }}
+                          data-testid="mobile-button-logout"
+                        >
+                          <LogOut className="mr-2 h-4 w-4" />
+                          Logout
+                        </Button>
+                      </>
+                    )}
+                  </div>
+
+                  <Separator />
+
+                  {/* Auth Actions */}
+                  {!isAuthenticated ? (
+                    <div className="flex flex-col gap-2">
+                      <Link href="/join/business" onClick={closeMobileMenu}>
+                        <Button variant="outline" className="w-full" data-testid="mobile-button-list-salon">
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          List Your Salon
+                        </Button>
+                      </Link>
+                      <Link href="/join" onClick={closeMobileMenu}>
+                        <Button variant="outline" className="w-full" data-testid="mobile-button-signup">
+                          Sign up
+                        </Button>
+                      </Link>
+                      <Link href="/login" onClick={closeMobileMenu}>
+                        <Button className="w-full" data-testid="mobile-button-login">
+                          Log in
+                        </Button>
+                      </Link>
+                    </div>
+                  ) : (
+                    <Button 
+                      variant="outline" 
+                      className="w-full" 
+                      onClick={() => {
+                        handleLogout();
+                        closeMobileMenu();
+                      }}
+                      data-testid="mobile-button-logout"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Log out
+                    </Button>
+                  )}
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
       </div>

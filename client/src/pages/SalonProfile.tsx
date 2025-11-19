@@ -449,7 +449,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
               </div>
               
               {/* Small Images Stacked Vertically */}
-              <div className="flex flex-col gap-2 w-64">
+              <div className="flex flex-col gap-2 w-96">
                 {galleryImages.slice(1, 3).map((asset: any, index: number) => (
                   <div 
                     key={asset.id || index} 

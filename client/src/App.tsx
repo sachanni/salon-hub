@@ -9,6 +9,7 @@ import { VersionManager } from '@/utils/versionManager';
 import Header from "@/components/Header";
 import Home from "@/pages/Home";
 import Join from "@/pages/Join";
+import Login from "@/pages/Login";
 import JoinCustomer from "@/pages/JoinCustomer";
 import JoinBusiness from "@/pages/JoinBusiness";
 import BusinessOnboarding from "@/pages/BusinessOnboarding";
@@ -32,6 +33,7 @@ import EmailVerificationExpired from "@/pages/EmailVerificationExpired";
 import ResetPassword from "@/pages/ResetPassword";
 import AILookAdvisor from "@/pages/AILookAdvisor";
 import TestMakeupRender from "@/pages/TestMakeupRender";
+import InventoryManagement from "@/pages/InventoryManagement";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -44,6 +46,7 @@ function Router() {
         <Route path="/join/customer" component={JoinCustomer} />
         <Route path="/join/business" component={BusinessOnboarding} />
         <Route path="/join/business/register" component={JoinBusiness} />
+        <Route path="/login" component={Login} />
         <Route path="/login/customer" component={LoginCustomer} />
         <Route path="/login/business" component={LoginBusiness} />
         <Route path="/business/setup" component={BusinessSetup} />
@@ -65,6 +68,12 @@ function Router() {
         </Route>
         <Route path="/calendar-management/:salonId">
           {(params) => <CalendarManagement salonId={params.salonId} />}
+        </Route>
+        <Route path="/inventory">
+          {() => <InventoryManagement />}
+        </Route>
+        <Route path="/inventory/:salonId">
+          {(params) => <InventoryManagement salonId={params.salonId} />}
         </Route>
         <Route path="/salon/:salonId/book" component={SalonBookingPage} />
         <Route path="/salon/:salonId">
