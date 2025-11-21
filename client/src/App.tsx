@@ -34,6 +34,20 @@ import ResetPassword from "@/pages/ResetPassword";
 import AILookAdvisor from "@/pages/AILookAdvisor";
 import TestMakeupRender from "@/pages/TestMakeupRender";
 import InventoryManagement from "@/pages/InventoryManagement";
+import ProductsManagement from "@/pages/ProductsManagement";
+import ProductDetailAdmin from "@/pages/ProductDetailAdmin";
+import ProductOrders from "@/pages/ProductOrders";
+import OrderDetailAdmin from "@/pages/OrderDetailAdmin";
+import DeliverySettings from "@/pages/DeliverySettings";
+import ProductAnalytics from "@/pages/ProductAnalytics";
+import ProductsList from "@/pages/ProductsList";
+import ProductDetails from "@/pages/ProductDetails";
+import ShoppingCart from "@/pages/ShoppingCart";
+import Checkout from "@/pages/Checkout";
+import OrderConfirmation from "@/pages/OrderConfirmation";
+import OrderDetails from "@/pages/OrderDetails";
+import OrderHistory from "@/pages/OrderHistory";
+import Wishlist from "@/pages/Wishlist";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -75,6 +89,37 @@ function Router() {
         <Route path="/inventory/:salonId">
           {(params) => <InventoryManagement salonId={params.salonId} />}
         </Route>
+        
+        {/* E-commerce / Product Management Routes (Business Admin) */}
+        <Route path="/business/products" component={ProductsManagement} />
+        <Route path="/business/products/:productId">
+          {(params) => <ProductDetailAdmin key={params.productId} />}
+        </Route>
+        <Route path="/business/orders" component={ProductOrders} />
+        <Route path="/business/orders/:orderId">
+          {(params) => <OrderDetailAdmin key={params.orderId} />}
+        </Route>
+        <Route path="/business/delivery-settings" component={DeliverySettings} />
+        <Route path="/business/analytics" component={ProductAnalytics} />
+        
+        {/* E-commerce / Customer Facing Routes */}
+        <Route path="/salon/:salonId/products">
+          {(params) => <ProductsList key={params.salonId} salonId={params.salonId!} />}
+        </Route>
+        <Route path="/products/:productId">
+          {(params) => <ProductDetails key={params.productId} />}
+        </Route>
+        <Route path="/cart" component={ShoppingCart} />
+        <Route path="/checkout" component={Checkout} />
+        <Route path="/orders/confirmation/:orderId">
+          {(params) => <OrderConfirmation key={params.orderId} />}
+        </Route>
+        <Route path="/orders/:orderId">
+          {(params) => <OrderDetails key={params.orderId} />}
+        </Route>
+        <Route path="/orders" component={OrderHistory} />
+        <Route path="/wishlist" component={Wishlist} />
+        
         <Route path="/salon/:salonId/book" component={SalonBookingPage} />
         <Route path="/salon/:salonId">
           {(params) => <SalonProfile salonId={params.salonId!} />}

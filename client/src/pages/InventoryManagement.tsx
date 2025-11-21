@@ -1028,18 +1028,235 @@ function VendorsTab({ salonId, vendors, loading }: any) {
 }
 
 function StockMovementsTab({ salonId, products, movements, loading }: any) {
+  const { toast } = useToast();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  const stockMovementSchema = z.object({
+    productId: z.string().min(1, 'Product is required'),
+    type: z.enum(['receipt', 'adjustment', 'usage']),
+    quantity: z.coerce.number().min(0.001, 'Quantity must be greater than 0'),
+    reason: z.string().min(1, 'Reason is required'),
+    notes: z.string().optional(),
+  });
+
+  const movementForm = useForm({
+    resolver: zodResolver(stockMovementSchema),
+    defaultValues: {
+      productId: '',
+      type: 'receipt' as const,
+      quantity: 0,
+      reason: '',
+      notes: '',
+    },
+  });
+
+  const createMovementMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('POST', `/api/salons/${salonId}/stock-movements`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'stock-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'products'] });
+      toast({ title: 'Stock movement recorded successfully' });
+      setIsDialogOpen(false);
+      movementForm.reset();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const onSubmitMovement = (data: any) => {
+    createMovementMutation.mutate(data);
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Stock Movements</CardTitle>
-        <CardDescription>Track inventory changes</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="text-muted-foreground p-4">
-          Stock movement history and quick adjustment forms
-        </div>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <CardTitle>Stock Management</CardTitle>
+              <CardDescription>Real-time stock tracking and movement history</CardDescription>
+            </div>
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button data-testid="button-add-stock-movement">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Record Movement
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Record Stock Movement</DialogTitle>
+                  <DialogDescription>
+                    Add or adjust inventory stock levels
+                  </DialogDescription>
+                </DialogHeader>
+                <Form {...movementForm}>
+                  <form onSubmit={movementForm.handleSubmit(onSubmitMovement)} className="space-y-4">
+                    <FormField
+                      control={movementForm.control}
+                      name="productId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Product *</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-movement-product">
+                                <SelectValue placeholder="Select product" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {products.map((product: any) => (
+                                <SelectItem key={product.id} value={product.id}>
+                                  {product.name} ({product.sku}) - Current: {product.currentStock}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={movementForm.control}
+                      name="type"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Movement Type *</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-movement-type">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="receipt">Receipt (Add Stock)</SelectItem>
+                              <SelectItem value="adjustment">Adjustment (Correct Stock)</SelectItem>
+                              <SelectItem value="usage">Usage (Remove Stock)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={movementForm.control}
+                      name="quantity"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Quantity *</FormLabel>
+                          <FormControl>
+                            <Input {...field} type="number" step="0.001" min="0" data-testid="input-movement-quantity" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={movementForm.control}
+                      name="reason"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Reason *</FormLabel>
+                          <FormControl>
+                            <Input {...field} placeholder="e.g., Initial stock, Vendor delivery, Damaged goods" data-testid="input-movement-reason" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={movementForm.control}
+                      name="notes"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Notes (Optional)</FormLabel>
+                          <FormControl>
+                            <Textarea {...field} placeholder="Additional details..." data-testid="input-movement-notes" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={movementForm.formState.isSubmitting} data-testid="button-save-movement">
+                        Record Movement
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-muted-foreground p-4">Loading stock movements...</div>
+          ) : movements.length === 0 ? (
+            <div className="text-center text-muted-foreground p-8">
+              <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium mb-2">No stock movements yet</p>
+              <p className="text-sm">Record your first stock movement to start tracking inventory changes</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Notes</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {movements.map((movement: any) => {
+                  const product = products.find((p: any) => p.id === movement.productId);
+                  return (
+                    <TableRow key={movement.id}>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(movement.createdAt).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {product?.name || 'Unknown'}
+                        <div className="text-xs text-muted-foreground">{product?.sku}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          movement.type === 'receipt' ? 'default' : 
+                          movement.type === 'usage' ? 'destructive' : 
+                          'secondary'
+                        }>
+                          {movement.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {movement.type === 'usage' ? '-' : '+'}{movement.quantity}
+                      </TableCell>
+                      <TableCell className="text-sm">{movement.reason}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {movement.notes || '-'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

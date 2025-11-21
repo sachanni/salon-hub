@@ -76,6 +76,17 @@ import {
   type SalonReview, type InsertSalonReview,
   // Google Places cache types
   type GooglePlacesCache, type InsertGooglePlacesCache,
+  // Product E-commerce types
+  type ProductRetailConfig, type InsertProductRetailConfig,
+  type ProductVariant, type InsertProductVariant,
+  type ShoppingCart, type InsertShoppingCart,
+  type CartItem, type InsertCartItem,
+  type ProductOrder, type InsertProductOrder,
+  type ProductOrderItem, type InsertProductOrderItem,
+  type Wishlist, type InsertWishlist,
+  type ProductReview, type InsertProductReview,
+  type DeliverySettings, type InsertDeliverySettings,
+  type ProductView, type InsertProductView,
   users, userSavedLocations, services, serviceTemplates, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
@@ -98,10 +109,14 @@ import {
   // Platform admin tables
   platformConfig, platformCommissions, platformPayouts, platformOffers,
   // Wallet and launch offer tables
-  userWallets, walletTransactions, userOfferUsage, launchOffers
+  userWallets, walletTransactions, userOfferUsage, launchOffers,
+  // Product E-commerce tables
+  productRetailConfig, productVariants, shoppingCarts, cartItems,
+  productOrders, productOrderItems, wishlists, productReviews,
+  deliverySettings, productViews
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne } from "drizzle-orm";
+import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne, like, isNotNull, lt } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
@@ -1230,6 +1245,166 @@ export interface IStorage {
   trackOfferUsage(userId: string, offerId: string, bookingId: string, discountInPaisa: number, usageNumber: number): Promise<void>;
   getCustomerOffers(userId: string, salonId?: string): Promise<any[]>;
   getAllOffersWithSalons(): Promise<any[]>;
+
+  // ===== PRODUCT E-COMMERCE OPERATIONS =====
+  
+  // Product Discovery (Customer-facing)
+  getRetailProducts(salonId: string, filters?: {
+    categoryId?: string;
+    search?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    featured?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<Array<Product & { retailConfig?: ProductRetailConfig; variants?: ProductVariant[] }>>;
+  
+  getProductById(productId: string, includeVariants?: boolean): Promise<(Product & { retailConfig?: ProductRetailConfig; variants?: ProductVariant[] }) | undefined>;
+  
+  searchProducts(query: string, filters?: {
+    salonId?: string;
+    categoryId?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    limit?: number;
+  }): Promise<Array<Product & { retailConfig?: ProductRetailConfig }>>;
+  
+  // Product Variants
+  getProductVariants(productId: string): Promise<ProductVariant[]>;
+  getVariantById(variantId: string): Promise<ProductVariant | undefined>;
+  
+  // Shopping Cart Operations
+  createOrGetCart(userId: string, salonId: string): Promise<ShoppingCart>;
+  getActiveCart(userId: string, salonId: string): Promise<(ShoppingCart & { items?: Array<CartItem & { product?: Product; variant?: ProductVariant }> }) | undefined>;
+  addCartItem(cartId: string, item: {
+    productId: string;
+    variantId?: string;
+    quantity: number;
+    priceAtAdd: number;
+  }): Promise<CartItem>;
+  updateCartItem(itemId: string, quantity: number): Promise<void>;
+  removeCartItem(itemId: string): Promise<void>;
+  clearCart(cartId: string): Promise<void>;
+  
+  // Product Order Operations
+  createProductOrder(orderData: {
+    userId: string;
+    salonId: string;
+    cartId: string;
+    deliveryAddress: any;
+    paymentMethod: string;
+    items: Array<{
+      productId: string;
+      variantId?: string;
+      quantity: number;
+      priceInPaisa: number;
+    }>;
+    subtotalInPaisa: number;
+    taxInPaisa: number;
+    deliveryFeeInPaisa: number;
+    totalInPaisa: number;
+  }): Promise<ProductOrder>;
+  
+  getProductOrder(orderId: string): Promise<(ProductOrder & { items?: ProductOrderItem[] }) | undefined>;
+  getProductOrdersByUser(userId: string, limit?: number): Promise<ProductOrder[]>;
+  updateOrderStatus(orderId: string, status: string, updatedBy?: string): Promise<void>;
+  cancelProductOrder(orderId: string, reason?: string): Promise<void>;
+  
+  // Stock Reservation Operations
+  reserveProductStock(productId: string, quantity: number): Promise<{ success: boolean; availableStock: number; message?: string }>;
+  releaseProductStock(productId: string, quantity: number): Promise<void>;
+  commitProductStockReduction(productId: string, quantity: number): Promise<void>;
+  
+  // Wishlist Operations
+  addToWishlist(userId: string, productId: string): Promise<Wishlist>;
+  getWishlist(userId: string, salonId?: string): Promise<Array<Wishlist & { product?: Product }>>;
+  removeFromWishlist(wishlistId: string): Promise<void>;
+  isInWishlist(userId: string, productId: string): Promise<boolean>;
+  
+  // Product Reviews
+  createProductReview(review: {
+    productId: string;
+    userId: string;
+    orderId?: string;
+    rating: number;
+    title?: string;
+    reviewText?: string;
+    images?: string[];
+  }): Promise<ProductReview>;
+  
+  getProductReviews(productId: string, filters?: {
+    rating?: number;
+    verified?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ProductReview[]>;
+  
+  updateReviewHelpfulness(reviewId: string, helpfulCount?: number, notHelpfulCount?: number): Promise<void>;
+  
+  // Product Views Analytics
+  trackProductView(userId: string | null, productId: string, sessionId?: string): Promise<void>;
+  getProductViewCount(productId: string, period?: string): Promise<number>;
+
+  // ===============================================
+  // BUSINESS ADMIN - Product Management
+  // ===============================================
+  getAdminProductList(salonId: string, filters?: {
+    availableForRetail?: boolean;
+    categoryId?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]>;
+  
+  configureProductForRetail(productId: string, salonId: string, config: {
+    availableForRetail: boolean;
+    retailPriceInPaisa?: number;
+    retailStockAllocated?: number;
+    retailDescription?: string;
+    retailImageUrls?: string[];
+    featured?: boolean;
+    metaTitle?: string;
+    metaDescription?: string;
+    searchKeywords?: string[];
+  }): Promise<void>;
+
+  // ===============================================
+  // BUSINESS ADMIN - Order Management  
+  // ===============================================
+  getAdminOrders(salonId: string, filters?: {
+    status?: string;
+    fulfillmentType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any>;
+
+  updateOrderStatus(orderId: string, salonId: string, updates: {
+    status: string;
+    trackingNumber?: string;
+    courierPartner?: string;
+    estimatedDeliveryDate?: string;
+    notes?: string;
+  }): Promise<void>;
+
+  cancelOrderAdmin(orderId: string, salonId: string, reason: string, refundAmountPaisa?: number): Promise<void>;
+
+  // ===============================================
+  // BUSINESS ADMIN - Analytics
+  // ===============================================
+  getProductAnalytics(salonId: string, filters?: {
+    period?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<any>;
+
+  // ===============================================
+  // BUSINESS ADMIN - Delivery Settings
+  // ===============================================
+  getDeliverySettings(salonId: string): Promise<any>;
+  updateDeliverySettings(salonId: string, settings: any): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -8385,6 +8560,1178 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     return result.length;
+  }
+
+  // ==================== PRODUCT E-COMMERCE OPERATIONS ====================
+  
+  /**
+   * Get retail products for a salon with optional filtering
+   */
+  async getRetailProducts(salonId: string, filters?: {
+    categoryId?: string;
+    search?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    featured?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<Array<Product & { retailConfig?: ProductRetailConfig; variants?: ProductVariant[] }>> {
+    const conditions = [
+      eq(products.salonId, salonId),
+      eq(products.isActive, 1),
+      eq(products.availableForRetail, 1),
+    ];
+
+    if (filters?.categoryId) {
+      conditions.push(eq(products.categoryId, filters.categoryId));
+    }
+
+    if (filters?.search) {
+      conditions.push(
+        or(
+          sql`LOWER(${products.name}) LIKE LOWER(${`%${filters.search}%`})`,
+          sql`LOWER(${products.description}) LIKE LOWER(${`%${filters.search}%`})`,
+          sql`LOWER(${products.brand}) LIKE LOWER(${`%${filters.search}%`})`
+        )!
+      );
+    }
+
+    if (filters?.minPrice !== undefined) {
+      conditions.push(gte(products.retailPriceInPaisa, filters.minPrice));
+    }
+
+    if (filters?.maxPrice !== undefined) {
+      conditions.push(lte(products.retailPriceInPaisa, filters.maxPrice));
+    }
+
+    // Get products with their retail config
+    const results = await db
+      .select({
+        product: products,
+        retailConfig: productRetailConfig,
+      })
+      .from(products)
+      .leftJoin(productRetailConfig, eq(products.id, productRetailConfig.productId))
+      .where(and(...conditions))
+      .limit(filters?.limit || 50)
+      .offset(filters?.offset || 0)
+      .orderBy(desc(products.createdAt));
+
+    // If featured filter, apply it on retail config
+    let filteredResults = results;
+    if (filters?.featured !== undefined) {
+      filteredResults = results.filter(r => r.retailConfig?.featured === (filters.featured ? 1 : 0));
+    }
+
+    // Get variants for each product
+    const productsWithData = await Promise.all(
+      filteredResults.map(async (result) => {
+        const variants = await db
+          .select()
+          .from(productVariants)
+          .where(and(
+            eq(productVariants.productId, result.product.id),
+            eq(productVariants.isActive, 1)
+          ))
+          .orderBy(asc(productVariants.displayOrder));
+
+        return {
+          ...result.product,
+          retailConfig: result.retailConfig || undefined,
+          variants: variants.length > 0 ? variants : undefined,
+        };
+      })
+    );
+
+    return productsWithData;
+  }
+
+  /**
+   * Get product by ID with variants and retail config
+   */
+  async getProductById(productId: string, includeVariants = true): Promise<(Product & { retailConfig?: ProductRetailConfig; variants?: ProductVariant[] }) | undefined> {
+    const [result] = await db
+      .select({
+        product: products,
+        retailConfig: productRetailConfig,
+      })
+      .from(products)
+      .leftJoin(productRetailConfig, eq(products.id, productRetailConfig.productId))
+      .where(eq(products.id, productId));
+
+    if (!result) {
+      return undefined;
+    }
+
+    let variants: ProductVariant[] | undefined;
+    if (includeVariants) {
+      variants = await db
+        .select()
+        .from(productVariants)
+        .where(and(
+          eq(productVariants.productId, productId),
+          eq(productVariants.isActive, 1)
+        ))
+        .orderBy(asc(productVariants.displayOrder));
+    }
+
+    return {
+      ...result.product,
+      retailConfig: result.retailConfig || undefined,
+      variants: variants && variants.length > 0 ? variants : undefined,
+    };
+  }
+
+  /**
+   * Search products across salons
+   */
+  async searchProducts(query: string, filters?: {
+    salonId?: string;
+    categoryId?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    limit?: number;
+  }): Promise<Array<Product & { retailConfig?: ProductRetailConfig }>> {
+    const conditions = [
+      eq(products.isActive, 1),
+      eq(products.availableForRetail, 1),
+      or(
+        sql`LOWER(${products.name}) LIKE LOWER(${`%${query}%`})`,
+        sql`LOWER(${products.description}) LIKE LOWER(${`%${query}%`})`,
+        sql`LOWER(${products.brand}) LIKE LOWER(${`%${query}%`})`
+      )!
+    ];
+
+    if (filters?.salonId) {
+      conditions.push(eq(products.salonId, filters.salonId));
+    }
+
+    if (filters?.categoryId) {
+      conditions.push(eq(products.categoryId, filters.categoryId));
+    }
+
+    if (filters?.minPrice !== undefined) {
+      conditions.push(gte(products.retailPriceInPaisa, filters.minPrice));
+    }
+
+    if (filters?.maxPrice !== undefined) {
+      conditions.push(lte(products.retailPriceInPaisa, filters.maxPrice));
+    }
+
+    const results = await db
+      .select({
+        product: products,
+        retailConfig: productRetailConfig,
+      })
+      .from(products)
+      .leftJoin(productRetailConfig, eq(products.id, productRetailConfig.productId))
+      .where(and(...conditions))
+      .limit(filters?.limit || 50)
+      .orderBy(desc(products.createdAt));
+
+    return results.map(r => ({
+      ...r.product,
+      retailConfig: r.retailConfig || undefined,
+    }));
+  }
+
+  /**
+   * Get product variants
+   */
+  async getProductVariants(productId: string): Promise<ProductVariant[]> {
+    return await db
+      .select()
+      .from(productVariants)
+      .where(and(
+        eq(productVariants.productId, productId),
+        eq(productVariants.isActive, 1)
+      ))
+      .orderBy(asc(productVariants.displayOrder));
+  }
+
+  /**
+   * Get variant by ID
+   */
+  async getVariantById(variantId: string): Promise<ProductVariant | undefined> {
+    const [variant] = await db
+      .select()
+      .from(productVariants)
+      .where(eq(productVariants.id, variantId));
+    return variant || undefined;
+  }
+
+  /**
+   * Create or get active shopping cart for user
+   */
+  async createOrGetCart(userId: string, salonId: string): Promise<ShoppingCart> {
+    // Check for existing active cart
+    const [existingCart] = await db
+      .select()
+      .from(shoppingCarts)
+      .where(and(
+        eq(shoppingCarts.userId, userId),
+        eq(shoppingCarts.salonId, salonId),
+        eq(shoppingCarts.status, 'active')
+      ));
+
+    if (existingCart) {
+      return existingCart;
+    }
+
+    // Create new cart
+    const [newCart] = await db
+      .insert(shoppingCarts)
+      .values({
+        userId,
+        salonId,
+        status: 'active',
+      })
+      .returning();
+
+    return newCart;
+  }
+
+  /**
+   * Get active cart with items
+   */
+  async getActiveCart(userId: string, salonId: string): Promise<(ShoppingCart & { items?: Array<CartItem & { product?: Product; variant?: ProductVariant }> }) | undefined> {
+    const [cart] = await db
+      .select()
+      .from(shoppingCarts)
+      .where(and(
+        eq(shoppingCarts.userId, userId),
+        eq(shoppingCarts.salonId, salonId),
+        eq(shoppingCarts.status, 'active')
+      ));
+
+    if (!cart) {
+      return undefined;
+    }
+
+    // Get cart items with product details
+    const items = await db
+      .select({
+        item: cartItems,
+        product: products,
+        variant: productVariants,
+      })
+      .from(cartItems)
+      .leftJoin(products, eq(cartItems.productId, products.id))
+      .leftJoin(productVariants, eq(cartItems.variantId, productVariants.id))
+      .where(eq(cartItems.cartId, cart.id));
+
+    return {
+      ...cart,
+      items: items.map(i => ({
+        ...i.item,
+        product: i.product || undefined,
+        variant: i.variant || undefined,
+      })),
+    };
+  }
+
+  /**
+   * Add item to cart
+   */
+  async addCartItem(cartId: string, item: {
+    productId: string;
+    variantId?: string;
+    quantity: number;
+    priceAtAdd: number;
+  }): Promise<CartItem> {
+    // Check if item already exists in cart
+    const existingItemConditions = [
+      eq(cartItems.cartId, cartId),
+      eq(cartItems.productId, item.productId),
+    ];
+
+    if (item.variantId) {
+      existingItemConditions.push(eq(cartItems.variantId, item.variantId));
+    } else {
+      existingItemConditions.push(isNull(cartItems.variantId));
+    }
+
+    const [existingItem] = await db
+      .select()
+      .from(cartItems)
+      .where(and(...existingItemConditions));
+
+    if (existingItem) {
+      // Update quantity
+      const [updated] = await db
+        .update(cartItems)
+        .set({
+          quantity: existingItem.quantity + item.quantity,
+          updatedAt: new Date(),
+        })
+        .where(eq(cartItems.id, existingItem.id))
+        .returning();
+      return updated;
+    }
+
+    // Add new item
+    const [newItem] = await db
+      .insert(cartItems)
+      .values({
+        cartId,
+        productId: item.productId,
+        variantId: item.variantId || null,
+        quantity: item.quantity,
+        priceAtAddPaisa: item.priceAtAdd, // Correct field name
+        currentPricePaisa: item.priceAtAdd, // Set current price same as add price initially
+      })
+      .returning();
+
+    // Update cart's updatedAt
+    await db
+      .update(shoppingCarts)
+      .set({ updatedAt: new Date() })
+      .where(eq(shoppingCarts.id, cartId));
+
+    return newItem;
+  }
+
+  /**
+   * Update cart item quantity
+   */
+  async updateCartItem(itemId: string, quantity: number): Promise<void> {
+    if (quantity <= 0) {
+      await this.removeCartItem(itemId);
+      return;
+    }
+
+    await db
+      .update(cartItems)
+      .set({ quantity, updatedAt: new Date() })
+      .where(eq(cartItems.id, itemId));
+  }
+
+  /**
+   * Remove cart item
+   */
+  async removeCartItem(itemId: string): Promise<void> {
+    await db.delete(cartItems).where(eq(cartItems.id, itemId));
+  }
+
+  /**
+   * Clear all items from cart
+   */
+  async clearCart(cartId: string): Promise<void> {
+    await db.delete(cartItems).where(eq(cartItems.cartId, cartId));
+  }
+
+  /**
+   * Create product order
+   */
+  async createProductOrder(orderData: {
+    userId: string;
+    salonId: string;
+    cartId: string;
+    deliveryAddress: any;
+    paymentMethod: string;
+    fulfillmentType: string;
+    items: Array<{
+      productId: string;
+      productName: string;
+      productSku?: string;
+      variantId?: string;
+      quantity: number;
+      priceInPaisa: number;
+    }>;
+    subtotalInPaisa: number;
+    taxInPaisa: number;
+    deliveryFeeInPaisa: number;
+    totalInPaisa: number;
+  }): Promise<ProductOrder> {
+    // Create order
+    const [order] = await db
+      .insert(productOrders)
+      .values({
+        customerId: orderData.userId, // Correct field name is customerId
+        salonId: orderData.salonId,
+        orderNumber: `ORD-${Date.now()}`,
+        status: 'pending',
+        paymentStatus: 'pending',
+        paymentMethod: orderData.paymentMethod,
+        fulfillmentType: orderData.fulfillmentType, // Required field
+        deliveryAddress: orderData.deliveryAddress,
+        subtotalPaisa: orderData.subtotalInPaisa,
+        taxPaisa: orderData.taxInPaisa,
+        deliveryChargePaisa: orderData.deliveryFeeInPaisa,
+        totalPaisa: orderData.totalInPaisa,
+      })
+      .returning();
+
+    // Create order items
+    await db.insert(productOrderItems).values(
+      orderData.items.map(item => ({
+        orderId: order.id,
+        productId: item.productId,
+        productName: item.productName, // Required snapshot field
+        productSku: item.productSku || null,
+        variantId: item.variantId || null,
+        quantity: item.quantity,
+        unitPricePaisa: item.priceInPaisa, // Correct field name
+        subtotalPaisa: item.priceInPaisa * item.quantity, // Required field
+      }))
+    );
+
+    // Mark cart as converted
+    await db
+      .update(shoppingCarts)
+      .set({ status: 'converted', updatedAt: new Date() })
+      .where(eq(shoppingCarts.id, orderData.cartId));
+
+    return order;
+  }
+
+  /**
+   * Get product order with items
+   */
+  async getProductOrder(orderId: string): Promise<(ProductOrder & { items?: ProductOrderItem[] }) | undefined> {
+    const [order] = await db
+      .select()
+      .from(productOrders)
+      .where(eq(productOrders.id, orderId));
+
+    if (!order) {
+      return undefined;
+    }
+
+    const items = await db
+      .select()
+      .from(productOrderItems)
+      .where(eq(productOrderItems.orderId, orderId));
+
+    return {
+      ...order,
+      items: items.length > 0 ? items : undefined,
+    };
+  }
+
+  /**
+   * Get product orders by user
+   */
+  async getProductOrdersByUser(userId: string, limit = 50): Promise<ProductOrder[]> {
+    return await db
+      .select()
+      .from(productOrders)
+      .where(eq(productOrders.customerId, userId)) // Correct field name is customerId
+      .orderBy(desc(productOrders.createdAt))
+      .limit(limit);
+  }
+
+  /**
+   * Update order status
+   */
+  async updateOrderStatus(orderId: string, status: string, updatedBy?: string): Promise<void> {
+    await db
+      .update(productOrders)
+      .set({ status })
+      .where(eq(productOrders.id, orderId));
+  }
+
+  /**
+   * Cancel product order
+   */
+  async cancelProductOrder(orderId: string, reason?: string): Promise<void> {
+    await db
+      .update(productOrders)
+      .set({ 
+        status: 'cancelled',
+        cancellationReason: reason || null,
+        cancelledAt: new Date(),
+      })
+      .where(eq(productOrders.id, orderId));
+  }
+
+  /**
+   * Reserve product stock atomically (prevents overselling)
+   * Returns success=false if insufficient stock available
+   */
+  async reserveProductStock(productId: string, quantity: number): Promise<{ success: boolean; availableStock: number; message?: string }> {
+    // Get current stock from product retail config
+    const [retailConfig] = await db
+      .select()
+      .from(productRetailConfig)
+      .where(eq(productRetailConfig.productId, productId))
+      .limit(1);
+
+    if (!retailConfig) {
+      return { success: false, availableStock: 0, message: 'Product retail config not found' };
+    }
+
+    const availableStock = parseFloat(retailConfig.retailStockAllocated || '0');
+
+    // Check if sufficient stock available
+    if (availableStock < quantity) {
+      return { 
+        success: false, 
+        availableStock, 
+        message: `Insufficient stock. Available: ${availableStock}, Requested: ${quantity}` 
+      };
+    }
+
+    // Atomically decrement stock
+    await db
+      .update(productRetailConfig)
+      .set({ 
+        retailStockAllocated: sql`${productRetailConfig.retailStockAllocated} - ${quantity}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(productRetailConfig.productId, productId));
+
+    return { success: true, availableStock: availableStock - quantity };
+  }
+
+  /**
+   * Release reserved stock (when order cancelled or payment failed)
+   */
+  async releaseProductStock(productId: string, quantity: number): Promise<void> {
+    await db
+      .update(productRetailConfig)
+      .set({ 
+        retailStockAllocated: sql`${productRetailConfig.retailStockAllocated} + ${quantity}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(productRetailConfig.productId, productId));
+  }
+
+  /**
+   * Commit stock reduction (same as reserve, but called after payment success for clarity)
+   * Stock is already decremented by reserveProductStock, this is a no-op for now
+   */
+  async commitProductStockReduction(productId: string, quantity: number): Promise<void> {
+    // No-op: Stock was already decremented during reservation
+    // This method exists for semantic clarity and future enhancements (e.g., moving from reserved to sold)
+    console.log(`Stock reduction committed for product ${productId}: ${quantity} units`);
+  }
+
+  /**
+   * Add product to wishlist
+   */
+  async addToWishlist(userId: string, productId: string): Promise<Wishlist> {
+    // Check if already in wishlist
+    const [existing] = await db
+      .select()
+      .from(wishlists)
+      .where(and(
+        eq(wishlists.userId, userId),
+        eq(wishlists.productId, productId)
+      ));
+
+    if (existing) {
+      return existing;
+    }
+
+    // Get product price for tracking
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(eq(products.id, productId));
+
+    // Add to wishlist
+    const [wishlistItem] = await db
+      .insert(wishlists)
+      .values({ 
+        userId, 
+        productId,
+        priceAtAddPaisa: product?.retailPriceInPaisa || 0, // Required field for price tracking
+      })
+      .returning();
+
+    return wishlistItem;
+  }
+
+  /**
+   * Get user's wishlist
+   */
+  async getWishlist(userId: string, salonId?: string): Promise<Array<Wishlist & { product?: Product }>> {
+    let query = db
+      .select({
+        wishlist: wishlists,
+        product: products,
+      })
+      .from(wishlists)
+      .leftJoin(products, eq(wishlists.productId, products.id))
+      .where(eq(wishlists.userId, userId));
+
+    if (salonId) {
+      const results = await query;
+      const filtered = results.filter(r => r.product?.salonId === salonId);
+      return filtered.map(r => ({
+        ...r.wishlist,
+        product: r.product || undefined,
+      }));
+    }
+
+    const results = await query.orderBy(desc(wishlists.addedAt));
+    return results.map(r => ({
+      ...r.wishlist,
+      product: r.product || undefined,
+    }));
+  }
+
+  /**
+   * Remove from wishlist
+   */
+  async removeFromWishlist(wishlistId: string): Promise<void> {
+    await db.delete(wishlists).where(eq(wishlists.id, wishlistId));
+  }
+
+  /**
+   * Check if product is in wishlist
+   */
+  async isInWishlist(userId: string, productId: string): Promise<boolean> {
+    const [result] = await db
+      .select()
+      .from(wishlists)
+      .where(and(
+        eq(wishlists.userId, userId),
+        eq(wishlists.productId, productId)
+      ));
+    return !!result;
+  }
+
+  /**
+   * Create product review
+   */
+  async createProductReview(review: {
+    productId: string;
+    userId: string;
+    orderId?: string;
+    rating: number;
+    title?: string;
+    reviewText?: string;
+    images?: string[];
+  }): Promise<ProductReview> {
+    // Get product's salon ID (required field)
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(eq(products.id, review.productId));
+
+    if (!product) {
+      throw new Error('Product not found');
+    }
+
+    // Get order ID if not provided but user bought the product
+    let orderId = review.orderId;
+    if (!orderId) {
+      const [order] = await db
+        .select()
+        .from(productOrders)
+        .innerJoin(productOrderItems, eq(productOrders.id, productOrderItems.orderId))
+        .where(and(
+          eq(productOrders.customerId, review.userId),
+          eq(productOrderItems.productId, review.productId),
+          eq(productOrders.status, 'delivered')
+        ))
+        .limit(1);
+      
+      orderId = order?.product_orders.id;
+    }
+
+    // Schema requires orderId to be non-null, so we must have a valid order
+    if (!orderId) {
+      throw new Error('Cannot create review: No order found for this product purchase');
+    }
+
+    const [newReview] = await db
+      .insert(productReviews)
+      .values({
+        productId: review.productId,
+        userId: review.userId,
+        salonId: product.salonId, // Required field
+        orderId: orderId, // Required field (schema doesn't allow null)
+        rating: review.rating,
+        title: review.title || null,
+        comment: review.reviewText || null, // Correct field name is 'comment'
+        imageUrls: review.images || null, // Correct field name is 'imageUrls'
+        verifiedPurchase: 1, // Always 1 since we require orderId
+      })
+      .returning();
+
+    return newReview;
+  }
+
+  /**
+   * Get product reviews
+   */
+  async getProductReviews(productId: string, filters?: {
+    rating?: number;
+    verified?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ProductReview[]> {
+    const conditions = [eq(productReviews.productId, productId)];
+
+    if (filters?.rating !== undefined) {
+      conditions.push(eq(productReviews.rating, filters.rating));
+    }
+
+    if (filters?.verified !== undefined) {
+      conditions.push(eq(productReviews.verifiedPurchase, filters.verified ? 1 : 0)); // Correct field name
+    }
+
+    return await db
+      .select()
+      .from(productReviews)
+      .where(and(...conditions))
+      .orderBy(desc(productReviews.createdAt))
+      .limit(filters?.limit || 50)
+      .offset(filters?.offset || 0);
+  }
+
+  /**
+   * Update review helpfulness counts
+   */
+  async updateReviewHelpfulness(reviewId: string, helpfulCount?: number, notHelpfulCount?: number): Promise<void> {
+    const updates: any = {};
+    if (helpfulCount !== undefined) {
+      updates.helpfulCount = helpfulCount;
+    }
+    if (notHelpfulCount !== undefined) {
+      updates.notHelpfulCount = notHelpfulCount;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await db
+        .update(productReviews)
+        .set(updates)
+        .where(eq(productReviews.id, reviewId));
+    }
+  }
+
+  /**
+   * Track product view
+   */
+  async trackProductView(userId: string | null, productId: string, sessionId?: string): Promise<void> {
+    // Get product's salon ID (required field)
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(eq(products.id, productId));
+
+    if (!product) {
+      return; // Silently skip if product not found
+    }
+
+    await db.insert(productViews).values({
+      productId,
+      salonId: product.salonId, // Required field
+      userId: userId || null,
+      sessionId: sessionId || null,
+    });
+  }
+
+  /**
+   * Get product view count
+   */
+  async getProductViewCount(productId: string, period?: string): Promise<number> {
+    const conditions = [eq(productViews.productId, productId)];
+
+    if (period) {
+      const now = new Date();
+      let startDate: Date;
+      
+      switch (period) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        default:
+          startDate = new Date(0);
+      }
+
+      conditions.push(gte(productViews.viewedAt, startDate));
+    }
+
+    const [result] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(productViews)
+      .where(and(...conditions));
+
+    return result?.count || 0;
+  }
+
+  // ===============================================
+  // BUSINESS ADMIN - Product Management
+  // ===============================================
+  async getAdminProductList(salonId: string, filters?: {
+    availableForRetail?: boolean;
+    categoryId?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]> {
+    const conditions = [eq(products.salonId, salonId), eq(products.isActive, 1)];
+
+    if (filters?.availableForRetail !== undefined) {
+      conditions.push(eq(products.availableForRetail, filters.availableForRetail ? 1 : 0));
+    }
+
+    if (filters?.categoryId) {
+      conditions.push(eq(products.categoryId, filters.categoryId));
+    }
+
+    if (filters?.search) {
+      conditions.push(
+        or(
+          like(products.name, `%${filters.search}%`),
+          like(products.sku, `%${filters.search}%`)
+        )!
+      );
+    }
+
+    const productsList = await db
+      .select()
+      .from(products)
+      .leftJoin(productRetailConfig, eq(products.id, productRetailConfig.productId))
+      .where(and(...conditions))
+      .limit(filters?.limit || 50)
+      .offset(filters?.offset || 0)
+      .orderBy(desc(products.createdAt));
+
+    return productsList.map(p => ({
+      ...p.products,
+      retailConfig: p.product_retail_config || null
+    }));
+  }
+
+  async configureProductForRetail(productId: string, salonId: string, config: {
+    availableForRetail: boolean;
+    retailPriceInPaisa?: number;
+    retailStockAllocated?: number;
+    retailDescription?: string;
+    retailImageUrls?: string[];
+    featured?: boolean;
+    metaTitle?: string;
+    metaDescription?: string;
+    searchKeywords?: string[];
+  }): Promise<void> {
+    // Update product table
+    await db.update(products)
+      .set({
+        availableForRetail: config.availableForRetail ? 1 : 0,
+        retailPriceInPaisa: config.retailPriceInPaisa || undefined,
+        updatedAt: new Date()
+      })
+      .where(and(eq(products.id, productId), eq(products.salonId, salonId)));
+
+    // Check if retail config exists
+    const existing = await db.select()
+      .from(productRetailConfig)
+      .where(eq(productRetailConfig.productId, productId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      // Update existing config
+      await db.update(productRetailConfig)
+        .set({
+          retailStockAllocated: config.retailStockAllocated || undefined,
+          retailDescription: config.retailDescription || undefined,
+          retailImageUrls: config.retailImageUrls || undefined,
+          featured: config.featured !== undefined ? (config.featured ? 1 : 0) : undefined,
+          metaTitle: config.metaTitle || undefined,
+          metaDescription: config.metaDescription || undefined,
+          searchKeywords: config.searchKeywords || undefined,
+          updatedAt: new Date()
+        })
+        .where(eq(productRetailConfig.productId, productId));
+    } else {
+      // Create new config
+      await db.insert(productRetailConfig).values({
+        productId,
+        salonId,
+        retailStockAllocated: config.retailStockAllocated || 0,
+        retailDescription: config.retailDescription,
+        retailImageUrls: config.retailImageUrls || [],
+        featured: config.featured ? 1 : 0,
+        metaTitle: config.metaTitle,
+        metaDescription: config.metaDescription,
+        searchKeywords: config.searchKeywords || []
+      });
+    }
+  }
+
+  // ===============================================
+  // BUSINESS ADMIN - Order Management
+  // ===============================================
+  async getAdminOrders(salonId: string, filters?: {
+    status?: string;
+    fulfillmentType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    const conditions = [eq(productOrders.salonId, salonId)];
+
+    if (filters?.status) {
+      conditions.push(eq(productOrders.status, filters.status));
+    }
+
+    if (filters?.fulfillmentType) {
+      conditions.push(eq(productOrders.fulfillmentType, filters.fulfillmentType));
+    }
+
+    if (filters?.dateFrom) {
+      conditions.push(gte(productOrders.createdAt, new Date(filters.dateFrom)));
+    }
+
+    if (filters?.dateTo) {
+      conditions.push(lte(productOrders.createdAt, new Date(filters.dateTo)));
+    }
+
+    if (filters?.search) {
+      conditions.push(like(productOrders.orderNumber, `%${filters.search}%`));
+    }
+
+    const orders = await db
+      .select({
+        order: productOrders,
+        user: users
+      })
+      .from(productOrders)
+      .leftJoin(users, eq(productOrders.customerId, users.id))
+      .where(and(...conditions))
+      .limit(filters?.limit || 50)
+      .offset(filters?.offset || 0)
+      .orderBy(desc(productOrders.createdAt));
+
+    // Get status summary
+    const statusCounts = await db
+      .select({
+        status: productOrders.status,
+        count: sql<number>`count(*)`
+      })
+      .from(productOrders)
+      .where(eq(productOrders.salonId, salonId))
+      .groupBy(productOrders.status);
+
+    const summary = statusCounts.reduce((acc, curr) => {
+      acc[curr.status] = curr.count;
+      acc.total = (acc.total || 0) + curr.count;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      orders: orders.map(o => ({
+        ...o.order,
+        customer: o.user
+      })),
+      summary
+    };
+  }
+
+  async updateOrderStatus(orderId: string, salonId: string, updates: {
+    status: string;
+    trackingNumber?: string;
+    courierPartner?: string;
+    estimatedDeliveryDate?: string;
+    notes?: string;
+  }): Promise<void> {
+    await db.update(productOrders)
+      .set({
+        status: updates.status,
+        trackingNumber: updates.trackingNumber,
+        courierPartner: updates.courierPartner,
+        estimatedDeliveryDate: updates.estimatedDeliveryDate ? new Date(updates.estimatedDeliveryDate) : undefined,
+        updatedAt: new Date()
+      })
+      .where(and(eq(productOrders.id, orderId), eq(productOrders.salonId, salonId)));
+  }
+
+  async cancelOrderAdmin(orderId: string, salonId: string, reason: string, refundAmountPaisa?: number): Promise<void> {
+    const [order] = await db.select()
+      .from(productOrders)
+      .where(and(eq(productOrders.id, orderId), eq(productOrders.salonId, salonId)))
+      .limit(1);
+
+    if (!order) {
+      throw new Error('Order not found');
+    }
+
+    // Update order status
+    await db.update(productOrders)
+      .set({
+        status: 'cancelled',
+        cancellationReason: reason,
+        cancelledAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(productOrders.id, orderId));
+
+    // Return stock if order is in early status (pending/confirmed)
+    if (['pending', 'confirmed'].includes(order.status)) {
+      const orderItems = await db.select()
+        .from(productOrderItems)
+        .where(eq(productOrderItems.orderId, orderId));
+
+      for (const item of orderItems) {
+        // Return stock to retail allocation
+        const [config] = await db.select()
+          .from(productRetailConfig)
+          .where(eq(productRetailConfig.productId, item.productId))
+          .limit(1);
+
+        if (config && config.retailStockAllocated !== null) {
+          await db.update(productRetailConfig)
+            .set({
+              retailStockAllocated: config.retailStockAllocated + item.quantity
+            })
+            .where(eq(productRetailConfig.productId, item.productId));
+        }
+      }
+    }
+  }
+
+  // ===============================================
+  // BUSINESS ADMIN - Analytics
+  // ===============================================
+  async getProductAnalytics(salonId: string, filters?: {
+    period?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<any> {
+    const now = new Date();
+    let startDate: Date;
+
+    if (filters?.dateFrom && filters?.dateTo) {
+      startDate = new Date(filters.dateFrom);
+    } else {
+      switch (filters?.period) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+        default:
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+      }
+    }
+
+    const endDate = filters?.dateTo ? new Date(filters.dateTo) : now;
+
+    // Get revenue summary
+    const revenueData = await db
+      .select({
+        totalRevenue: sql<number>`COALESCE(SUM(${productOrders.totalPaisa}), 0)`,
+        totalOrders: sql<number>`COUNT(*)`,
+        averageOrderValue: sql<number>`COALESCE(AVG(${productOrders.totalPaisa}), 0)`
+      })
+      .from(productOrders)
+      .where(
+        and(
+          eq(productOrders.salonId, salonId),
+          gte(productOrders.createdAt, startDate),
+          lte(productOrders.createdAt, endDate),
+          sql`${productOrders.status} NOT IN ('cancelled', 'refunded')`
+        )
+      );
+
+    // Get total units sold
+    const unitsData = await db
+      .select({
+        totalUnits: sql<number>`COALESCE(SUM(${productOrderItems.quantity}), 0)`
+      })
+      .from(productOrderItems)
+      .innerJoin(productOrders, eq(productOrderItems.orderId, productOrders.id))
+      .where(
+        and(
+          eq(productOrders.salonId, salonId),
+          gte(productOrders.createdAt, startDate),
+          lte(productOrders.createdAt, endDate),
+          sql`${productOrders.status} NOT IN ('cancelled', 'refunded')`
+        )
+      );
+
+    // Get top products
+    const topProducts = await db
+      .select({
+        productId: productOrderItems.productId,
+        productName: products.name,
+        unitsSold: sql<number>`SUM(${productOrderItems.quantity})`,
+        revenue: sql<number>`SUM(${productOrderItems.unitPricePaisa} * ${productOrderItems.quantity})`
+      })
+      .from(productOrderItems)
+      .innerJoin(productOrders, eq(productOrderItems.orderId, productOrders.id))
+      .innerJoin(products, eq(productOrderItems.productId, products.id))
+      .where(
+        and(
+          eq(productOrders.salonId, salonId),
+          gte(productOrders.createdAt, startDate),
+          lte(productOrders.createdAt, endDate),
+          sql`${productOrders.status} NOT IN ('cancelled', 'refunded')`
+        )
+      )
+      .groupBy(productOrderItems.productId, products.name)
+      .orderBy(desc(sql`SUM(${productOrderItems.unitPricePaisa} * ${productOrderItems.quantity})`))
+      .limit(10);
+
+    return {
+      period: filters?.period || 'month',
+      dateRange: {
+        from: startDate.toISOString().split('T')[0],
+        to: endDate.toISOString().split('T')[0]
+      },
+      summary: {
+        totalRevenue: revenueData[0]?.totalRevenue || 0,
+        totalOrders: revenueData[0]?.totalOrders || 0,
+        totalUnits: unitsData[0]?.totalUnits || 0,
+        averageOrderValue: Math.round(revenueData[0]?.averageOrderValue || 0)
+      },
+      topProducts: topProducts.map(p => ({
+        productId: p.productId,
+        productName: p.productName,
+        unitsSold: p.unitsSold,
+        revenue: p.revenue
+      }))
+    };
+  }
+
+  // ===============================================
+  // BUSINESS ADMIN - Delivery Settings
+  // ===============================================
+  async getDeliverySettings(salonId: string): Promise<any> {
+    const [settings] = await db
+      .select()
+      .from(deliverySettings)
+      .where(eq(deliverySettings.salonId, salonId))
+      .limit(1);
+
+    return settings || null;
+  }
+
+  async updateDeliverySettings(salonId: string, settings: any): Promise<void> {
+    const existing = await db.select()
+      .from(deliverySettings)
+      .where(eq(deliverySettings.salonId, salonId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      await db.update(deliverySettings)
+        .set({
+          ...settings,
+          updatedAt: new Date()
+        })
+        .where(eq(deliverySettings.salonId, salonId));
+    } else {
+      await db.insert(deliverySettings).values({
+        salonId,
+        ...settings
+      });
+    }
   }
 }
 

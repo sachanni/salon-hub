@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
 import { db } from "./db";
@@ -11,7 +11,8 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import express from "express";
 import { verifyFirebaseToken, getPhoneNumberFromToken } from "./firebaseAdmin";
-import { createClient } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 import { OfferCalculator } from "./offerCalculator";
 import { getGooglePlacesService } from "./services/googlePlaces";
 import { z } from "zod";
@@ -106,7 +107,18 @@ import {
   toggleOfferStatusSchema,
 } from "@shared/schema";
 import { sendVerificationEmail } from "./emailService";
-import { communicationService, sendBookingConfirmation, sendBookingReminder, sendRescheduleNotification } from "./communicationService";
+import { 
+  communicationService, 
+  sendBookingConfirmation, 
+  sendBookingReminder, 
+  sendRescheduleNotification,
+  sendOrderConfirmation,
+  sendPaymentSuccess,
+  sendPaymentFailure,
+  sendOrderStatusUpdate,
+  sendOrderCancellation,
+  sendLowStockAlert
+} from "./communicationService";
 import { schedulingService } from "./schedulingService";
 import { communicationRateLimits, businessTierLimits, checkBusinessLimits, spikeProtection } from "./middleware/rateLimiting";
 import { analyticsService } from "./analyticsService";
@@ -154,17 +166,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Session-based authentication middleware
-  const isAuthenticated = async (req: any, res: any, next: any) => {
+  const isAuthenticated = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     const userId = req.session?.userId;
     if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
+      res.status(401).json({ message: "Unauthorized" });
+      return;
     }
 
     try {
       // Populate user data with roles and organization memberships for authorization
       const user = await storage.getUserById(userId);
       if (!user) {
-        return res.status(401).json({ message: "User not found" });
+        res.status(401).json({ message: "User not found" });
+        return;
       }
 
       const userRoles = await storage.getUserRoles(userId);
@@ -173,7 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set user data on request for authorization middleware
       req.user = {
         id: userId,
-        email: user.email,
+        email: user.email ?? '',
         roles: userRoles.map(role => role.name),
         orgMemberships
       };
@@ -181,7 +195,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next();
     } catch (error) {
       console.error("Authentication error:", error);
-      return res.status(401).json({ message: "Authentication failed" });
+      res.status(401).json({ message: "Authentication failed" });
     }
   };
 
@@ -406,7 +420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Manual registration endpoint (works alongside Replit Auth)
-  app.post('/api/auth/register', async (req: any, res) => {
+  app.post('/api/auth/register', async (req: Request, res: Response) => {
     try {
       const { email, password, firstName, lastName, phone, userType, workPreference, panNumber, gstNumber, firebaseToken, phoneVerified } = req.body;
 
@@ -1579,7 +1593,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // INVENTORY MANAGEMENT ROUTES
   // =================================
 
-  // Product Categories
+  // Public Product Categories - Customer-facing read-only endpoint
+  // Returns sanitized category data (only customer-safe fields)
+  app.get('/api/salons/:salonId/product-categories/public', async (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const allCategories = await storage.getProductCategoriesBySalonId(salonId);
+      
+      // Filter only active categories and whitelist customer-safe fields
+      const sanitizedCategories = allCategories
+        .filter(cat => cat.isActive === 1) // Only show active categories to customers
+        .map(cat => ({
+          id: cat.id,
+          name: cat.name,
+          description: cat.description,
+          parentCategoryId: cat.parentCategoryId,
+        }));
+      
+      // Wrap in object for backward compatibility with frontend
+      res.json({ categories: sanitizedCategories });
+    } catch (error) {
+      console.error('Error fetching public product categories:', error);
+      res.status(500).json({ error: 'Failed to fetch product categories' });
+    }
+  });
+
+  // Admin Product Categories - Protected endpoint with full data
   app.get('/api/salons/:salonId/product-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
@@ -2668,7 +2707,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Location search endpoint for the location picker modal
   // Redis client for caching
-  let redisClient: any = null;
+  let redisClient: RedisClientType | null = null;
   const CACHE_DURATION = 5 * 60; // 5 minutes in seconds
   
   // Initialize Redis client
@@ -2676,7 +2715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const redisUrl = process.env.REDIS_URL;
     if (redisUrl) {
       redisClient = createClient({ url: redisUrl });
-      redisClient.on('error', (err: any) => console.error('Redis Client Error:', err));
+      redisClient.on('error', (err: Error) => console.error('Redis Client Error:', err));
       redisClient.on('connect', () => console.log('✅ Redis connected successfully'));
       redisClient.connect();
     } else {
@@ -2684,7 +2723,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('   Add REDIS_URL to your .env file for better performance.');
     }
   } catch (error) {
-    console.error('Redis connection error:', error);
+    console.error('Redis connection error:', error instanceof Error ? error.message : String(error));
   }
   
   // Fallback in-memory cache
@@ -4171,6 +4210,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Mark payment as completed
       await storage.updatePaymentStatus(paymentRecord.id, 'completed', new Date());
 
+      // ============ HANDLE PRODUCT ORDER PAYMENTS ============
+      if (paymentRecord.productOrderId) {
+        console.log(`Processing product order payment: ${paymentRecord.productOrderId}`);
+        
+        try {
+          // Update product order status to processing
+          await storage.updateOrderStatus(paymentRecord.productOrderId, 'processing');
+          
+          console.log(`Product order ${paymentRecord.productOrderId} marked as processing after successful payment`);
+          
+          // Send payment success and order confirmation emails
+          try {
+            const order = await storage.getProductOrder(paymentRecord.productOrderId);
+            
+            if (order) {
+              const user = await storage.getUserById(order.customerId);
+              const salon = await storage.getSalonById(order.salonId);
+              
+              if (user && salon && user.email) {
+                // Format customer name with null safety
+                const customerName = user.firstName 
+                  ? `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`.trim()
+                  : user.email.split('@')[0];
+                
+                // Format order items for email
+                const orderItemsList = order.items.map((item: any, index: number) => 
+                  `${index + 1}. ${item.productName}\n   Qty: ${item.quantity} x Rs.${(item.priceAtOrderPaisa / 100).toFixed(2)} = Rs.${((item.priceAtOrderPaisa * item.quantity) / 100).toFixed(2)}`
+                ).join('\n');
+                
+                // Format delivery address properly
+                let formattedAddress = 'Pickup from salon';
+                const addr = order.deliveryAddress;
+                if (typeof addr === 'object' && addr.line1) {
+                  formattedAddress = `${addr.line1}\n${addr.line2 ? addr.line2 + '\n' : ''}${addr.city}, ${addr.state} ${addr.pincode}`;
+                } else if (typeof addr === 'string') {
+                  formattedAddress = addr;
+                }
+                
+                // Send payment success email
+                await sendPaymentSuccess(
+                  order.salonId,
+                  order.id,
+                  user.email,
+                  {
+                    customer_name: customerName,
+                    salon_name: salon.name,
+                    order_number: order.orderNumber,
+                    amount_paid: (order.totalPaisa / 100).toFixed(2),
+                    payment_method: 'Online Payment',
+                    transaction_id: payment.id,
+                  }
+                );
+                
+                // Send order confirmation email (with updated status)
+                await sendOrderConfirmation(
+                  order.salonId,
+                  order.id,
+                  user.email,
+                  {
+                    customer_name: customerName,
+                    salon_name: salon.name,
+                    order_number: order.orderNumber,
+                    item_count: order.items.length.toString(),
+                    total_amount: (order.totalPaisa / 100).toFixed(2),
+                    delivery_address: formattedAddress,
+                    order_items: orderItemsList,
+                    payment_method: 'Online Payment',
+                    payment_status: 'Paid',
+                  }
+                );
+                
+                console.log(`Payment success and order confirmation emails sent for order ${order.id}`);
+              }
+            }
+          } catch (emailError) {
+            console.error('Failed to send payment success emails:', emailError);
+            // Don't fail the payment if email fails
+          }
+          
+        } catch (error) {
+          console.error('Error processing product order payment:', error);
+        }
+        
+        return; // Exit early for product orders
+      }
+
       // ============ OFFER VALIDATION & BOOKING CONFIRMATION ============
       // CRITICAL: Validate offers BEFORE confirming booking to prevent usage limit bypass
       const booking = await storage.getBooking(paymentRecord.bookingId);
@@ -4288,6 +4413,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update payment status to failed
       await storage.updatePaymentStatus(paymentRecord.id, 'failed');
       
+      // Handle product order payment failures
+      if (paymentRecord.productOrderId) {
+        console.log(`Handling product order payment failure: ${paymentRecord.productOrderId}`);
+        
+        try {
+          // Get order details to release stock
+          const order = await storage.getProductOrder(paymentRecord.productOrderId);
+          
+          if (order && order.items) {
+            // Release reserved stock for all items
+            for (const item of order.items) {
+              await storage.releaseProductStock(item.productId, item.quantity);
+              console.log(`Released ${item.quantity} units of product ${item.productId}`);
+            }
+          }
+          
+          // Mark order as payment_failed
+          await storage.updateOrderStatus(paymentRecord.productOrderId, 'payment_failed');
+          
+          // Send payment failure notification to customer
+          try {
+            const user = await storage.getUserById(order.customerId);
+            const salon = await storage.getSalonById(order.salonId);
+            
+            if (user && salon && user.email) {
+              // Format customer name with null safety
+              const customerName = user.firstName 
+                ? `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`.trim()
+                : user.email.split('@')[0];
+              
+              await sendPaymentFailure(
+                order.salonId,
+                order.id,
+                user.email,
+                {
+                  customer_name: customerName,
+                  salon_name: salon.name,
+                  order_number: order.orderNumber,
+                  amount: (order.totalPaisa / 100).toFixed(2),
+                  payment_method: 'Online Payment',
+                  failure_reason: payment.error_description || payment.error_reason || 'Payment could not be processed',
+                }
+              );
+              
+              console.log(`Payment failure email sent for order ${order.id}`);
+            }
+          } catch (emailError) {
+            console.error('Failed to send payment failure email:', emailError);
+            // Don't fail the webhook processing if email fails
+          }
+          
+          console.log(`Product order ${paymentRecord.productOrderId} marked as payment_failed and stock released`);
+        } catch (error) {
+          console.error('Error handling product order payment failure:', error);
+        }
+        
+        return; // Exit early for product orders
+      }
+      
       // Update booking status to cancelled
       await storage.updateBookingStatus(paymentRecord.bookingId, 'cancelled');
 
@@ -4327,6 +4511,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await handlePaymentCaptured(payment);
     } catch (error) {
       console.error('Error processing order.paid:', error);
+    }
+  }
+
+  // Helper function to check and send low stock alerts
+  async function checkAndSendLowStockAlert(productId: string, salonId: string) {
+    try {
+      // Get product with retail config
+      const product = await storage.getProductById(productId, true);
+      
+      if (!product || !product.retailConfig) {
+        return;
+      }
+      
+      const retailStock = parseFloat(product.retailConfig.retailStockAllocated || '0');
+      const serviceStock = parseFloat(product.retailConfig.serviceStockAllocated || '0');
+      const threshold = product.retailConfig.lowStockThreshold || 5;
+      const totalStock = retailStock + serviceStock;
+      
+      // Check if stock is below threshold
+      if (totalStock <= threshold) {
+        console.log(`⚠️ Low stock detected for product ${product.name}: ${totalStock} units (threshold: ${threshold})`);
+        
+        // Get salon owner/admin emails
+        try {
+          const salon = await storage.getSalonById(salonId);
+          
+          if (salon && salon.ownerId) {
+            const owner = await storage.getUserById(salon.ownerId);
+            
+            if (owner && owner.email) {
+              // Send low stock alert email
+              await sendLowStockAlert(
+                salonId,
+                owner.email,
+                {
+                  product_name: product.name,
+                  current_stock: totalStock.toString(),
+                  threshold: threshold.toString(),
+                  retail_allocated: retailStock.toString(),
+                  service_allocated: serviceStock.toString(),
+                  product_link: `${process.env.APP_URL || 'https://salonhub.com'}/admin/inventory/products/${productId}`,
+                }
+              );
+              
+              console.log(`Low stock alert sent to ${owner.email} for product ${product.name}`);
+            }
+          }
+        } catch (emailError) {
+          console.error('Failed to send low stock alert:', emailError);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking low stock:', error);
     }
   }
 
@@ -9208,18 +9445,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Product category routes
-  app.get('/api/salons/:salonId/product-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
-    try {
-      const { salonId } = req.params;
-      const categories = await storage.getProductCategoriesBySalonId(salonId);
-      res.json(categories);
-    } catch (error) {
-      console.error('Error fetching product categories:', error);
-      res.status(500).json({ error: 'Failed to fetch product categories' });
-    }
-  });
-
   app.post('/api/salons/:salonId/product-categories', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
@@ -12091,6 +12316,1044 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // AI Personal Look Advisor routes (Premium feature)
   app.use('/api/premium/ai-look', isAuthenticated, aiLookRoutes);
+
+  // ===============================================
+  // PRODUCT E-COMMERCE ROUTES
+  // Customer-facing retail product sales
+  // ===============================================
+
+  // Product Discovery - Get retail products for a salon (PUBLIC)
+  app.get('/api/salons/:salonId/products/retail', async (req, res) => {
+    try {
+      const { salonId } = req.params;
+      const { 
+        categoryId, 
+        search, 
+        minPrice, 
+        maxPrice, 
+        featured,
+        limit = '50',
+        offset = '0' 
+      } = req.query;
+
+      const products = await storage.getRetailProducts(salonId, {
+        categoryId: categoryId as string,
+        search: search as string,
+        minPrice: minPrice ? parseInt(minPrice as string) : undefined,
+        maxPrice: maxPrice ? parseInt(maxPrice as string) : undefined,
+        featured: featured === 'true',
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      });
+
+      res.json({ success: true, data: { products } });
+    } catch (error: any) {
+      console.error('Error fetching retail products:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Details - Get single product with variants (PUBLIC)
+  app.get('/api/products/:productId', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const { includeVariants = 'true' } = req.query;
+
+      const product = await storage.getProductById(
+        productId,
+        includeVariants === 'true'
+      );
+
+      if (!product) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      res.json({ success: true, data: { product } });
+    } catch (error: any) {
+      console.error('Error fetching product:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Search - Search across products (PUBLIC)
+  app.get('/api/products/search', async (req, res) => {
+    try {
+      const { 
+        query, 
+        salonId, 
+        categoryId, 
+        minPrice, 
+        maxPrice,
+        limit = '50' 
+      } = req.query;
+
+      if (!query) {
+        return res.status(400).json({ error: 'Search query is required' });
+      }
+
+      const products = await storage.searchProducts(query as string, {
+        salonId: salonId as string,
+        categoryId: categoryId as string,
+        minPrice: minPrice ? parseInt(minPrice as string) : undefined,
+        maxPrice: maxPrice ? parseInt(maxPrice as string) : undefined,
+        limit: parseInt(limit as string),
+      });
+
+      res.json({ success: true, data: { products } });
+    } catch (error: any) {
+      console.error('Error searching products:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Variants - Get variants for a product (PUBLIC)
+  app.get('/api/products/:productId/variants', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const variants = await storage.getProductVariants(productId);
+      res.json({ success: true, data: { variants } });
+    } catch (error: any) {
+      console.error('Error fetching product variants:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Shopping Cart - Get active cart (AUTHENTICATED)
+  app.get('/api/cart', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { salonId } = req.query;
+
+      if (!salonId) {
+        return res.status(400).json({ error: 'salonId is required' });
+      }
+
+      const cart = await storage.getActiveCart(userId, salonId as string);
+      res.json({ success: true, data: { cart: cart || null } });
+    } catch (error: any) {
+      console.error('Error fetching cart:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Shopping Cart - Add item to cart
+  app.post('/api/cart/items', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      
+      // Validate request body with Zod
+      const validation = schema.addToCartSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { salonId, productId, variantId, quantity } = validation.data;
+
+      // Get or create cart
+      const cart = await storage.createOrGetCart(userId, salonId);
+
+      // Get product with server-side price verification
+      const product = await storage.getProductById(productId, true);
+      if (!product) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      if (!product.availableForRetail) {
+        return res.status(400).json({ error: 'Product not available for retail' });
+      }
+
+      // Use server-calculated price (never trust client)
+      let serverPrice = product.retailPriceInPaisa;
+
+      // If variant selected, use variant price
+      if (variantId && product.variants) {
+        const variant = product.variants.find(v => v.id === variantId);
+        if (!variant) {
+          return res.status(404).json({ error: 'Variant not found' });
+        }
+        if (variant.priceAdjustmentPaisa) {
+          serverPrice = product.retailPriceInPaisa + variant.priceAdjustmentPaisa;
+        }
+      }
+
+      // Check stock availability (considering retail allocation)
+      const retailConfig = product.retailConfig;
+      const availableStock = retailConfig?.retailStockAllocated || 0;
+      
+      if (availableStock < quantity) {
+        return res.status(400).json({ 
+          error: 'Insufficient stock', 
+          available: availableStock 
+        });
+      }
+
+      // Add item with server-calculated price
+      const item = await storage.addCartItem(cart.id, {
+        productId,
+        variantId,
+        quantity,
+        priceAtAdd: serverPrice,
+      });
+
+      res.json({ success: true, data: { item } });
+    } catch (error: any) {
+      console.error('Error adding to cart:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Shopping Cart - Update item quantity
+  app.put('/api/cart/items/:itemId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { itemId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.updateCartItemSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { quantity } = validation.data;
+
+      await storage.updateCartItem(itemId, quantity);
+      res.json({ success: true, data: { message: 'Cart item updated' } });
+    } catch (error: any) {
+      console.error('Error updating cart item:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Shopping Cart - Remove item
+  app.delete('/api/cart/items/:itemId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { itemId } = req.params;
+      await storage.removeCartItem(itemId);
+      res.json({ success: true, data: { message: 'Cart item removed' } });
+    } catch (error: any) {
+      console.error('Error removing cart item:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Orders - Create order
+  app.post('/api/product-orders', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      
+      // Validate request body with Zod
+      const validation = schema.createProductOrderSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { salonId, cartId, deliveryAddress, paymentMethod, fulfillmentType } = validation.data;
+
+      // Get active cart
+      const cart = await storage.getActiveCart(userId, salonId);
+      if (!cart || cart.id !== cartId) {
+        return res.status(404).json({ error: 'Cart not found' });
+      }
+
+      if (!cart.items || cart.items.length === 0) {
+        return res.status(400).json({ error: 'Cart is empty' });
+      }
+
+      // Server-side price calculation and stock validation
+      let subtotalPaisa = 0;
+      const orderItems = [];
+
+      // PHASE 1: Validate products and calculate prices (no database operations yet)
+      for (const item of cart.items) {
+        // Get product with latest price
+        const product = await storage.getProductById(item.productId, true);
+        if (!product) {
+          return res.status(404).json({ error: `Product ${item.productId} not found` });
+        }
+
+        if (!product.availableForRetail) {
+          return res.status(400).json({ error: `Product ${product.name} not available for retail` });
+        }
+
+        // Verify stock availability BEFORE transaction (read-only check)
+        const retailConfig = product.retailConfig;
+        const availableStock = parseFloat(retailConfig?.retailStockAllocated || '0');
+        if (availableStock < item.quantity) {
+          return res.status(400).json({ 
+            error: `Insufficient stock for ${product.name}`,
+            available: availableStock,
+            requested: item.quantity
+          });
+        }
+
+        // Calculate server-side price
+        let serverPrice = product.retailPriceInPaisa;
+        if (item.variantId && product.variants) {
+          const variant = product.variants.find(v => v.id === item.variantId);
+          if (variant?.priceAdjustmentPaisa) {
+            serverPrice += variant.priceAdjustmentPaisa;
+          }
+        }
+
+        subtotalPaisa += serverPrice * item.quantity;
+        orderItems.push({
+          productId: item.productId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          priceAtOrderPaisa: serverPrice,
+          productName: product.name,
+          productImage: product.images?.[0] || null,
+        });
+      }
+
+      // PHASE 2: Validate delivery settings and payment configuration (before transaction)
+      const deliverySettings = await db
+        .select()
+        .from(schema.deliverySettings)
+        .where(eq(schema.deliverySettings.salonId, salonId))
+        .limit(1);
+
+      let deliveryFeePaisa = 0;
+      if (fulfillmentType === 'delivery') {
+        const settings = deliverySettings[0];
+        if (settings?.enableHomeDelivery === 1) {
+          deliveryFeePaisa = settings.deliveryChargePaisa || 0;
+          // Free delivery above threshold
+          if (settings.freeDeliveryAbovePaisa && subtotalPaisa >= settings.freeDeliveryAbovePaisa) {
+            deliveryFeePaisa = 0;
+          }
+        } else {
+          return res.status(400).json({ error: 'Home delivery not enabled for this salon' });
+        }
+      }
+
+      // Validate Razorpay is configured (before transaction)
+      if ((paymentMethod === 'online' || paymentMethod === 'upi') && !razorpay) {
+        return res.status(503).json({ error: 'Payment service not configured' });
+      }
+
+      // Calculate tax (18% GST for India)
+      const taxPaisa = Math.round(subtotalPaisa * 0.18);
+      const totalPaisa = subtotalPaisa + taxPaisa + deliveryFeePaisa;
+
+      // PHASE 3: ATOMIC TRANSACTION - Reserve stock + Create order + Initialize payment
+      try {
+        const result = await db.transaction(async (tx) => {
+          // Step 1: Atomically reserve stock for ALL items (inside transaction)
+          for (const item of orderItems) {
+            // Atomic stock decrement with availability check
+            const [updatedConfig] = await tx
+              .update(schema.productRetailConfig)
+              .set({
+                retailStockAllocated: sql`${schema.productRetailConfig.retailStockAllocated} - ${item.quantity}`,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(schema.productRetailConfig.productId, item.productId),
+                  sql`${schema.productRetailConfig.retailStockAllocated} >= ${item.quantity}` // Ensure sufficient stock
+                )
+              )
+              .returning();
+
+            if (!updatedConfig) {
+              throw new Error(`Insufficient stock for ${item.productName} (concurrent purchase)`);
+            }
+          }
+
+          // Step 2: Create order (inside transaction)
+          const order = await storage.createProductOrder({
+            userId,
+            salonId,
+            cartId,
+            deliveryAddress,
+            paymentMethod,
+            fulfillmentType,
+            items: orderItems,
+            subtotalInPaisa: subtotalPaisa,
+            taxInPaisa: taxPaisa,
+            deliveryFeeInPaisa: deliveryFeePaisa,
+            totalInPaisa: totalPaisa,
+          });
+
+          return { order };
+        });
+
+        const { order } = result;
+        
+        // Check for low stock alerts after successful order creation
+        for (const item of orderItems) {
+          // Check asynchronously without blocking order flow
+          checkAndSendLowStockAlert(item.productId, salonId).catch(err => 
+            console.error(`Failed to check low stock for product ${item.productId}:`, err)
+          );
+        }
+
+        // Step 3: Initialize payment (OUTSIDE transaction - external API call)
+        // If this fails, order exists in database with payment_failed status for retry
+        if (paymentMethod === 'online' || paymentMethod === 'upi') {
+          try {
+            // Create Razorpay order
+            const razorpayOrderOptions = {
+              amount: totalPaisa,
+              currency: 'INR',
+              receipt: `product_order_${order.id}`,
+              notes: {
+                orderId: order.id,
+                userId: userId,
+                salonId: salonId,
+                orderType: 'product_order'
+              }
+            };
+
+            const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
+
+            // Create payment record
+            await storage.createPayment({
+              userId: userId,
+              productOrderId: order.id,
+              amountPaisa: totalPaisa,
+              paymentMethod: paymentMethod,
+              razorpayOrderId: razorpayOrder.id,
+              status: 'pending',
+            });
+
+            // Mark order as payment_pending
+            await storage.updateOrderStatus(order.id, 'payment_pending');
+
+            // Return order with Razorpay details
+            return res.json({ 
+              success: true, 
+              data: { 
+                order,
+                razorpayOrder: {
+                  id: razorpayOrder.id,
+                  amount: razorpayOrder.amount,
+                  currency: razorpayOrder.currency,
+                },
+                razorpayKeyId: process.env.RAZORPAY_KEY_ID
+              } 
+            });
+          } catch (razorpayError: any) {
+            console.error('Razorpay payment initialization failed:', razorpayError);
+            
+            // CRITICAL: Create payment attempt record even on failure (for retry tracking)
+            await storage.createPayment({
+              userId: userId,
+              productOrderId: order.id,
+              amountPaisa: totalPaisa,
+              paymentMethod: paymentMethod,
+              razorpayOrderId: null, // Razorpay order not created
+              status: 'failed',
+            });
+            
+            // CRITICAL: Mark order as payment_failed so customer can retry
+            await storage.updateOrderStatus(order.id, 'payment_failed');
+            
+            // Return error with order ID for retry
+            return res.status(500).json({ 
+              error: 'Payment initialization failed. Please try again.',
+              orderId: order.id,
+              canRetry: true
+            });
+          }
+        } else {
+          // COD or other payment methods - order created successfully
+          
+          // Send order confirmation email
+          try {
+            const user = await storage.getUserById(userId);
+            const salon = await storage.getSalonById(salonId);
+            
+            if (user && salon && user.email) {
+              // Format customer name with null safety
+              const customerName = user.firstName 
+                ? `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`.trim()
+                : user.email.split('@')[0];
+              
+              // Format order items for email
+              const orderItemsList = orderItems.map((item, index) => 
+                `${index + 1}. ${item.productName}\n   Qty: ${item.quantity} x Rs.${(item.priceAtOrderPaisa / 100).toFixed(2)} = Rs.${((item.priceAtOrderPaisa * item.quantity) / 100).toFixed(2)}`
+              ).join('\n');
+              
+              // Format delivery address properly
+              let formattedAddress = 'Pickup from salon';
+              if (typeof deliveryAddress === 'object' && deliveryAddress.line1) {
+                formattedAddress = `${deliveryAddress.line1}\n${deliveryAddress.line2 ? deliveryAddress.line2 + '\n' : ''}${deliveryAddress.city}, ${deliveryAddress.state} ${deliveryAddress.pincode}`;
+              } else if (typeof deliveryAddress === 'string') {
+                formattedAddress = deliveryAddress;
+              }
+              
+              await sendOrderConfirmation(
+                salonId,
+                order.id,
+                user.email,
+                {
+                  customer_name: customerName,
+                  salon_name: salon.name,
+                  order_number: order.orderNumber,
+                  item_count: orderItems.length.toString(),
+                  total_amount: (totalPaisa / 100).toFixed(2),
+                  delivery_address: formattedAddress,
+                  order_items: orderItemsList,
+                  payment_method: paymentMethod === 'cod' ? 'Cash on Delivery' : paymentMethod,
+                  payment_status: 'Pending (COD)',
+                }
+              );
+            }
+          } catch (emailError) {
+            console.error('Failed to send order confirmation email:', emailError);
+            // Don't fail the order if email fails
+          }
+          
+          return res.json({ success: true, data: { order } });
+        }
+      } catch (error: any) {
+        console.error('Error creating product order:', error);
+        // Transaction automatically rolled back on error (stock + order)
+        const statusCode = error.message.includes('not configured') ? 503 
+          : error.message.includes('not enabled') ? 400 
+          : error.message.includes('Insufficient stock') ? 400
+          : 500;
+        return res.status(statusCode).json({ error: error.message });
+      }
+    } catch (error: any) {
+      console.error('Error creating product order:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Orders - Get order details (AUTHENTICATED)
+  app.get('/api/product-orders/:orderId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { orderId } = req.params;
+      const order = await storage.getProductOrder(orderId);
+
+      if (!order) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      res.json({ success: true, data: { order } });
+    } catch (error: any) {
+      console.error('Error fetching product order:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Orders - Get user's order history (AUTHENTICATED)
+  app.get('/api/product-orders', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { limit = '50' } = req.query;
+
+      const orders = await storage.getProductOrdersByUser(
+        userId,
+        parseInt(limit as string)
+      );
+
+      res.json({ success: true, data: { orders } });
+    } catch (error: any) {
+      console.error('Error fetching product orders:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Orders - Cancel order (AUTHENTICATED)
+  app.put('/api/product-orders/:orderId/cancel', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { orderId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.cancelOrderSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { reason } = validation.data;
+
+      await storage.cancelProductOrder(orderId, reason);
+      res.json({ success: true, data: { message: 'Order cancelled' } });
+    } catch (error: any) {
+      console.error('Error cancelling product order:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Wishlist - Get user's wishlist
+  app.get('/api/wishlist', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { salonId } = req.query;
+
+      const wishlist = await storage.getWishlist(userId, salonId as string);
+      res.json({ success: true, data: { wishlist } });
+    } catch (error: any) {
+      console.error('Error fetching wishlist:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Wishlist - Add to wishlist
+  app.post('/api/wishlist', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      
+      // Validate request body with Zod
+      const validation = schema.addToWishlistSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { productId, variantId } = validation.data;
+
+      const wishlistItem = await storage.addToWishlist(userId, productId, variantId);
+      res.json({ success: true, data: { wishlistItem } });
+    } catch (error: any) {
+      console.error('Error adding to wishlist:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Wishlist - Remove from wishlist
+  app.delete('/api/wishlist/:wishlistId', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { wishlistId } = req.params;
+      await storage.removeFromWishlist(wishlistId);
+      res.json({ success: true, data: { message: 'Item removed from wishlist' } });
+    } catch (error: any) {
+      console.error('Error removing from wishlist:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Reviews - Get product reviews (PUBLIC - no auth required for reading)
+  app.get('/api/products/:productId/reviews', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const { rating, verified, limit = '50', offset = '0' } = req.query;
+
+      const reviews = await storage.getProductReviews(productId, {
+        rating: rating ? parseInt(rating as string) : undefined,
+        verified: verified === 'true',
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      });
+
+      res.json({ success: true, data: { reviews } });
+    } catch (error: any) {
+      console.error('Error fetching product reviews:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Reviews - Submit review (AUTHENTICATED)
+  app.post('/api/products/:productId/reviews', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { productId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.createReviewSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { orderId, rating, title, reviewText, images } = validation.data;
+
+      const review = await storage.createProductReview({
+        productId,
+        userId,
+        orderId,
+        rating,
+        title,
+        reviewText,
+        images,
+      });
+
+      res.json({ success: true, data: { review } });
+    } catch (error: any) {
+      console.error('Error creating product review:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Views - Track view (PUBLIC - optional auth)
+  app.post('/api/products/:productId/view', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const userId = (req as AuthenticatedRequest).user?.id || null;
+      
+      // Validate request body with Zod
+      const validation = schema.trackProductViewSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { sessionId } = validation.data;
+
+      await storage.trackProductView(userId, productId, sessionId);
+      res.json({ success: true, data: { message: 'View tracked' } });
+    } catch (error: any) {
+      console.error('Error tracking product view:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================================================================================
+  // BUSINESS ADMIN - PRODUCT MANAGEMENT APIs
+  // ==================================================================================
+
+  // Admin - Get products list with retail configuration
+  app.get('/api/admin/salons/:salonId/products/retail', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const { availableForRetail, categoryId, search, limit = '50', offset = '0' } = req.query;
+
+      const products = await storage.getAdminProductList(salonId, {
+        availableForRetail: availableForRetail === 'true' ? true : availableForRetail === 'false' ? false : undefined,
+        categoryId: categoryId as string | undefined,
+        search: search as string | undefined,
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      });
+
+      res.json({ success: true, data: { products } });
+    } catch (error: any) {
+      console.error('Error fetching admin products:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin - Get product stats
+  app.get('/api/admin/salons/:salonId/products/stats', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+
+      // Get all products for this salon
+      const allProducts = await db
+        .select()
+        .from(schema.products)
+        .where(eq(schema.products.salonId, salonId));
+
+      // Get orders from today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todayOrders = await db
+        .select({ id: schema.productOrders.id })
+        .from(schema.productOrders)
+        .where(
+          and(
+            eq(schema.productOrders.salonId, salonId),
+            sql`${schema.productOrders.createdAt} >= ${today.toISOString()}`
+          )
+        );
+
+      const stats = {
+        totalProducts: allProducts.length,
+        retailEnabled: allProducts.filter(p => p.availableForRetail).length,
+        lowStock: allProducts.filter(p => p.stock < 10).length,
+        ordersToday: todayOrders.length,
+      };
+
+      res.json({ success: true, data: stats });
+    } catch (error: any) {
+      console.error('Error fetching product stats:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin - Configure product for retail
+  app.put('/api/admin/salons/:salonId/products/:productId/retail-config', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, productId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.configureRetailSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      await storage.configureProductForRetail(productId, salonId, validation.data);
+
+      res.json({ success: true, data: { message: 'Product retail configuration updated' } });
+    } catch (error: any) {
+      console.error('Error configuring product for retail:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================================================================================
+  // BUSINESS ADMIN - ORDER MANAGEMENT APIs
+  // ==================================================================================
+
+  // Admin - Get order summary statistics
+  app.get('/api/admin/salons/:salonId/product-orders/summary', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+
+      // Get all orders for this salon
+      const allOrders = await db
+        .select({ status: schema.productOrders.status })
+        .from(schema.productOrders)
+        .where(eq(schema.productOrders.salonId, salonId));
+
+      // Count by status
+      const summary = {
+        new: allOrders.filter(o => o.status === 'pending').length,
+        preparing: allOrders.filter(o => o.status === 'processing').length,
+        ready: allOrders.filter(o => o.status === 'ready_for_pickup' || o.status === 'out_for_delivery').length,
+        delivered: allOrders.filter(o => o.status === 'delivered' || o.status === 'completed').length,
+        cancelled: allOrders.filter(o => o.status === 'cancelled').length,
+      };
+
+      res.json({ success: true, data: summary });
+    } catch (error: any) {
+      console.error('Error fetching order summary:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin - Get orders with filters
+  app.get('/api/admin/salons/:salonId/product-orders', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const { status, fulfillmentType, dateFrom, dateTo, search, limit = '50', offset = '0' } = req.query;
+
+      const result = await storage.getAdminOrders(salonId, {
+        status: status as string | undefined,
+        fulfillmentType: fulfillmentType as string | undefined,
+        dateFrom: dateFrom as string | undefined,
+        dateTo: dateTo as string | undefined,
+        search: search as string | undefined,
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Error fetching admin orders:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin - Update order status
+  app.put('/api/admin/salons/:salonId/product-orders/:orderId/status', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.updateOrderStatusSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      await storage.updateOrderStatus(orderId, salonId, validation.data);
+      
+      // Send status update email notification
+      try {
+        const order = await storage.getProductOrder(orderId);
+        
+        if (order && validation.data.status) {
+          const user = await storage.getUserById(order.customerId);
+          const salon = await storage.getSalonById(salonId);
+          
+          if (user && salon && user.email) {
+            // Format customer name with null safety
+            const customerName = user.firstName 
+              ? `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`.trim()
+              : user.email.split('@')[0];
+            
+            const newStatus = validation.data.status;
+            
+            // Only send emails for customer-facing status changes
+            if (['processing', 'packed', 'shipped', 'delivered'].includes(newStatus)) {
+              await sendOrderStatusUpdate(
+                salonId,
+                orderId,
+                user.email,
+                newStatus,
+                {
+                  customer_name: customerName,
+                  salon_name: salon.name,
+                  order_number: order.orderNumber,
+                  tracking_number: validation.data.trackingInfo || '',
+                  estimated_delivery: validation.data.estimatedDeliveryDate || 'TBD',
+                  delivered_date: newStatus === 'delivered' ? new Date().toLocaleDateString('en-IN') : '',
+                  delivery_method_pickup: order.fulfillmentType === 'pickup' ? 'true' : '',
+                  salon_address: salon.address || '',
+                }
+              );
+              
+              console.log(`Status update email sent for order ${orderId}, new status: ${newStatus}`);
+            }
+          }
+        }
+      } catch (emailError) {
+        console.error('Failed to send status update email:', emailError);
+        // Don't fail the status update if email fails
+      }
+
+      res.json({ success: true, data: { message: 'Order status updated' } });
+    } catch (error: any) {
+      console.error('Error updating order status:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin - Cancel order
+  app.post('/api/admin/salons/:salonId/product-orders/:orderId/cancel', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.cancelOrderAdminSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      const { reason, refundAmountPaisa } = validation.data;
+
+      await storage.cancelOrderAdmin(orderId, salonId, reason, refundAmountPaisa);
+      
+      // Send order cancellation email notification
+      try {
+        const order = await storage.getProductOrder(orderId);
+        
+        if (order) {
+          const user = await storage.getUserById(order.customerId);
+          const salon = await storage.getSalonById(salonId);
+          
+          if (user && salon && user.email) {
+            // Format customer name with null safety
+            const customerName = user.firstName 
+              ? `${user.firstName}${user.lastName ? ' ' + user.lastName : ''}`.trim()
+              : user.email.split('@')[0];
+            
+            await sendOrderCancellation(
+              salonId,
+              orderId,
+              user.email,
+              {
+                customer_name: customerName,
+                salon_name: salon.name,
+                order_number: order.orderNumber,
+                cancellation_reason: reason,
+                cancelled_date: new Date().toLocaleDateString('en-IN'),
+                refund_applicable: refundAmountPaisa && refundAmountPaisa > 0 ? 'true' : '',
+                refund_amount: refundAmountPaisa ? (refundAmountPaisa / 100).toFixed(2) : '0',
+                refund_method: order.paymentMethod === 'cod' ? 'N/A' : 'Original payment method',
+                refund_timeline: order.paymentMethod === 'cod' ? 'N/A' : '5-7 business days',
+              }
+            );
+            
+            console.log(`Cancellation email sent for order ${orderId}`);
+          }
+        }
+      } catch (emailError) {
+        console.error('Failed to send cancellation email:', emailError);
+        // Don't fail the cancellation if email fails
+      }
+
+      res.json({ success: true, data: { message: 'Order cancelled successfully' } });
+    } catch (error: any) {
+      console.error('Error cancelling order:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================================================================================
+  // BUSINESS ADMIN - ANALYTICS APIs
+  // ==================================================================================
+
+  // Admin - Get product analytics
+  app.get('/api/admin/salons/:salonId/analytics/products', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      const { period, dateFrom, dateTo } = req.query;
+
+      const analytics = await storage.getProductAnalytics(salonId, {
+        period: period as string | undefined,
+        dateFrom: dateFrom as string | undefined,
+        dateTo: dateTo as string | undefined,
+      });
+
+      res.json({ success: true, data: analytics });
+    } catch (error: any) {
+      console.error('Error fetching product analytics:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ==================================================================================
+  // BUSINESS ADMIN - DELIVERY SETTINGS APIs
+  // ==================================================================================
+
+  // Admin - Get delivery settings
+  app.get('/api/admin/salons/:salonId/delivery-settings', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+
+      const settings = await storage.getDeliverySettings(salonId);
+
+      res.json({ success: true, data: { settings } });
+    } catch (error: any) {
+      console.error('Error fetching delivery settings:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin - Update delivery settings
+  app.put('/api/admin/salons/:salonId/delivery-settings', requireSalonAccess, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { salonId } = req.params;
+      
+      // Validate request body with Zod
+      const validation = schema.updateDeliverySettingsSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: validation.error.errors 
+        });
+      }
+
+      await storage.updateDeliverySettings(salonId, validation.data);
+
+      res.json({ success: true, data: { message: 'Delivery settings updated' } });
+    } catch (error: any) {
+      console.error('Error updating delivery settings:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   const httpServer = createServer(app);
 

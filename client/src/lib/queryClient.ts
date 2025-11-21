@@ -29,7 +29,35 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const url = queryKey.join("/") as string;
+    // Extract URL path (all non-object elements) and query params (last object element if exists)
+    const pathSegments: string[] = [];
+    let queryParams: Record<string, unknown> | undefined;
+    
+    for (const segment of queryKey) {
+      if (typeof segment === 'object' && segment !== null && !Array.isArray(segment)) {
+        // Last object is query parameters (not arrays)
+        queryParams = segment as Record<string, unknown>;
+      } else {
+        // Convert all other types (string, number, boolean) to string for URL path
+        pathSegments.push(String(segment));
+      }
+    }
+    
+    // Build URL with query parameters
+    let url = pathSegments.join("/");
+    if (queryParams && Object.keys(queryParams).length > 0) {
+      const searchParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(queryParams)) {
+        if (value !== undefined && value !== null && value !== '') {
+          searchParams.append(key, String(value));
+        }
+      }
+      const queryString = searchParams.toString();
+      if (queryString) {
+        url += `?${queryString}`;
+      }
+    }
+    
     console.log('QueryClient fetching:', url);
     
     try {
@@ -70,9 +98,16 @@ export const getQueryFn: <T>(options: {
       }
       
       try {
-        const data = JSON.parse(text) as T;
+        const jsonResponse = JSON.parse(text);
         console.log('QueryClient parsed successfully:', url);
-        return data;
+        
+        // Auto-unwrap standard API response format: { success, data }
+        if (jsonResponse && typeof jsonResponse === 'object' && 'success' in jsonResponse && 'data' in jsonResponse) {
+          console.log('QueryClient auto-unwrapping standard response envelope');
+          return jsonResponse.data as T;
+        }
+        
+        return jsonResponse as T;
       } catch (error) {
         console.error('JSON parsing error in queryClient:', error, 'Response:', text.substring(0, 200));
         throw new Error(`Failed to parse JSON response: ${error}`);

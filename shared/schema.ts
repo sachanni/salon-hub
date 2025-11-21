@@ -846,15 +846,19 @@ export const bookingsRelations = relations(bookings, ({ one, many }) => ({
   bookingServices: many(bookingServices),
 }));
 
-// Payments table - tracks payment information
+// Payments table - tracks payment information for both service bookings and product orders
 export const payments = pgTable("payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  // Either bookingId (for service bookings) OR productOrderId (for product orders) must be set
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "cascade" }),
+  productOrderId: varchar("product_order_id").references(() => productOrders.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  paymentMethod: varchar("payment_method", { length: 50 }), // online, cod, upi, wallet
   razorpayOrderId: text("razorpay_order_id"),
   razorpayPaymentId: text("razorpay_payment_id"),
   razorpaySignature: text("razorpay_signature"),
   amountPaisa: integer("amount_paisa").notNull(),
-  currency: varchar("currency", { length: 3 }).notNull().default('USD'),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
   status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, completed, failed
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
@@ -2953,6 +2957,11 @@ export const products = pgTable("products", {
   isRetailItem: integer("is_retail_item").notNull().default(0), // Can be sold to customers
   trackStock: integer("track_stock").notNull().default(1), // Enable stock tracking
   lowStockAlert: integer("low_stock_alert").notNull().default(1),
+  
+  // E-commerce retail fields
+  availableForRetail: integer("available_for_retail").notNull().default(0), // Enable retail sales for this product
+  retailPriceInPaisa: integer("retail_price_in_paisa"), // Customer-facing price (separate from cost_price_in_paisa)
+  
   notes: text("notes"),
   tags: jsonb("tags").default('[]'), // Flexible tagging system
   metadata: jsonb("metadata").default('{}'), // Additional custom fields
@@ -2966,6 +2975,7 @@ export const products = pgTable("products", {
   index("products_barcode_idx").on(table.barcode),
   index("products_current_stock_idx").on(table.currentStock),
   index("products_low_stock_idx").on(table.currentStock, table.minimumStock),
+  index("products_retail_idx").on(table.salonId, table.availableForRetail, table.isActive), // E-commerce: Efficient retail product filtering
   unique("products_salon_sku_unique").on(table.salonId, table.sku),
 ]);
 
@@ -3883,3 +3893,510 @@ export type SalonInventory = typeof salonInventory.$inferSelect;
 export type AiLookSession = typeof aiLookSessions.$inferSelect;
 export type AiLookOption = typeof aiLookOptions.$inferSelect;
 export type AiLookProduct = typeof aiLookProducts.$inferSelect;
+
+// ===== PRODUCT E-COMMERCE SYSTEM =====
+// Tables for customer-facing product sales, shopping cart, orders, reviews
+
+// Product Retail Configuration - retail-specific settings per product
+export const productRetailConfig = pgTable("product_retail_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  
+  // Retail settings
+  availableForRetail: integer("available_for_retail").notNull().default(0),
+  retailPriceInPaisa: integer("retail_price_in_paisa"), // Overrides products.retailPriceInPaisa if set
+  
+  // Display settings
+  featured: integer("featured").default(0),
+  displayOrder: integer("display_order").default(0),
+  
+  // Stock allocation (separate from main inventory)
+  retailStockAllocated: decimal("retail_stock_allocated", { precision: 10, scale: 3 }).default('0'),
+  
+  // Images & Media
+  retailImages: text("retail_images").array(), // Retail-specific images
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("product_retail_config_salon_id_idx").on(table.salonId, table.availableForRetail),
+  index("product_retail_config_featured_idx").on(table.salonId, table.featured).where(sql`${table.featured} = 1`),
+  index("product_retail_config_product_id_idx").on(table.productId),
+  unique("retail_config_unique").on(table.salonId, table.productId),
+]);
+
+export const insertProductRetailConfigSchema = createInsertSchema(productRetailConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ProductRetailConfig = typeof productRetailConfig.$inferSelect;
+export type InsertProductRetailConfig = z.infer<typeof insertProductRetailConfigSchema>;
+
+// Product Variants - size, color, scent variations of products
+export const productVariants = pgTable("product_variants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Variant details
+  variantType: varchar("variant_type", { length: 50 }).notNull(), // size, color, scent, etc.
+  variantValue: varchar("variant_value", { length: 100 }).notNull(), // 100ml, Red, Lavender, etc.
+  skuSuffix: varchar("sku_suffix", { length: 20 }), // -100ML, -RED
+  
+  // Pricing override (if different from base product)
+  priceAdjustmentPaisa: integer("price_adjustment_paisa").default(0), // +/- from base price
+  
+  // Stock
+  stockQuantity: integer("stock_quantity").notNull().default(0),
+  
+  // Display
+  displayOrder: integer("display_order").default(0),
+  colorHex: varchar("color_hex", { length: 7 }), // For color variants: #FF5733
+  imageUrl: text("image_url"),
+  
+  // Availability
+  isActive: integer("is_active").notNull().default(1),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("product_variants_product_id_idx").on(table.productId),
+  index("product_variants_salon_id_idx").on(table.salonId),
+  index("product_variants_active_idx").on(table.productId, table.isActive),
+  unique("product_variants_salon_unique").on(table.salonId, table.productId, table.variantType, table.variantValue),
+]);
+
+export const insertProductVariantSchema = createInsertSchema(productVariants).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type ProductVariant = typeof productVariants.$inferSelect;
+export type InsertProductVariant = z.infer<typeof insertProductVariantSchema>;
+
+// Shopping Carts - customer shopping carts
+export const shoppingCarts = pgTable("shopping_carts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
+  sessionId: varchar("session_id"), // For guest users
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default('active'), // active, abandoned, converted, expired
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  expiresAt: timestamp("expires_at").default(sql`NOW() + INTERVAL '30 days'`),
+}, (table) => [
+  index("shopping_carts_user_id_idx").on(table.userId, table.status),
+  index("shopping_carts_session_id_idx").on(table.sessionId, table.status),
+  index("shopping_carts_expires_idx").on(table.expiresAt),
+  check("shopping_carts_user_or_session", sql`${table.userId} IS NOT NULL OR ${table.sessionId} IS NOT NULL`),
+]);
+
+export const insertShoppingCartSchema = createInsertSchema(shoppingCarts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ShoppingCart = typeof shoppingCarts.$inferSelect;
+export type InsertShoppingCart = z.infer<typeof insertShoppingCartSchema>;
+
+// Cart Items - items within shopping carts
+export const cartItems = pgTable("cart_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  cartId: varchar("cart_id").notNull().references(() => shoppingCarts.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  variantId: varchar("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+  
+  // Pricing (locked at time of adding to cart)
+  priceAtAddPaisa: integer("price_at_add_paisa").notNull(),
+  currentPricePaisa: integer("current_price_paisa").notNull(), // Updated when cart is loaded
+  
+  // Quantity
+  quantity: integer("quantity").notNull().default(1),
+  
+  // Timestamps
+  addedAt: timestamp("added_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("cart_items_cart_id_idx").on(table.cartId),
+  index("cart_items_product_id_idx").on(table.productId),
+  unique("cart_items_unique").on(table.cartId, table.productId, table.variantId),
+  check("cart_items_quantity_positive", sql`${table.quantity} > 0`),
+]);
+
+export const insertCartItemSchema = createInsertSchema(cartItems).omit({
+  id: true,
+  addedAt: true,
+  updatedAt: true,
+});
+
+export type CartItem = typeof cartItems.$inferSelect;
+export type InsertCartItem = z.infer<typeof insertCartItemSchema>;
+
+// Product Orders - customer product purchases (separate from service bookings)
+export const productOrders = pgTable("product_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderNumber: varchar("order_number", { length: 20 }).notNull().unique(),
+  
+  // Relationships
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "restrict" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  
+  // Order details
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  // pending, confirmed, packed, shipped, delivered, cancelled, refunded
+  
+  // Fulfillment
+  fulfillmentType: varchar("fulfillment_type", { length: 20 }).notNull(), // delivery, salon_pickup
+  deliveryAddressId: varchar("delivery_address_id").references(() => userSavedLocations.id),
+  deliveryAddress: text("delivery_address"), // Snapshot of address at order time
+  pickupCode: varchar("pickup_code", { length: 10 }), // For salon pickup: 6-digit code
+  
+  // Pricing (all in paisa)
+  subtotalPaisa: integer("subtotal_paisa").notNull(),
+  discountPaisa: integer("discount_paisa").default(0),
+  deliveryChargePaisa: integer("delivery_charge_paisa").default(0),
+  taxPaisa: integer("tax_paisa").notNull(),
+  totalPaisa: integer("total_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Payment
+  paymentMethod: varchar("payment_method", { length: 50 }), // online, cod, wallet, pay_at_salon
+  paymentStatus: varchar("payment_status", { length: 20 }).notNull().default('pending'), // pending, paid, failed, refunded
+  paymentId: varchar("payment_id"), // Razorpay payment ID
+  razorpayOrderId: varchar("razorpay_order_id"),
+  walletAmountUsedPaisa: integer("wallet_amount_used_paisa").default(0),
+  
+  // Offers (offer system to be implemented separately)
+  offerId: varchar("offer_id"),
+  offerCode: varchar("offer_code", { length: 20 }),
+  
+  // Tracking
+  trackingNumber: varchar("tracking_number", { length: 100 }),
+  courierPartner: varchar("courier_partner", { length: 100 }),
+  estimatedDeliveryDate: timestamp("estimated_delivery_date"),
+  
+  // Cancellation/Return
+  cancellationReason: text("cancellation_reason"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledBy: varchar("cancelled_by").references(() => users.id),
+  
+  // Platform commission
+  commissionRate: decimal("commission_rate", { precision: 5, scale: 2 }).default('10.00'),
+  commissionPaisa: integer("commission_paisa"),
+  
+  // Notes
+  customerNotes: text("customer_notes"),
+  adminNotes: text("admin_notes"),
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow(),
+  confirmedAt: timestamp("confirmed_at"),
+  packedAt: timestamp("packed_at"),
+  shippedAt: timestamp("shipped_at"),
+  deliveredAt: timestamp("delivered_at"),
+}, (table) => [
+  index("product_orders_salon_id_idx").on(table.salonId, table.status),
+  index("product_orders_customer_id_idx").on(table.customerId, table.status),
+  index("product_orders_status_idx").on(table.status, table.createdAt),
+  index("product_orders_number_idx").on(table.orderNumber),
+  check("product_orders_total_check", sql`${table.totalPaisa} = ${table.subtotalPaisa} - ${table.discountPaisa} + ${table.deliveryChargePaisa} + ${table.taxPaisa}`),
+]);
+
+export const insertProductOrderSchema = createInsertSchema(productOrders).omit({
+  id: true,
+  createdAt: true,
+  confirmedAt: true,
+  packedAt: true,
+  shippedAt: true,
+  deliveredAt: true,
+});
+
+export type ProductOrder = typeof productOrders.$inferSelect;
+export type InsertProductOrder = z.infer<typeof insertProductOrderSchema>;
+
+// Product Order Items - items within product orders
+export const productOrderItems = pgTable("product_order_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => productOrders.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  variantId: varchar("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+  
+  // Snapshot at time of order (in case product is deleted/updated)
+  productName: varchar("product_name", { length: 255 }).notNull(),
+  productSku: varchar("product_sku", { length: 100 }),
+  variantInfo: jsonb("variant_info"), // {type: "size", value: "100ml"}
+  productImageUrl: text("product_image_url"),
+  
+  // Pricing
+  unitPricePaisa: integer("unit_price_paisa").notNull(),
+  quantity: integer("quantity").notNull(),
+  discountPerItemPaisa: integer("discount_per_item_paisa").default(0),
+  subtotalPaisa: integer("subtotal_paisa").notNull(),
+  
+  // Review
+  reviewSubmitted: integer("review_submitted").notNull().default(0),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("product_order_items_order_id_idx").on(table.orderId),
+  index("product_order_items_product_id_idx").on(table.productId),
+  check("product_order_items_quantity_positive", sql`${table.quantity} > 0`),
+]);
+
+export const insertProductOrderItemSchema = createInsertSchema(productOrderItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type ProductOrderItem = typeof productOrderItems.$inferSelect;
+export type InsertProductOrderItem = z.infer<typeof insertProductOrderItemSchema>;
+
+// Wishlists - customer saved products
+export const wishlists = pgTable("wishlists", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  variantId: varchar("variant_id").references(() => productVariants.id, { onDelete: "cascade" }),
+  
+  // Price tracking
+  priceAtAddPaisa: integer("price_at_add_paisa").notNull(),
+  
+  // Notifications
+  notifyOnPriceDrop: integer("notify_on_price_drop").notNull().default(1),
+  notifyOnBackInStock: integer("notify_on_back_in_stock").notNull().default(1),
+  
+  addedAt: timestamp("added_at").defaultNow(),
+}, (table) => [
+  index("wishlists_user_id_idx").on(table.userId, table.addedAt),
+  index("wishlists_product_id_idx").on(table.productId),
+  unique("wishlists_unique").on(table.userId, table.productId, table.variantId),
+]);
+
+export const insertWishlistSchema = createInsertSchema(wishlists).omit({
+  id: true,
+  addedAt: true,
+});
+
+export type Wishlist = typeof wishlists.$inferSelect;
+export type InsertWishlist = z.infer<typeof insertWishlistSchema>;
+
+// Product Reviews - customer reviews of purchased products
+export const productReviews = pgTable("product_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  orderId: varchar("order_id").notNull().references(() => productOrders.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Review content
+  rating: integer("rating").notNull(), // 1-5
+  title: varchar("title", { length: 200 }),
+  comment: text("comment"),
+  
+  // Media
+  imageUrls: text("image_urls").array(), // Array of review images
+  
+  // Verification
+  verifiedPurchase: integer("verified_purchase").notNull().default(1),
+  
+  // Moderation
+  isVisible: integer("is_visible").notNull().default(1),
+  moderationStatus: varchar("moderation_status", { length: 20 }).notNull().default('approved'), // pending, approved, rejected
+  moderationReason: text("moderation_reason"),
+  
+  // Salon response
+  salonResponse: text("salon_response"),
+  salonRespondedAt: timestamp("salon_responded_at"),
+  
+  // Helpfulness
+  helpfulCount: integer("helpful_count").default(0),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("product_reviews_product_id_idx").on(table.productId, table.isVisible, table.createdAt),
+  index("product_reviews_user_id_idx").on(table.userId),
+  index("product_reviews_salon_id_idx").on(table.salonId, table.moderationStatus),
+  index("product_reviews_rating_idx").on(table.productId, table.rating),
+  unique("product_reviews_unique").on(table.orderId, table.productId, table.userId),
+  check("product_reviews_rating_range", sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
+]);
+
+export const insertProductReviewSchema = createInsertSchema(productReviews).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ProductReview = typeof productReviews.$inferSelect;
+export type InsertProductReview = z.infer<typeof insertProductReviewSchema>;
+
+// Delivery Settings - salon-specific delivery configuration
+export const deliverySettings = pgTable("delivery_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().unique().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Delivery options
+  enableHomeDelivery: integer("enable_home_delivery").notNull().default(0),
+  enableSalonPickup: integer("enable_salon_pickup").notNull().default(1),
+  
+  // Delivery charges
+  deliveryChargePaisa: integer("delivery_charge_paisa").default(5000), // ₹50
+  freeDeliveryAbovePaisa: integer("free_delivery_above_paisa").default(50000), // ₹500
+  
+  // Delivery area
+  deliveryRadiusKm: integer("delivery_radius_km").default(10),
+  serviceablePincodes: text("serviceable_pincodes").array(), // Array of pincodes
+  
+  // Timing
+  estimatedDeliveryDays: integer("estimated_delivery_days").default(3),
+  pickupReadyHours: integer("pickup_ready_hours").default(24),
+  
+  // Return policy
+  acceptReturns: integer("accept_returns").notNull().default(1),
+  returnWindowDays: integer("return_window_days").default(7),
+  returnConditions: text("return_conditions"),
+  
+  // Packaging
+  packagingChargePaisa: integer("packaging_charge_paisa").default(0),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("delivery_settings_salon_id_idx").on(table.salonId),
+]);
+
+export const insertDeliverySettingsSchema = createInsertSchema(deliverySettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type DeliverySettings = typeof deliverySettings.$inferSelect;
+export type InsertDeliverySettings = z.infer<typeof insertDeliverySettingsSchema>;
+
+// Product Views - analytics tracking for product page views
+export const productViews = pgTable("product_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  sessionId: varchar("session_id"), // For anonymous users
+  viewedAt: timestamp("viewed_at").defaultNow(),
+}, (table) => [
+  index("product_views_product_id_idx").on(table.productId, table.viewedAt),
+  index("product_views_user_id_idx").on(table.userId),
+  index("product_views_salon_id_idx").on(table.salonId, table.viewedAt),
+]);
+
+export const insertProductViewSchema = createInsertSchema(productViews).omit({
+  id: true,
+  viewedAt: true,
+});
+
+export type ProductView = typeof productViews.$inferSelect;
+export type InsertProductView = z.infer<typeof insertProductViewSchema>;
+
+// ===============================================
+// E-COMMERCE API REQUEST VALIDATION SCHEMAS
+// ===============================================
+
+// Shopping Cart Schemas
+export const addToCartSchema = z.object({
+  salonId: z.string().uuid(),
+  productId: z.string().uuid(),
+  variantId: z.string().uuid().optional(),
+  quantity: z.number().int().min(1).max(100),
+});
+
+export const updateCartItemSchema = z.object({
+  quantity: z.number().int().min(0).max(100),
+});
+
+// Product Order Schemas
+export const createProductOrderSchema = z.object({
+  salonId: z.string().uuid(),
+  cartId: z.string().uuid(),
+  fulfillmentType: z.enum(['delivery', 'pickup']),
+  deliveryAddress: z.string().optional(),
+  paymentMethod: z.enum(['cod', 'online', 'upi']).default('cod'),
+});
+
+export const cancelOrderSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
+// Wishlist Schemas
+export const addToWishlistSchema = z.object({
+  productId: z.string().uuid(),
+  variantId: z.string().uuid().optional(),
+});
+
+// Review Schemas
+export const createReviewSchema = z.object({
+  orderId: z.string().uuid().optional(),
+  rating: z.number().int().min(1).max(5),
+  title: z.string().max(200).optional(),
+  reviewText: z.string().max(2000).optional(),
+  images: z.array(z.string().url()).max(5).optional(),
+});
+
+export const trackProductViewSchema = z.object({
+  sessionId: z.string().max(100).optional(),
+});
+export type TrackProductViewInput = z.infer<typeof trackProductViewSchema>;
+
+// ========================================================================
+// BUSINESS ADMIN - E-COMMERCE VALIDATION SCHEMAS
+// ========================================================================
+
+// Admin - Configure product for retail
+export const configureRetailSchema = z.object({
+  availableForRetail: z.boolean(),
+  retailPriceInPaisa: z.number().int().positive().optional(),
+  retailStockAllocated: z.number().int().min(0).optional(),
+  retailDescription: z.string().optional(),
+  retailImageUrls: z.array(z.string().url()).optional(),
+  featured: z.boolean().optional(),
+  metaTitle: z.string().max(200).optional(),
+  metaDescription: z.string().max(500).optional(),
+  searchKeywords: z.array(z.string()).optional(),
+});
+export type ConfigureRetailInput = z.infer<typeof configureRetailSchema>;
+
+// Admin - Update order status
+export const updateOrderStatusSchema = z.object({
+  status: z.enum(['pending', 'confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded']),
+  trackingNumber: z.string().max(100).optional(),
+  courierPartner: z.string().max(100).optional(),
+  estimatedDeliveryDate: z.string().optional(), // ISO date string
+  notes: z.string().optional(),
+});
+export type UpdateOrderStatusInput = z.infer<typeof updateOrderStatusSchema>;
+
+// Admin - Cancel order
+export const cancelOrderAdminSchema = z.object({
+  reason: z.string().min(1, 'Cancellation reason is required'),
+  refundAmountPaisa: z.number().int().positive().optional(),
+});
+export type CancelOrderAdminInput = z.infer<typeof cancelOrderAdminSchema>;
+
+// Admin - Update delivery settings
+export const updateDeliverySettingsSchema = z.object({
+  salonPickupEnabled: z.number().int().min(0).max(1).optional(),
+  homeDeliveryEnabled: z.number().int().min(0).max(1).optional(),
+  freeDeliveryThresholdPaisa: z.number().int().min(0).optional(),
+  baseDeliveryChargePaisa: z.number().int().min(0).optional(),
+  maxDeliveryRadiusKm: z.number().min(0).optional(),
+  estimatedPickupMinutes: z.number().int().min(0).optional(),
+  estimatedDeliveryMinutes: z.number().int().min(0).optional(),
+  deliveryInstructions: z.string().optional(),
+});
+export type UpdateDeliverySettingsInput = z.infer<typeof updateDeliverySettingsSchema>;

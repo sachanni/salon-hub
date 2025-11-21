@@ -479,7 +479,7 @@ export async function sendRescheduleNotification(
         bookingId,
         customContent: {
           subject: 'Booking Rescheduled - {{salon_name}}',
-          body: `Hi {{customer_name}},\n\nYour booking has been rescheduled.\n\n❌ Previous Time:\nDate: {{old_date}}\nTime: {{old_time}}\n\n✅ New Time:\nDate: {{new_date}}\nTime: {{new_time}}\n\nService: {{service_name}}\nStaff: {{staff_name}}\nTotal: ₹{{total_amount}}\n\nThank you for your flexibility!\n\n{{salon_name}}`
+          body: `Hi {{customer_name}},\n\nYour booking has been rescheduled.\n\nPrevious Time:\nDate: {{old_date}}\nTime: {{old_time}}\n\nNew Time:\nDate: {{new_date}}\nTime: {{new_time}}\n\nService: {{service_name}}\nStaff: {{staff_name}}\nTotal: Rs.{{total_amount}}\n\nThank you for your flexibility!\n\n{{salon_name}}`
         },
         variables
       });
@@ -504,4 +504,144 @@ export async function sendRescheduleNotification(
   }
   
   return results;
+}
+
+export async function sendOrderConfirmation(
+  salonId: string,
+  orderId: string,
+  customerEmail: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse> {
+  return await communicationService.sendMessage({
+    to: customerEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customerId: customerEmail,
+    customContent: {
+      subject: 'Order Confirmation #{{order_number}} - {{salon_name}}',
+      body: `Hi {{customer_name}},\n\nThank you for your order! Your order has been confirmed and is being prepared.\n\nOrder Details:\nOrder Number: #{{order_number}}\nTotal Items: {{item_count}}\nTotal Amount: Rs.{{total_amount}}\n\nDelivery Address:\n{{delivery_address}}\n\nOrder Items:\n{{order_items}}\n\nPayment Method: {{payment_method}}\nPayment Status: {{payment_status}}\n\nWe'll notify you when your order is ready for pickup/delivery!\n\nThank you for shopping with us!\n\n{{salon_name}}`
+    },
+    variables
+  });
+}
+
+export async function sendPaymentSuccess(
+  salonId: string,
+  orderId: string,
+  customerEmail: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse> {
+  return await communicationService.sendMessage({
+    to: customerEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customerId: customerEmail,
+    customContent: {
+      subject: 'Payment Successful - Order #{{order_number}}',
+      body: `Hi {{customer_name}},\n\nYour payment has been successfully processed!\n\nPayment Details:\nOrder Number: #{{order_number}}\nAmount Paid: Rs.{{amount_paid}}\nPayment Method: {{payment_method}}\nTransaction ID: {{transaction_id}}\n\nYour order is now being prepared and you'll receive updates as it progresses.\n\nThank you for your purchase!\n\n{{salon_name}}`
+    },
+    variables
+  });
+}
+
+export async function sendPaymentFailure(
+  salonId: string,
+  orderId: string,
+  customerEmail: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse> {
+  return await communicationService.sendMessage({
+    to: customerEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customerId: customerEmail,
+    customContent: {
+      subject: 'Payment Failed - Order #{{order_number}}',
+      body: `Hi {{customer_name}},\n\nWe were unable to process your payment for order #{{order_number}}.\n\nPayment Details:\nOrder Number: #{{order_number}}\nAmount: Rs.{{amount}}\nPayment Method: {{payment_method}}\nReason: {{failure_reason}}\n\nWhat's Next?\n1. Your order has been saved and is on hold\n2. Please retry payment from your Order History\n3. Or contact us if you need assistance\n\nDon't worry - we've reserved your items for the next 24 hours!\n\nNeed help? Reply to this email or contact our support team.\n\n{{salon_name}}`
+    },
+    variables
+  });
+}
+
+export async function sendOrderStatusUpdate(
+  salonId: string,
+  orderId: string,
+  customerEmail: string,
+  newStatus: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse> {
+  const statusMessages: Record<string, { subject: string; body: string }> = {
+    processing: {
+      subject: 'Order #{{order_number}} is Being Prepared',
+      body: `Hi {{customer_name}},\n\nGreat news! Your order is now being prepared.\n\nOrder Number: #{{order_number}}\nStatus: Processing\n\nWe'll notify you once your order is packed and ready!\n\n{{salon_name}}`
+    },
+    packed: {
+      subject: 'Order #{{order_number}} is Packed & Ready',
+      body: `Hi {{customer_name}},\n\nYour order has been packed and is ready!\n\nOrder Number: #{{order_number}}\nStatus: Packed\n\n{{#if delivery_method_pickup}}\nPickup Details:\nLocation: {{salon_address}}\nReady for pickup anytime during business hours\n{{else}}\nYour order will be shipped soon!\n{{/if}}\n\n{{salon_name}}`
+    },
+    shipped: {
+      subject: 'Order #{{order_number}} Has Been Shipped',
+      body: `Hi {{customer_name}},\n\nYour order is on its way!\n\nOrder Number: #{{order_number}}\nStatus: Shipped\n{{#if tracking_number}}\nTracking Number: {{tracking_number}}\n{{/if}}\nEstimated Delivery: {{estimated_delivery}}\n\nYou can track your order from your Order History page.\n\n{{salon_name}}`
+    },
+    delivered: {
+      subject: 'Order #{{order_number}} Delivered Successfully',
+      body: `Hi {{customer_name}},\n\nYour order has been delivered!\n\nOrder Number: #{{order_number}}\nStatus: Delivered\nDelivered On: {{delivered_date}}\n\nWe hope you love your products! If you have any concerns, please contact us within 7 days.\n\nWe'd love your feedback! Please rate your experience and help other customers.\n\nThank you for shopping with us!\n\n{{salon_name}}`
+    }
+  };
+
+  const statusMessage = statusMessages[newStatus] || {
+    subject: 'Order #{{order_number}} Status Update',
+    body: `Hi {{customer_name}},\n\nYour order status has been updated.\n\nOrder Number: #{{order_number}}\nNew Status: ${newStatus}\n\n{{salon_name}}`
+  };
+
+  return await communicationService.sendMessage({
+    to: customerEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customerId: customerEmail,
+    customContent: statusMessage,
+    variables
+  });
+}
+
+export async function sendOrderCancellation(
+  salonId: string,
+  orderId: string,
+  customerEmail: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse> {
+  return await communicationService.sendMessage({
+    to: customerEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customerId: customerEmail,
+    customContent: {
+      subject: 'Order #{{order_number}} Cancelled',
+      body: `Hi {{customer_name}},\n\nYour order has been cancelled.\n\nOrder Number: #{{order_number}}\nCancellation Reason: {{cancellation_reason}}\nCancelled On: {{cancelled_date}}\n\nRefund Information:\n{{#if refund_applicable}}\nAmount to be Refunded: Rs.{{refund_amount}}\nRefund Method: {{refund_method}}\nExpected in: {{refund_timeline}}\n{{else}}\nNo refund applicable for this order.\n{{/if}}\n\nIf you have any questions, please don't hesitate to contact us.\n\nWe hope to serve you again soon!\n\n{{salon_name}}`
+    },
+    variables
+  });
+}
+
+export async function sendLowStockAlert(
+  salonId: string,
+  adminEmail: string,
+  variables: Record<string, string> = {}
+): Promise<SendMessageResponse> {
+  return await communicationService.sendMessage({
+    to: adminEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customContent: {
+      subject: 'LOW STOCK ALERT - {{product_name}}',
+      body: `Hello Admin,\n\nStock Alert: {{product_name}} is running low!\n\nStock Details:\nProduct: {{product_name}}\nCurrent Stock: {{current_stock}} units\nLow Stock Threshold: {{threshold}} units\nRetail Allocated: {{retail_allocated}} units\nService Allocated: {{service_allocated}} units\n\nRecommended Action:\nPlease restock this product soon to avoid running out.\n\nView Product: {{product_link}}\n\nSalonHub Admin`
+    },
+    variables
+  });
 }
