@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { VersionManager } from '@/utils/versionManager';
+import { useJWTAuth } from '@/lib/auth';
+import { SessionExpiryWarning } from '@/components/SessionExpiryWarning';
 import Header from "@/components/Header";
 import Home from "@/pages/Home";
 import Join from "@/pages/Join";
@@ -48,6 +50,7 @@ import OrderConfirmation from "@/pages/OrderConfirmation";
 import OrderDetails from "@/pages/OrderDetails";
 import OrderHistory from "@/pages/OrderHistory";
 import Wishlist from "@/pages/Wishlist";
+import Shop from "@/pages/Shop";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -56,6 +59,7 @@ function Router() {
       <Header />
       <Switch>
         <Route path="/" component={Home} />
+        <Route path="/shop" component={Shop} />
         <Route path="/join" component={Join} />
         <Route path="/join/customer" component={JoinCustomer} />
         <Route path="/join/business" component={BusinessOnboarding} />
@@ -148,6 +152,9 @@ function Router() {
 }
 
 function App() {
+  // Initialize JWT authentication
+  useJWTAuth();
+
   // Initialize version management on first render
   useEffect(() => {
     VersionManager.check();
@@ -160,6 +167,7 @@ function App() {
         <AuthProvider>
           <Toaster />
           <Router />
+          <SessionExpiryWarning />
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

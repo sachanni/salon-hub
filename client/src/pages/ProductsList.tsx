@@ -91,9 +91,9 @@ export default function ProductsList({ salonId }: { salonId: string }) {
     },
   });
 
-  const products = productsData?.data?.products || [];
-  // Type-safe category extraction with fallback
-  const categories = ((categoriesData as { categories?: ProductCategory[] } | undefined)?.categories) || [];
+  // QueryClient auto-unwraps {success, data} response envelope
+  const products = (productsData as { products?: Product[] })?.products || [];
+  const categories = ((categoriesData as { categories?: ProductCategory[] })?.categories) || [];
 
   // Sort products client-side
   const sortedProducts = [...products].sort((a, b) => {

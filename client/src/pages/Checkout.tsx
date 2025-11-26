@@ -109,16 +109,19 @@ export default function Checkout() {
     enabled: fulfillmentType === 'delivery',
   });
 
-  const cart = (cartData as { data?: { cart?: Cart } })?.data?.cart;
-  const savedAddresses = ((addressesData as { data?: { addresses?: SavedAddress[] } })?.data?.addresses || []);
+  // QueryClient auto-unwraps {success, data} response envelope
+  const cart = (cartData as { cart?: Cart })?.cart;
+  const savedAddresses = ((addressesData as { addresses?: SavedAddress[] })?.addresses || []);
 
   // Create order mutation
   const createOrderMutation = useMutation({
     mutationFn: async (orderData: any) => {
-      return apiRequest('POST', '/api/product-orders', orderData);
+      const response = await apiRequest('POST', '/api/product-orders', orderData);
+      return await response.json();
     },
-    onSuccess: (response: any) => {
-      const orderId = response?.data?.order?.id;
+    onSuccess: (data: any) => {
+      // Mutations don't auto-unwrap, so we parse JSON and access .data.order.id
+      const orderId = data?.data?.order?.id;
       if (orderId) {
         navigate(`/orders/confirmation/${orderId}`);
       } else {

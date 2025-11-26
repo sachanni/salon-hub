@@ -25,6 +25,22 @@ export const emailVerificationTokens = pgTable("email_verification_tokens", {
   verifiedAt: timestamp("verified_at"),
 });
 
+// Refresh tokens table for JWT authentication
+export const refreshTokens = pgTable("refresh_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  deviceInfo: text("device_info"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  lastUsedAt: timestamp("last_used_at"),
+  revokedAt: timestamp("revoked_at"),
+}, (table) => [
+  index("refresh_tokens_user_id_idx").on(table.userId),
+  index("refresh_tokens_expires_at_idx").on(table.expiresAt),
+]);
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").unique(), // Optional - auto-generated from email
@@ -3913,6 +3929,8 @@ export const productRetailConfig = pgTable("product_retail_config", {
   
   // Stock allocation (separate from main inventory)
   retailStockAllocated: decimal("retail_stock_allocated", { precision: 10, scale: 3 }).default('0'),
+  useAllocatedStock: integer("use_allocated_stock").notNull().default(1), // Hybrid model: 1=use allocated stock, 0=use warehouse stock
+  lowStockThreshold: decimal("low_stock_threshold", { precision: 10, scale: 3 }).default('5'), // Alert when retail stock falls below this
   
   // Images & Media
   retailImages: text("retail_images").array(), // Retail-specific images
@@ -4322,10 +4340,19 @@ export const updateCartItemSchema = z.object({
 
 // Product Order Schemas
 export const createProductOrderSchema = z.object({
-  salonId: z.string().uuid(),
-  cartId: z.string().uuid(),
+  salonId: z.string().uuid().optional(), // Optional - will be derived from cart items
+  cartId: z.string().optional(), // Optional - supports virtual "combined" cart
+  addressId: z.string().uuid().optional(), // For existing saved addresses
   fulfillmentType: z.enum(['delivery', 'pickup']),
-  deliveryAddress: z.string().optional(),
+  deliveryAddress: z.union([z.string(), z.object({
+    fullName: z.string(),
+    phone: z.string(),
+    addressLine1: z.string(),
+    addressLine2: z.string().optional(),
+    city: z.string(),
+    state: z.string(),
+    pincode: z.string(),
+  })]).optional(),
   paymentMethod: z.enum(['cod', 'online', 'upi']).default('cod'),
 });
 

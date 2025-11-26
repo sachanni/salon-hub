@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Separator } from "@/components/ui/separator";
 import { Building2, Eye, EyeOff, BarChart3, Shield, TrendingUp, Users, Calendar, DollarSign } from "lucide-react";
 import { PasswordResetModal } from "@/components/PasswordResetModal";
+import { handleLoginSuccess } from "@/lib/auth";
 
 export default function LoginBusiness() {
   const [formData, setFormData] = useState({
@@ -45,6 +46,11 @@ export default function LoginBusiness() {
       const data = await response.json();
 
       if (response.ok) {
+        // Store JWT access token if provided (for mobile app support)
+        if (data.accessToken) {
+          handleLoginSuccess(data.accessToken);
+        }
+        
         toast({
           title: "Welcome back!",
           description: "You've been logged in successfully.",

@@ -27,7 +27,8 @@ export default function OrderConfirmation() {
     enabled: !!orderId,
   });
 
-  const order = (orderData as { data?: { order?: ProductOrder } })?.data?.order;
+  // QueryClient auto-unwraps {success, data} response envelope
+  const order = (orderData as { order?: ProductOrder })?.order;
 
   // Animation effect
   useEffect(() => {

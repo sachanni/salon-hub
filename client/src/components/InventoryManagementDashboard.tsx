@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -64,6 +65,9 @@ import {
   Minus
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { POListView } from "@/components/PurchaseOrders/POListView";
+import { CreatePODialog } from "@/components/PurchaseOrders/CreatePODialog";
+import { PODetailView } from "@/components/PurchaseOrders/PODetailView";
 
 interface InventoryManagementDashboardProps {
   salonId: string;
@@ -134,6 +138,11 @@ interface Product {
   notes?: string;
   tags: string[];
   metadata: any;
+  availableForRetail?: number;
+  retailPriceInPaisa?: number;
+  retailDescription?: string;
+  retailStockAllocated?: number | string;
+  featured?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -288,6 +297,478 @@ const getStockLevelBadge = (currentStock: number, minimumStock: number) => {
   return <Badge variant="default">In Stock</Badge>;
 };
 
+const getRetailStockBadge = (
+  retailStock: number | string | undefined, 
+  isListed: boolean | number,
+  lowStockThreshold: number = 5
+) => {
+  const stock = parseFloat(String(retailStock || 0));
+  
+  if (!isListed) {
+    return <Badge variant="secondary">Not Listed</Badge>;
+  }
+  
+  if (stock <= 0) {
+    return <Badge variant="destructive">No Retail Stock</Badge>;
+  }
+  
+  if (stock <= lowStockThreshold) {
+    return <Badge variant="secondary" className="bg-orange-100 text-orange-800 border-orange-300">Low Stock</Badge>;
+  }
+  
+  return <Badge variant="default" className="bg-green-100 text-green-800 border-green-300">Available</Badge>;
+};
+
+const getStockAllocationPercentage = (retailStock: number | string | undefined, totalStock: number) => {
+  if (totalStock <= 0) return 0;
+  const retail = parseFloat(String(retailStock || 0));
+  return Math.round((retail / totalStock) * 100);
+};
+
+// Allocate Stock Dialog Component
+function AllocateStockDialog({ product, salonId }: { product: Product; salonId: string }) {
+  const [open, setOpen] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  
+  const currentRetailStock = parseFloat(String(product.retailStockAllocated || 0));
+  const totalStock = parseFloat(String(product.currentStock || 0));
+  
+  const allocateStockForm = useForm({
+    resolver: zodResolver(
+      z.object({
+        retailStockAllocated: z.number()
+          .min(0, "Stock allocation must be 0 or greater")
+          .max(totalStock, `Cannot allocate more than available stock (${totalStock} ${product.unit})`)
+          .finite("Stock allocation must be a valid number"),
+        retailPriceInPaisa: z.number()
+          .min(1, "Retail price must be greater than ₹0")
+          .finite("Retail price must be a valid number"),
+        useAllocatedStock: z.number().int().min(0).max(1),
+        lowStockThreshold: z.number().min(0).finite(),
+      })
+    ),
+    defaultValues: {
+      retailStockAllocated: currentRetailStock,
+      retailPriceInPaisa: product.retailPriceInPaisa ? product.retailPriceInPaisa / 100 : 0,
+      useAllocatedStock: product.useAllocatedStock ?? 1,
+      lowStockThreshold: parseFloat(String(product.lowStockThreshold || 5)),
+    },
+  });
+  
+  const allocateStockMutation = useMutation({
+    mutationFn: async (data: { retailStockAllocated: number; retailPriceInPaisa: number; useAllocatedStock: number; lowStockThreshold: number }) => {
+      // Convert rupees to paisa before sending to backend
+      const dataWithPaisa = {
+        ...data,
+        retailPriceInPaisa: Math.round(data.retailPriceInPaisa * 100),
+      };
+      return apiRequest('PUT', `/api/salons/${salonId}/products/${product.id}/allocate-retail-stock`, dataWithPaisa);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'products'] });
+      setOpen(false);
+      toast({
+        title: "Success",
+        description: "Retail stock allocation updated successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to allocate retail stock",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  const handleSubmit = (data: { retailStockAllocated: number; retailPriceInPaisa: number; useAllocatedStock: number; lowStockThreshold: number }) => {
+    allocateStockMutation.mutate(data);
+  };
+  
+  const watchedValue = allocateStockForm.watch('retailStockAllocated');
+  const remainingStock = totalStock - (watchedValue || 0);
+  const allocationPercentage = getStockAllocationPercentage(watchedValue, totalStock);
+  
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" title="Allocate Stock for Retail">
+          <Package className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Allocate Retail Stock</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Allocate inventory specifically for online retail sales. The remaining stock can be used for salon services or reserved inventory.
+            </AlertDescription>
+          </Alert>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total Inventory</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{totalStock} {product.unit}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Currently Allocated</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{currentRetailStock} {product.unit}</div>
+              </CardContent>
+            </Card>
+          </div>
+          
+          <Form {...allocateStockForm}>
+            <form onSubmit={allocateStockForm.handleSubmit(handleSubmit)} className="space-y-4">
+              <FormField
+                control={allocateStockForm.control}
+                name="retailStockAllocated"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Retail Stock Allocation ({product.unit})</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        max={totalStock}
+                        placeholder="Enter retail stock quantity"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const rawValue = e.target.value;
+                          // SECURITY: Explicit NaN rejection with default to 0
+                          if (rawValue === '' || rawValue === null || rawValue === undefined) {
+                            field.onChange(0);
+                          } else {
+                            const parsed = parseFloat(rawValue);
+                            // Reject NaN, Infinity, and negative infinity
+                            if (!isNaN(parsed) && isFinite(parsed)) {
+                              field.onChange(parsed);
+                            }
+                          }
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Maximum: {totalStock} {product.unit}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={allocateStockForm.control}
+                name="retailPriceInPaisa"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Retail Price (₹)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        placeholder="Enter customer price (e.g., 500)"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const rawValue = e.target.value;
+                          if (rawValue === '' || rawValue === null || rawValue === undefined) {
+                            field.onChange(0);
+                          } else {
+                            const parsed = parseFloat(rawValue);
+                            if (!isNaN(parsed) && isFinite(parsed)) {
+                              field.onChange(parsed);
+                            }
+                          }
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Customer-facing price in rupees (required for shop listing)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <Separator />
+              
+              <FormField
+                control={allocateStockForm.control}
+                name="useAllocatedStock"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">Stock Mode</FormLabel>
+                      <FormDescription>
+                        {field.value === 1 ? "Using allocated stock for online sales" : "Using warehouse stock directly"}
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value === 1}
+                        onCheckedChange={(checked) => field.onChange(checked ? 1 : 0)}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={allocateStockForm.control}
+                name="lowStockThreshold"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Low Stock Alert Threshold ({product.unit})</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        placeholder="Alert when stock falls below"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const rawValue = e.target.value;
+                          if (rawValue === '' || rawValue === null || rawValue === undefined) {
+                            field.onChange(0);
+                          } else {
+                            const parsed = parseFloat(rawValue);
+                            if (!isNaN(parsed) && isFinite(parsed)) {
+                              field.onChange(parsed);
+                            }
+                          }
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      You'll be alerted when retail stock falls below this threshold
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Allocation</span>
+                  <span className="font-medium">{allocationPercentage}%</span>
+                </div>
+                <Progress value={allocationPercentage} className="h-2" />
+              </div>
+              
+              <div className="rounded-lg bg-muted p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Retail Stock (Online Sales):</span>
+                  <span className="font-semibold text-green-600">{watchedValue || 0} {product.unit}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Remaining Stock (Services/Reserved):</span>
+                  <span className="font-semibold text-blue-600">{remainingStock} {product.unit}</span>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={allocateStockMutation.isPending}>
+                  {allocateStockMutation.isPending ? "Saving..." : "Save Allocation"}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Retail Configuration Dialog Component
+function RetailConfigDialog({ product, salonId }: { product: Product; salonId: string }) {
+  const [open, setOpen] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const retailConfigForm = useForm({
+    resolver: zodResolver(
+      z.object({
+        availableForRetail: z.boolean().default(false),
+        retailPriceInPaisa: z.number().min(0, "Retail price must be 0 or greater").optional(),
+        retailDescription: z.string().optional(),
+        featured: z.boolean().default(false),
+      })
+    ),
+    defaultValues: {
+      availableForRetail: product.availableForRetail === 1,
+      retailPriceInPaisa: product.retailPriceInPaisa ? product.retailPriceInPaisa / 100 : undefined,
+      retailDescription: product.retailDescription || "",
+      featured: false,
+    },
+  });
+
+  const configureRetailMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('PUT', `/api/salons/${salonId}/products/${product.id}/retail-config`, {
+        availableForRetail: data.availableForRetail,
+        retailPriceInPaisa: data.retailPriceInPaisa ? Math.round(data.retailPriceInPaisa * 100) : undefined,
+        retailDescription: data.retailDescription,
+        featured: data.featured,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'products'] });
+      setOpen(false);
+      toast({
+        title: "Success",
+        description: product.availableForRetail 
+          ? "Product shop configuration updated" 
+          : "Product is now listed in the shop",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to configure product for shop",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSubmit = (data: any) => {
+    configureRetailMutation.mutate(data);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" title="Configure for Shop">
+          <Settings className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Configure Product for Shop</DialogTitle>
+        </DialogHeader>
+        <Form {...retailConfigForm}>
+          <form onSubmit={retailConfigForm.handleSubmit(handleSubmit)} className="space-y-4">
+            <FormField
+              control={retailConfigForm.control}
+              name="availableForRetail"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-base">List in Shop</FormLabel>
+                    <FormDescription>
+                      Make this product available for customers to purchase in the shop
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={field.value}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={retailConfigForm.control}
+              name="retailPriceInPaisa"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Retail Price (₹)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="Enter retail price"
+                      {...field}
+                      onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Price shown to customers (current cost: {formatCurrency(product.costPriceInPaisa)})
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={retailConfigForm.control}
+              name="retailDescription"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Shop Description (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Enter customer-facing description for the shop"
+                      className="resize-none"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    A customer-friendly description (different from internal notes)
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={retailConfigForm.control}
+              name="featured"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5">
+                    <FormLabel className="text-base">Featured Product</FormLabel>
+                    <FormDescription>
+                      Show this product prominently in the shop
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={field.value}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+
+            <div className="flex justify-end space-x-2">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={configureRetailMutation.isPending}>
+                {configureRetailMutation.isPending ? "Saving..." : "Save Configuration"}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function InventoryManagementDashboard({ salonId }: InventoryManagementDashboardProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [searchTerm, setSearchTerm] = useState("");
@@ -298,6 +779,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [selectedPO, setSelectedPO] = useState<any>(null);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1393,8 +1875,10 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                       <TableHead>SKU</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead>Vendor</TableHead>
-                      <TableHead>Current Stock</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Total Stock</TableHead>
+                      <TableHead>Retail Stock</TableHead>
+                      <TableHead>Retail Status</TableHead>
+                      <TableHead>Shop Status</TableHead>
                       <TableHead>Cost Price</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
@@ -1402,7 +1886,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                   <TableBody>
                     {productsLoading ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8">
+                        <TableCell colSpan={10} className="text-center py-8">
                           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
                         </TableCell>
                       </TableRow>
@@ -1410,6 +1894,8 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                       safeProducts.map((product) => {
                         const category = safeCategories.find(c => c.id === product.categoryId);
                         const vendor = safeVendors.find(v => v.id === product.vendorId);
+                        const retailStock = parseFloat(String(product.retailStockAllocated || 0));
+                        const allocationPercentage = getStockAllocationPercentage(product.retailStockAllocated, product.currentStock);
                         
                         return (
                           <TableRow key={product.id} data-testid={`row-product-${product.id}`}>
@@ -1440,11 +1926,42 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                               </div>
                             </TableCell>
                             <TableCell>
-                              {getStockLevelBadge(product.currentStock, product.minimumStock)}
+                              <div className="space-y-1">
+                                <div className="flex items-center space-x-2">
+                                  <span className={retailStock > 0 ? 'text-green-600 font-medium' : 'text-muted-foreground'}>
+                                    {retailStock} {product.unit}
+                                  </span>
+                                  {allocationPercentage > 0 && (
+                                    <span className="text-xs text-muted-foreground">
+                                      ({allocationPercentage}%)
+                                    </span>
+                                  )}
+                                </div>
+                                {allocationPercentage > 0 && (
+                                  <Progress value={allocationPercentage} className="h-1 w-20" />
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {getRetailStockBadge(
+                                product.retailStockAllocated, 
+                                product.availableForRetail || 0,
+                                parseFloat(String(product.lowStockThreshold || 5))
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {product.availableForRetail ? (
+                                <Badge variant="default">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Listed
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">Not Listed</Badge>
+                              )}
                             </TableCell>
                             <TableCell>{formatCurrency(product.costPriceInPaisa)}</TableCell>
                             <TableCell>
-                              <div className="flex items-center space-x-2">
+                              <div className="flex items-center space-x-1">
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1456,6 +1973,8 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                                 >
                                   <Edit className="h-4 w-4" />
                                 </Button>
+                                <AllocateStockDialog product={product} salonId={salonId} />
+                                <RetailConfigDialog product={product} salonId={salonId} />
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1470,7 +1989,7 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                       })
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8">
+                        <TableCell colSpan={10} className="text-center py-8">
                           <div className="flex flex-col items-center space-y-2">
                             <Package className="h-8 w-8 text-muted-foreground" />
                             <p className="text-muted-foreground">No products found</p>
@@ -1803,28 +2322,230 @@ export default function InventoryManagementDashboard({ salonId }: InventoryManag
                 Real-time stock tracking and movement history
               </p>
             </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                Stock management features coming soon...
-              </div>
+            <CardContent className="p-0">
+              <Tabs defaultValue="in-stock" className="w-full">
+                <TabsList className="w-full justify-start rounded-none border-b">
+                  <TabsTrigger value="in-stock" className="rounded-none" data-testid="tab-in-stock">
+                    In Stock
+                  </TabsTrigger>
+                  <TabsTrigger value="low-stock" className="rounded-none" data-testid="tab-low-stock">
+                    Low Stock
+                  </TabsTrigger>
+                  <TabsTrigger value="out-of-stock" className="rounded-none" data-testid="tab-out-of-stock">
+                    Out of Stock
+                  </TabsTrigger>
+                </TabsList>
+
+                {/* In Stock Products */}
+                <TabsContent value="in-stock" className="p-6">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Current Stock</TableHead>
+                        <TableHead>Min Stock</TableHead>
+                        <TableHead>Cost Price</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {productsLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+                          </TableCell>
+                        </TableRow>
+                      ) : safeProducts.filter(p => p.currentStock > p.minimumStock).length > 0 ? (
+                        safeProducts
+                          .filter(p => p.currentStock > p.minimumStock)
+                          .map((product) => {
+                            const category = safeCategories.find(c => c.id === product.categoryId);
+                            return (
+                              <TableRow key={product.id}>
+                                <TableCell>
+                                  <div>
+                                    <div className="font-medium">{product.name}</div>
+                                    {product.brand && (
+                                      <div className="text-sm text-muted-foreground">{product.brand}</div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-mono">{product.sku}</TableCell>
+                                <TableCell>{category?.name || '-'}</TableCell>
+                                <TableCell className="text-green-600 font-semibold">
+                                  {product.currentStock} {product.unit}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {product.minimumStock} {product.unit}
+                                </TableCell>
+                                <TableCell>{formatCurrency(product.costPriceInPaisa)}</TableCell>
+                                <TableCell>
+                                  <Badge variant="default">In Stock</Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="flex flex-col items-center space-y-2">
+                              <Package className="h-8 w-8 text-muted-foreground" />
+                              <p className="text-muted-foreground">No products in stock</p>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TabsContent>
+
+                {/* Low Stock Products */}
+                <TabsContent value="low-stock" className="p-6">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Current Stock</TableHead>
+                        <TableHead>Min Stock</TableHead>
+                        <TableHead>Cost Price</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {productsLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+                          </TableCell>
+                        </TableRow>
+                      ) : safeProducts.filter(p => p.currentStock > 0 && p.currentStock <= p.minimumStock).length > 0 ? (
+                        safeProducts
+                          .filter(p => p.currentStock > 0 && p.currentStock <= p.minimumStock)
+                          .map((product) => {
+                            const category = safeCategories.find(c => c.id === product.categoryId);
+                            return (
+                              <TableRow key={product.id}>
+                                <TableCell>
+                                  <div>
+                                    <div className="font-medium">{product.name}</div>
+                                    {product.brand && (
+                                      <div className="text-sm text-muted-foreground">{product.brand}</div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-mono">{product.sku}</TableCell>
+                                <TableCell>{category?.name || '-'}</TableCell>
+                                <TableCell className="text-orange-600 font-semibold">
+                                  {product.currentStock} {product.unit}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {product.minimumStock} {product.unit}
+                                </TableCell>
+                                <TableCell>{formatCurrency(product.costPriceInPaisa)}</TableCell>
+                                <TableCell>
+                                  <Badge variant="secondary">Low Stock</Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="flex flex-col items-center space-y-2">
+                              <CheckCircle className="h-8 w-8 text-green-600" />
+                              <p className="text-muted-foreground">No low stock products</p>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TabsContent>
+
+                {/* Out of Stock Products */}
+                <TabsContent value="out-of-stock" className="p-6">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead>SKU</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Current Stock</TableHead>
+                        <TableHead>Min Stock</TableHead>
+                        <TableHead>Cost Price</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {productsLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+                          </TableCell>
+                        </TableRow>
+                      ) : safeProducts.filter(p => p.currentStock <= 0).length > 0 ? (
+                        safeProducts
+                          .filter(p => p.currentStock <= 0)
+                          .map((product) => {
+                            const category = safeCategories.find(c => c.id === product.categoryId);
+                            return (
+                              <TableRow key={product.id}>
+                                <TableCell>
+                                  <div>
+                                    <div className="font-medium">{product.name}</div>
+                                    {product.brand && (
+                                      <div className="text-sm text-muted-foreground">{product.brand}</div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-mono">{product.sku}</TableCell>
+                                <TableCell>{category?.name || '-'}</TableCell>
+                                <TableCell className="text-red-600 font-semibold">
+                                  0 {product.unit}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {product.minimumStock} {product.unit}
+                                </TableCell>
+                                <TableCell>{formatCurrency(product.costPriceInPaisa)}</TableCell>
+                                <TableCell>
+                                  <Badge variant="destructive">Out of Stock</Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8">
+                            <div className="flex flex-col items-center space-y-2">
+                              <CheckCircle className="h-8 w-8 text-green-600" />
+                              <p className="text-muted-foreground">No out of stock products</p>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="orders" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Purchase Orders</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Create and manage purchase orders with vendors
-              </p>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                Purchase order management features coming soon...
+          {selectedPO ? (
+            <PODetailView salonId={salonId} po={selectedPO} onBack={() => setSelectedPO(null)} />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <CreatePODialog salonId={salonId} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'purchase-orders'] })} />
               </div>
-            </CardContent>
-          </Card>
+              <POListView salonId={salonId} onSelectPO={setSelectedPO} />
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="analytics" className="space-y-4">

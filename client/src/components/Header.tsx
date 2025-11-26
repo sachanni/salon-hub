@@ -1,4 +1,4 @@
-import { User, Menu, LogOut, Settings as SettingsIcon, LayoutDashboard, Wallet, Gift, Sparkles, X } from "lucide-react";
+import { User, Menu, LogOut, Settings as SettingsIcon, LayoutDashboard, Wallet, Gift, Sparkles, X, ShoppingCart, Heart, Package, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,6 +14,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
 
 export default function Header() {
   const { user, isAuthenticated, logout } = useAuth();
@@ -42,6 +44,21 @@ export default function Header() {
 
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
+  // Fetch cart count for badge
+  const { data: cartData } = useQuery({
+    queryKey: ['/api/cart'],
+    enabled: isAuthenticated && isCustomer,
+  });
+
+  // Fetch wishlist count for badge
+  const { data: wishlistData } = useQuery({
+    queryKey: ['/api/wishlist'],
+    enabled: isAuthenticated && isCustomer,
+  });
+
+  const cartItemsCount = (cartData as any)?.data?.cart?.items?.length || 0;
+  const wishlistItemsCount = (wishlistData as any)?.data?.wishlist?.length || 0;
+
   return (
     <header className="bg-background border-b border-border sticky top-0 z-50">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -67,6 +84,16 @@ export default function Header() {
                 Home
               </Button>
             </Link>
+            <Link href="/shop">
+              <Button 
+                variant="ghost" 
+                className="text-foreground"
+                data-testid="link-shop"
+              >
+                <Store className="h-4 w-4 mr-2" />
+                Shop
+              </Button>
+            </Link>
             <Link href="/all-offers">
               <Button 
                 variant="ghost"
@@ -81,6 +108,47 @@ export default function Header() {
 
           {/* Right side actions */}
           <div className="flex items-center gap-3">
+            {/* E-commerce Icons - Always visible */}
+            {isAuthenticated && isCustomer && (
+              <div className="flex items-center gap-2">
+                <Link href="/wishlist">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="relative"
+                    data-testid="button-wishlist"
+                  >
+                    <Heart className="h-5 w-5" />
+                    {wishlistItemsCount > 0 && (
+                      <Badge 
+                        className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+                        variant="destructive"
+                      >
+                        {wishlistItemsCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </Link>
+                <Link href="/cart">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="relative"
+                    data-testid="button-cart"
+                  >
+                    <ShoppingCart className="h-5 w-5" />
+                    {cartItemsCount > 0 && (
+                      <Badge 
+                        className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+                      >
+                        {cartItemsCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </Link>
+              </div>
+            )}
+
             {!isAuthenticated && (
               <>
                 {/* Business CTA - Hidden on mobile, shown on desktop */}
@@ -175,12 +243,28 @@ export default function Header() {
                       )}
                       
                       {isCustomer && (
-                        <DropdownMenuItem onClick={() => setLocation('/wallet')} data-testid="menu-wallet">
-                          <Wallet className="mr-2 h-4 w-4" />
-                          Wallet
-                        </DropdownMenuItem>
+                        <>
+                          <DropdownMenuItem onClick={() => setLocation('/wallet')} data-testid="menu-wallet">
+                            <Wallet className="mr-2 h-4 w-4" />
+                            Wallet
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => setLocation('/orders')} data-testid="menu-orders">
+                            <Package className="mr-2 h-4 w-4" />
+                            My Orders
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setLocation('/wishlist')} data-testid="menu-wishlist">
+                            <Heart className="mr-2 h-4 w-4" />
+                            Wishlist
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setLocation('/cart')} data-testid="menu-cart">
+                            <ShoppingCart className="mr-2 h-4 w-4" />
+                            Shopping Cart
+                          </DropdownMenuItem>
+                        </>
                       )}
                       
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => {
                         if (isCustomer) {
                           setLocation('/customer/dashboard');
@@ -262,6 +346,12 @@ export default function Header() {
                         Home
                       </Button>
                     </Link>
+                    <Link href="/shop" onClick={closeMobileMenu}>
+                      <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-shop">
+                        <Store className="mr-2 h-4 w-4" />
+                        Shop
+                      </Button>
+                    </Link>
                     <Link href="/all-offers" onClick={closeMobileMenu}>
                       <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-offers">
                         <Gift className="mr-2 h-4 w-4" />
@@ -284,6 +374,35 @@ export default function Header() {
                               <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-wallet">
                                 <Wallet className="mr-2 h-4 w-4" />
                                 Wallet
+                              </Button>
+                            </Link>
+                            <Separator className="my-2" />
+                            <Link href="/orders" onClick={closeMobileMenu}>
+                              <Button variant="ghost" className="w-full justify-start relative" data-testid="mobile-link-orders">
+                                <Package className="mr-2 h-4 w-4" />
+                                My Orders
+                              </Button>
+                            </Link>
+                            <Link href="/wishlist" onClick={closeMobileMenu}>
+                              <Button variant="ghost" className="w-full justify-start relative" data-testid="mobile-link-wishlist">
+                                <Heart className="mr-2 h-4 w-4" />
+                                Wishlist
+                                {wishlistItemsCount > 0 && (
+                                  <Badge className="ml-auto" variant="destructive">
+                                    {wishlistItemsCount}
+                                  </Badge>
+                                )}
+                              </Button>
+                            </Link>
+                            <Link href="/cart" onClick={closeMobileMenu}>
+                              <Button variant="ghost" className="w-full justify-start relative" data-testid="mobile-link-cart">
+                                <ShoppingCart className="mr-2 h-4 w-4" />
+                                Cart
+                                {cartItemsCount > 0 && (
+                                  <Badge className="ml-auto">
+                                    {cartItemsCount}
+                                  </Badge>
+                                )}
                               </Button>
                             </Link>
                           </>

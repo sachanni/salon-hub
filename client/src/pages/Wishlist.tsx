@@ -32,7 +32,8 @@ export default function Wishlist() {
     queryKey: ['/api/wishlist'],
   });
 
-  const wishlist = ((wishlistData as { data?: { wishlist?: WishlistItem[] } })?.data?.wishlist || []);
+  // QueryClient auto-unwraps {success, data} for useQuery responses
+  const wishlist = ((wishlistData as { wishlist?: WishlistItem[] })?.wishlist || []);
   const availableItems = wishlist.filter(item => item.isAvailable);
   const unavailableItems = wishlist.filter(item => !item.isAvailable);
 

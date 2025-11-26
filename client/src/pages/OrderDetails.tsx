@@ -109,7 +109,8 @@ export default function OrderDetails() {
     enabled: !!orderId,
   });
 
-  const order = (orderData as { data?: { order?: ProductOrder } })?.data?.order;
+  // QueryClient auto-unwraps {success, data} response envelope
+  const order = (orderData as { order?: ProductOrder })?.order;
 
   // Cancel order mutation
   const cancelOrderMutation = useMutation({

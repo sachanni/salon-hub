@@ -214,7 +214,56 @@
 
 ---
 
-### ✅ **Phase 6: Customer App Screens** - COMPLETED
+### ✅ **Phase 6.5: Hybrid Stock Mode System** - COMPLETED
+**Completed:** November 21, 2025 | **Architect Reviewed:** ✅ Approved
+
+**Business Problem Solved:**
+- Salons need flexibility: some products sold exclusively online, others shared between services and retail
+- Previous system: Single stock pool caused overselling when products used for both services and retail
+- Solution: Per-product choice between warehouse stock (direct) and allocated stock (dedicated retail pool)
+
+**Implementation:**
+1. ✅ **Database Schema Enhancement**
+   - Added `use_allocated_stock` field to `product_retail_config` table (0 = warehouse, 1 = allocated)
+   - Added `low_stock_threshold` field with default value of 10 units
+   - Salon-scoped product loader (`getProductByIdForSalon`) to prevent cross-salon data exposure
+
+2. ✅ **Backend API Updates**
+   - Updated `/api/products/search` visibility filters to respect stock mode
+   - Updated `/api/salons/:salonId/products/retail` visibility filters  
+   - Effective stock calculation based on `useAllocatedStock` flag
+   - Secure stock allocation endpoint with salon-scoped access control
+
+3. ✅ **Frontend UI Components**
+   - Stock mode toggle in "Allocate Retail Stock" dialog (📦 Package icon)
+   - Low stock threshold configuration field
+   - Visual stock indicators: "In Stock" / "Low Stock ⚠️" / "Out of Stock"
+   - Real-time form validation with Zod schemas
+
+4. ✅ **Security Hardening**
+   - All mutation endpoints protected with `isAuthenticated` + `requireSalonAccess` middleware
+   - Salon-scoped product loader prevents cross-salon manipulation
+   - NaN validation on all numeric form inputs
+   - All 4 visibility gates enforced (availableForRetail, isActive, retailPrice, effectiveStock)
+
+**Customer Visibility Rules (4 Conditions):**
+A product appears in shop ONLY when ALL 4 conditions are met:
+1. `availableForRetail = true` - Listed for retail
+2. `isActive = true` - Not deleted/deactivated
+3. `retailPriceInPaisa > 0` - Valid price configured
+4. `effectiveStock > 0` - Based on stock mode:
+   - Warehouse mode: `currentStock > 0`
+   - Allocated mode: `retailStockAllocated > 0`
+
+**Architect Approval Notes:**
+- Security validated: cross-salon isolation working, authorization on all mutations
+- Visibility filters correctly implement hybrid stock logic
+- Low stock alerts use configurable thresholds from database
+- End-to-end flow verified: UI → database → customer display
+
+---
+
+### ✅ **Phase 7: Customer App Screens** - COMPLETED
 **Started:** November 20, 2025 | **Completed:** November 20, 2025 | **All 8 screens built**
 
 **Customer Screens Implemented (8 Total):**
@@ -3216,6 +3265,212 @@ dateTo: string
 ---
 
 ## Business Logic Rules
+
+### 0. Product Visibility & Shop Listing Rules ⭐ CRITICAL
+
+#### Rule 0.1: Product Visibility Criteria (4 CONDITIONS REQUIRED)
+```
+A product appears in customer-facing shop IF AND ONLY IF ALL 4 conditions are met:
+  1. availableForRetail = true (explicitly enabled)
+  2. isActive = true (not deleted or deactivated)
+  3. retailPriceInPaisa > 0 (valid price configured)
+  4. effectiveStock > 0 (based on stock mode - see Rule 0.1a)
+
+Backend Visibility Filter (applied in server/routes.ts):
+  const effectiveStock = (useAllocatedStock === 0)
+    ? parseFloat(currentStock)
+    : parseFloat(retailStockAllocated);
+    
+  WHERE available_for_retail = true 
+    AND is_active = true 
+    AND retail_price_in_paisa > 0
+    AND effectiveStock > 0
+    AND salon_id = :salonId (for salon-specific listings)
+
+Note: Missing ANY of these 4 conditions = product NOT visible to customers
+```
+
+#### Rule 0.1a: Hybrid Stock Mode System (November 2025)
+```
+BUSINESS FLEXIBILITY: Each product can use one of two stock modes:
+
+STOCK MODE 1: Warehouse Stock (useAllocatedStock = 0)
+  - Products sell directly from warehouse inventory
+  - Customer views: currentStock from products table
+  - No separate retail allocation needed
+  - Best for: Products with single inventory pool
+  - Visibility Check: currentStock > 0
+  
+STOCK MODE 2: Allocated Stock (useAllocatedStock = 1) [DEFAULT]
+  - Dedicated retail stock allocation separate from warehouse
+  - Customer views: retailStockAllocated from product_retail_config
+  - Prevents overselling when same product used for services + retail
+  - Best for: Products shared between salon services and retail sales
+  - Visibility Check: retailStockAllocated > 0
+
+Configuration Location:
+  - UI: Inventory Management → Products tab → Click 📦 Package icon
+  - Dialog: "Allocate Retail Stock" → Stock Mode toggle
+  - API: PUT /api/salons/:salonId/products/:productId/allocate-retail-stock
+  - Field: useAllocatedStock (0 or 1)
+
+Database Schema:
+  - Table: product_retail_config
+  - Fields:
+    * use_allocated_stock INTEGER DEFAULT 1 (0 = warehouse, 1 = allocated)
+    * retail_stock_allocated DECIMAL(10,2) (used when mode = 1)
+    * low_stock_threshold DECIMAL(10,2) DEFAULT 10 (configurable per product)
+
+Low Stock Alerts:
+  - Visual Indicators: "In Stock" / "Low Stock ⚠️" / "Out of Stock"
+  - Threshold: Configurable per product (default: 10 units)
+  - Alert System: checkAndSendLowStockAlert() uses lowStockThreshold from DB
+  - Location: server/routes.ts line 4891
+
+Implementation Details:
+  - Effective Stock Calculation (routes.ts lines 12735-12742, 12780-12787):
+    const effectiveStock = (p.retailConfig?.useAllocatedStock === 0)
+      ? parseFloat(String(p.currentStock || 0))
+      : parseFloat(String(p.retailConfig?.retailStockAllocated || 0));
+  
+  - Applied in: /api/products/search (both query variants)
+  - Applied in: /api/salons/:salonId/products/retail
+```
+
+#### Rule 0.2: Product Listing Configuration Flow
+```
+Business User Configuration Process:
+
+1. Navigate: Business Partner App → Inventory Management
+2. Select: Click on product card to open details
+3. Enable: Toggle "List in Shop" switch → sets availableForRetail = true
+4. Configure via /api/salons/:salonId/products/:productId/retail-config:
+   REQUIRED:
+   - retailPrice: Customer-facing price (rupees, auto-converts to paisa)
+   
+   OPTIONAL:
+   - retailStockQuantity: Dedicated retail stock allocation
+   - retailDescription: Customer-friendly product description
+   - retailImageUrls: Product images for shop display
+   - featured: Featured product flag
+   - metaTitle: SEO title
+   - metaDescription: SEO description
+   - searchKeywords: Array of search keywords
+
+5. Validation:
+   - Backend validates retailPriceInPaisa > 0
+   - Returns error if price is 0 or null
+   
+6. Result:
+   - Product immediately visible in /shop
+   - Shows "✅ Listed" badge in inventory dashboard
+   - Searchable via /api/products/search
+```
+
+#### Rule 0.3: Data Transformation (Backend → Frontend)
+```
+Backend Database Fields → Frontend Shop Display:
+
+1. Stock Field Conversion (HYBRID MODE - November 2025):
+   - DB Fields: 
+     * currentStock (varchar/string, e.g., "100") - warehouse inventory
+     * retailStockAllocated (decimal) - retail-only allocation
+     * useAllocatedStock (integer 0 or 1) - stock mode selector
+   
+   - Effective Stock Calculation:
+     const effectiveStock = (useAllocatedStock === 0)
+       ? parseFloat(currentStock || 0)
+       : parseFloat(retailStockAllocated || 0);
+   
+   - Frontend: stock (number) = effectiveStock
+   - Customer Views: Stock based on business owner's chosen mode
+   
+   - Example 1 (Warehouse Mode):
+     * currentStock = "100", useAllocatedStock = 0
+     * Customer sees: 100 units available
+   
+   - Example 2 (Allocated Mode):
+     * currentStock = "100", retailStockAllocated = 30, useAllocatedStock = 1
+     * Customer sees: 30 units available (retail allocation)
+     * Warehouse has 70 units reserved for services
+
+2. Image Merging:
+   - DB: images (array) + retailImages (array)  
+   - Frontend: retailImages (merged array, retail images prioritized)
+   - Transform: [...retailImages, ...images].slice(0, 5)
+
+3. Price Display:
+   - DB: retailPriceInPaisa (integer, e.g., 25000)
+   - Frontend: Display as ₹250.00
+   - Transform: (retailPriceInPaisa / 100).toFixed(2)
+
+4. Filtering (Invisible to Frontend):
+   - isActive = false → Not returned in API response
+   - availableForRetail = false → Not returned in API response
+   - retailPriceInPaisa <= 0 → Not returned in API response
+   - effectiveStock <= 0 → Not returned in API response (based on stock mode)
+```
+
+#### Rule 0.4: Product Unlisting (Removal from Shop)
+```
+To remove product from customer-facing shop:
+
+1. User Action: Toggle "List in Shop" to OFF
+2. Backend Update: SET availableForRetail = false
+3. Immediate Effect:
+   - Product hidden from /shop page
+   - Not returned by /api/products/search
+   - Not returned by /api/salons/:salonId/products/retail
+4. Preservation:
+   - Product remains in inventory (isActive = true)
+   - Stock allocation preserved
+   - All product data retained
+   - Can be re-enabled at any time
+
+Soft Delete vs Unlist:
+- Unlist (availableForRetail = false): Hidden from shop, visible in inventory
+- Soft Delete (isActive = false): Hidden from shop AND inventory
+```
+
+#### Rule 0.5: Cross-Salon Product Visibility
+```
+Endpoint: /api/products/search
+
+With salonId parameter:
+  - Returns products from specified salon only
+  - Applies salon_id filter in WHERE clause
+
+Without salonId parameter (empty query):
+  - Returns ALL retail products across all salons
+  - No salon_id filter applied
+  - Enables marketplace-style browsing
+
+Both scenarios apply same visibility rules:
+  - availableForRetail = true
+  - isActive = true  
+  - retailPriceInPaisa > 0
+```
+
+#### Rule 0.6: Inventory Dashboard Status Indicators
+```
+Product Listing Status Display:
+
+"✅ Listed" Badge Shown When:
+  - availableForRetail = true
+  - retailPriceInPaisa > 0
+  - isActive = true
+
+"Not Listed" Status When:
+  - availableForRetail = false (user disabled)
+  - OR retailPriceInPaisa = null/0 (price not configured)
+
+Action Button States:
+  - "List in Shop" button: Visible when NOT listed
+  - "Listed ✓" button: Visible when listed (green background)
+  - Click toggles between states with optimistic UI update
+```
+
+---
 
 ### 1. Stock Management Rules
 

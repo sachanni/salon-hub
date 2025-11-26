@@ -45,7 +45,8 @@ export default function OrderHistory() {
     queryKey: ['/api/product-orders'],
   });
 
-  const orders = ((ordersData as { data?: { orders?: ProductOrder[] } })?.data?.orders || []);
+  // QueryClient auto-unwraps {success, data} response envelope
+  const orders = ((ordersData as { orders?: ProductOrder[] })?.orders || []);
 
   // Filter orders by status
   const filteredOrders = orders.filter((order) => {

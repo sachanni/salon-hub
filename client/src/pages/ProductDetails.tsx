@@ -94,31 +94,78 @@ export default function ProductDetails() {
     enabled: !!productId,
   });
 
-  const product = (productData as { data?: { product?: Product } })?.data?.product;
-  const variants = ((variantsData as { data?: { variants?: ProductVariant[] } })?.data?.variants || []);
-  const reviews = ((reviewsData as { data?: { reviews?: Review[] } })?.data?.reviews || []);
+  // QueryClient auto-unwraps {success, data} response envelope
+  const product = (productData as { product?: Product })?.product;
+  const variants = ((variantsData as { variants?: ProductVariant[] })?.variants || []);
+  const reviews = ((reviewsData as { reviews?: Review[] })?.reviews || []);
 
   // Add to cart mutation
   const addToCartMutation = useMutation({
     mutationFn: async () => {
+      if (!product) throw new Error('Product not found');
+      
       return apiRequest('POST', '/api/cart/items', {
+        salonId: product.salonId,
         productId,
-        variantId: selectedVariant,
+        variantId: selectedVariant || undefined,
         quantity,
+        priceAtAdd: product.retailPriceInPaisa,
       });
     },
     onSuccess: () => {
+      // Invalidate cart query to update cart count badge and cart page
+      queryClient.invalidateQueries({ queryKey: ['/api/cart'] });
+      
       toast({
         title: 'Added to cart',
         description: `${quantity} item(s) added to your cart`,
       });
     },
-    onError: () => {
+    onError: (error: any) => {
+      // Parse error message or response data
+      let errorData;
+      try {
+        // Try to parse error response from API
+        const errorMessage = error?.message || '';
+        const jsonMatch = errorMessage.match(/\{.*\}/);
+        if (jsonMatch) {
+          errorData = JSON.parse(jsonMatch[0]);
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+
+      // Check error types
+      const isUnauthorized = error?.message?.includes('401') || error?.message?.includes('Unauthorized');
+      const isStockError = errorData?.error?.includes('Insufficient stock') || errorData?.error?.includes('stock');
+      
+      // Build error message
+      let title = 'Error';
+      let description = 'Failed to add to cart';
+      
+      if (isUnauthorized) {
+        title = 'Please login';
+        description = 'You need to login to add items to your cart';
+      } else if (isStockError) {
+        title = 'Out of stock';
+        const available = errorData?.available ?? 0;
+        if (available > 0) {
+          description = `Only ${available} item${available === 1 ? '' : 's'} available in stock`;
+        } else {
+          description = 'This product is currently out of stock';
+        }
+      }
+
       toast({
-        title: 'Error',
-        description: 'Failed to add to cart',
+        title,
+        description,
         variant: 'destructive',
       });
+
+      // Redirect to login if unauthorized
+      if (isUnauthorized) {
+        setTimeout(() => navigate('/login'), 1500);
+      }
     },
   });
 
@@ -127,7 +174,8 @@ export default function ProductDetails() {
     queryKey: ['/api/wishlist'],
   });
 
-  const wishlistItems = ((wishlistData as { data?: { wishlist?: Array<{ id: string; productId: string }> } })?.data?.wishlist || []);
+  // QueryClient auto-unwraps {success, data} for useQuery responses
+  const wishlistItems = ((wishlistData as { wishlist?: Array<{ id: string; productId: string }> })?.wishlist || []);
   const wishlistItem = wishlistItems.find(item => item.productId === productId);
 
   // Toggle wishlist mutation
@@ -148,12 +196,22 @@ export default function ProductDetails() {
         title: wishlistItem ? 'Removed from wishlist' : 'Added to wishlist',
       });
     },
-    onError: () => {
+    onError: (error: any) => {
+      // Check if it's an authentication error (401)
+      const isUnauthorized = error?.message?.includes('401') || error?.message?.includes('Unauthorized');
+      
       toast({
-        title: 'Error',
-        description: 'Failed to update wishlist',
+        title: isUnauthorized ? 'Please login' : 'Error',
+        description: isUnauthorized 
+          ? 'You need to login to manage your wishlist' 
+          : 'Failed to update wishlist',
         variant: 'destructive',
       });
+
+      // Redirect to login if unauthorized
+      if (isUnauthorized) {
+        setTimeout(() => navigate('/login'), 1500);
+      }
     },
   });
 

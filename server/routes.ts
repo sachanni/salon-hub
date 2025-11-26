@@ -16,6 +16,7 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 import { OfferCalculator } from "./offerCalculator";
 import { getGooglePlacesService } from "./services/googlePlaces";
 import { z } from "zod";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken, revokeRefreshToken, revokeAllUserTokens, extractBearerToken } from "./utils/jwt";
 import aiLookRoutes from "./routes/ai-look.routes";
 import { tempImageStorage } from "./services/tempImageStorage";
 import { 
@@ -1022,8 +1023,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Email verification is now optional - users can login without verification
       // We'll show a banner in the dashboard encouraging verification for enhanced security
 
-      // Establish session after successful login
+      // Establish session after successful login (for web browsers)
       req.session.userId = user.id;
+
+      // Generate JWT tokens for mobile/API clients
+      const accessToken = generateAccessToken(user.id, user.email!);
+      const deviceInfo = req.headers['user-agent'];
+      const ipAddress = req.ip || req.connection.remoteAddress;
+      const { token: refreshToken } = await generateRefreshToken(
+        user.id,
+        deviceInfo,
+        ipAddress
+      );
+
+      // Set refresh token as httpOnly cookie (works for both web and mobile)
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax', // Changed from 'strict' to prevent cookie loss on page reload
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: '/',
+      });
 
       // Check user role for redirect
       const roles = await storage.getUserRoles(user.id);
@@ -1043,11 +1063,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         redirectUrl = '/customer/dashboard';
       }
 
-      // Success response
+      // Success response (includes accessToken for mobile apps)
       const { password: _, ...userResponse } = user;
       res.json({
         success: true,
         user: userResponse,
+        accessToken, // Mobile apps can use this token
         message: "Login successful",
         authenticated: true,
         redirect: redirectUrl
@@ -1056,6 +1077,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Login failed. Please try again." });
+    }
+  });
+
+  // JWT Refresh Token endpoint - generates new access token from valid refresh token
+  app.post('/api/auth/refresh', async (req: any, res) => {
+    try {
+      const refreshToken = req.cookies?.refreshToken;
+
+      if (!refreshToken) {
+        return res.status(401).json({ error: "No refresh token provided" });
+      }
+
+      // Verify and decode refresh token (checks database allowlist)
+      const decoded = await verifyRefreshToken(refreshToken);
+
+      // Get user details
+      const user = await storage.getUserById(decoded.userId);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      // Generate new access token
+      const newAccessToken = generateAccessToken(user.id, user.email!);
+
+      // Token rotation: Generate new refresh token and revoke old one
+      const deviceInfo = req.headers['user-agent'];
+      const ipAddress = req.ip || req.connection.remoteAddress;
+      const { token: newRefreshToken } = await generateRefreshToken(
+        user.id,
+        deviceInfo,
+        ipAddress
+      );
+
+      // Revoke old refresh token
+      await revokeRefreshToken(decoded.tokenId);
+
+      // Set new refresh token as httpOnly cookie
+      res.cookie('refreshToken', newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax', // Changed from 'strict' to prevent cookie loss on page reload
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: '/',
+      });
+
+      res.json({
+        success: true,
+        accessToken: newAccessToken,
+        message: "Token refreshed successfully"
+      });
+
+    } catch (error: any) {
+      console.error("Token refresh error:", error);
+      res.status(401).json({ error: error.message || "Invalid or expired refresh token" });
+    }
+  });
+
+  // Logout endpoint - revokes refresh token and destroys session
+  app.post('/api/auth/logout', async (req: any, res) => {
+    try {
+      const refreshToken = req.cookies?.refreshToken;
+
+      // Revoke refresh token if present
+      if (refreshToken) {
+        try {
+          const decoded = await verifyRefreshToken(refreshToken);
+          await revokeRefreshToken(decoded.tokenId);
+        } catch (error) {
+          // Token might be invalid or expired, continue with logout
+          console.warn("Error revoking refresh token during logout:", error);
+        }
+      }
+
+      // Clear refresh token cookie
+      res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+      });
+
+      // Destroy session if it exists
+      if (req.session) {
+        req.session.destroy((err: any) => {
+          if (err) {
+            console.error("Session destruction error:", err);
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Logged out successfully"
+      });
+
+    } catch (error) {
+      console.error("Logout error:", error);
+      res.status(500).json({ error: "Logout failed. Please try again." });
+    }
+  });
+
+  // Logout from all devices - revokes all refresh tokens for the user
+  app.post('/api/auth/logout-all', async (req: any, res) => {
+    try {
+      const userId = req.session?.userId;
+      
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      // Revoke all refresh tokens for this user
+      await revokeAllUserTokens(userId);
+
+      // Clear current refresh token cookie
+      res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+      });
+
+      // Destroy current session
+      if (req.session) {
+        req.session.destroy((err: any) => {
+          if (err) {
+            console.error("Session destruction error:", err);
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Logged out from all devices successfully"
+      });
+
+    } catch (error) {
+      console.error("Logout all error:", error);
+      res.status(500).json({ error: "Failed to logout from all devices" });
     }
   });
 
@@ -1731,7 +1890,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         search: req.query.search,
         isActive: req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined,
       };
-      const products = await storage.getProductsBySalonId(salonId, filters);
+      const productsData = await storage.getProductsBySalonId(salonId, filters);
+      
+      // Fetch retail config for all products in one query
+      const productIds = productsData.map((p: any) => p.id);
+      let retailConfigs: any[] = [];
+      if (productIds.length > 0) {
+        retailConfigs = await db.select().from(schema.productRetailConfig)
+          .where(inArray(schema.productRetailConfig.productId, productIds));
+      }
+      
+      // Merge retail config into products
+      const products = productsData.map((product: any) => {
+        const retailConfig = retailConfigs.find((rc: any) => rc.productId === product.id);
+        return {
+          ...product,
+          retailDescription: retailConfig?.retailDescription,
+          retailStockAllocated: retailConfig?.retailStockAllocated,
+          featured: retailConfig?.featured,
+        };
+      });
+      
       res.json(products);
     } catch (error) {
       console.error('Error fetching products:', error);
@@ -1769,6 +1948,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error updating product:', error);
       res.status(400).json({ error: error.message || 'Failed to update product' });
+    }
+  });
+
+  app.put('/api/salons/:salonId/products/:productId/retail-config', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, productId } = req.params;
+      
+      // Validate and sanitize input
+      const configSchema = z.object({
+        availableForRetail: z.boolean(),
+        retailPriceInPaisa: z.number().int().min(0).optional(),
+        retailDescription: z.string().optional(),
+        featured: z.boolean().optional(),
+      });
+      
+      const validated = configSchema.parse(req.body);
+      
+      await storage.configureProductForRetail(productId, salonId, validated);
+      res.json({ success: true, message: 'Product retail configuration updated successfully' });
+    } catch (error: any) {
+      console.error('Error configuring product for retail:', error);
+      if (error.name === 'ZodError') {
+        res.status(400).json({ error: 'Invalid retail configuration data' });
+      } else {
+        res.status(400).json({ error: error.message || 'Failed to configure product for retail' });
+      }
+    }
+  });
+
+  app.put('/api/salons/:salonId/products/:productId/allocate-retail-stock', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, productId } = req.params;
+      
+      // Validate input - ensure retailStockAllocated is actually a number and not NaN
+      const allocationSchema = z.object({
+        retailStockAllocated: z.number().min(0, 'Stock allocation must be 0 or greater').finite('Stock allocation must be a valid number'),
+        retailPriceInPaisa: z.number().int().min(1, 'Retail price must be at least ₹0.01').optional(), // Customer-facing price
+        useAllocatedStock: z.number().int().min(0).max(1).optional(), // 0=warehouse stock, 1=allocated stock
+        lowStockThreshold: z.number().min(0).finite().optional(), // Alert threshold
+      });
+      
+      const validated = allocationSchema.parse(req.body);
+      
+      // SECURE: Use salon-scoped loader to prevent cross-salon data exposure
+      const product = await storage.getProductByIdForSalon(productId, salonId, true);
+      if (!product) {
+        return res.status(404).json({ error: 'Product not found or does not belong to this salon' });
+      }
+      
+      const totalStock = parseFloat(String(product.currentStock || 0));
+      if (validated.retailStockAllocated > totalStock) {
+        return res.status(400).json({ 
+          error: `Cannot allocate more than available stock (${totalStock} ${product.unit})`,
+          available: totalStock
+        });
+      }
+      
+      await storage.allocateRetailStock(productId, salonId, validated);
+      res.json({ success: true, message: 'Retail stock allocation updated successfully' });
+    } catch (error: any) {
+      console.error('Error allocating retail stock:', error);
+      if (error.name === 'ZodError') {
+        res.status(400).json({ error: 'Invalid stock allocation data' });
+      } else {
+        res.status(400).json({ error: error.message || 'Failed to allocate retail stock' });
+      }
     }
   });
 
@@ -1839,10 +2084,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endDate: req.query.endDate,
         limit: req.query.limit ? parseInt(req.query.limit) : undefined,
       };
+      
+      console.log('🔍 Fetching purchase orders with filters:', { salonId, filters });
       const orders = await storage.getPurchaseOrdersBySalonId(salonId, filters);
-      res.json(orders);
+      console.log('📦 Raw orders from database:', orders.length, orders);
+      
+      // Transform to match frontend expectations
+      const transformedOrders = await Promise.all(orders.map(async (order: any) => {
+        const vendor = await storage.getVendor(order.vendorId, salonId);
+        const transformed = {
+          id: order.id,
+          poNumber: order.orderNumber,
+          vendorId: order.vendorId,
+          vendorName: vendor?.name || 'Unknown Vendor',
+          orderDate: order.orderDate,
+          expectedDeliveryDate: order.expectedDeliveryDate,
+          status: order.status,
+          totalAmount: order.totalInPaisa,
+          createdAt: order.createdAt,
+        };
+        console.log('✅ Transformed order:', transformed);
+        return transformed;
+      }));
+      
+      console.log('📤 Sending transformed orders:', transformedOrders.length);
+      res.json(transformedOrders);
     } catch (error) {
-      console.error('Error fetching purchase orders:', error);
+      console.error('❌ Error fetching purchase orders:', error);
       res.status(500).json({ error: 'Failed to fetch purchase orders' });
     }
   });
@@ -1859,7 +2127,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Purchase order not found' });
       }
       
-      res.json({ ...order, items });
+      // Get vendor name
+      const vendor = await storage.getVendor(order.vendorId, salonId);
+      
+      // Transform to match frontend expectations
+      const transformedOrder = {
+        id: order.id,
+        poNumber: order.orderNumber,
+        vendorId: order.vendorId,
+        vendorName: vendor?.name || 'Unknown Vendor',
+        orderDate: order.orderDate,
+        expectedDeliveryDate: order.expectedDeliveryDate,
+        actualDeliveryDate: order.actualDeliveryDate,
+        status: order.status,
+        totalAmount: order.totalInPaisa,
+        subtotalInPaisa: order.subtotalInPaisa,
+        taxInPaisa: order.taxInPaisa,
+        shippingInPaisa: order.shippingInPaisa,
+        discountInPaisa: order.discountInPaisa,
+        notes: order.notes,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      };
+      
+      // Transform items to match frontend expectations
+      const transformedItems = items.map((item: any) => ({
+        id: item.id,
+        productId: item.productId,
+        product_name: item.product_name,
+        sku: item.sku,
+        quantity: item.quantity,
+        unit: item.unit,
+        unitCostInPaisa: item.unitCostInPaisa,
+        totalCostInPaisa: item.totalCostInPaisa,
+      }));
+      
+      res.json({ ...transformedOrder, items: transformedItems });
     } catch (error) {
       console.error('Error fetching purchase order:', error);
       res.status(500).json({ error: 'Failed to fetch purchase order' });
@@ -1869,16 +2172,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/salons/:salonId/purchase-orders', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId } = req.params;
-      const { items, ...orderData } = req.body;
+      const { items, vendor_id, expected_delivery_date, ...rest } = req.body;
       
       if (!items || items.length === 0) {
         return res.status(400).json({ error: 'Purchase order must have at least one item' });
       }
       
-      const result = await storage.createPurchaseOrder(
-        { ...orderData, salonId, createdBy: req.user.id },
-        items
-      );
+      // Convert date string to Date object
+      const deliveryDate = expected_delivery_date ? new Date(expected_delivery_date) : null;
+      
+      // Map snake_case to camelCase for backend schema
+      const orderData = {
+        vendorId: vendor_id,
+        expectedDeliveryDate: deliveryDate,
+        ...rest,
+        salonId,
+        createdBy: req.user.id
+      };
+      
+      // Map items to camelCase
+      const itemsData = items.map((item: any) => ({
+        productId: item.product_id,
+        quantity: item.quantity,
+        unit: item.unit || 'units',
+        unitCostInPaisa: item.unit_price,
+        totalCostInPaisa: item.quantity * item.unit_price
+      }));
+      
+      const result = await storage.createPurchaseOrder(orderData, itemsData);
       
       res.status(201).json(result);
     } catch (error: any) {
@@ -1898,10 +2219,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put('/api/salons/:salonId/purchase-orders/:orderId/receive', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+  app.post('/api/salons/:salonId/purchase-orders/:orderId/receive', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
       const { salonId, orderId } = req.params;
       const { receivedItems } = req.body;
+      
+      console.log('📦 Receiving PO:', { orderId, salonId, receivedItems });
       
       if (!receivedItems || receivedItems.length === 0) {
         return res.status(400).json({ error: 'Received items are required' });
@@ -1910,8 +2233,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.receivePurchaseOrder(orderId, salonId, req.user.id, receivedItems);
       res.json({ success: true, message: 'Purchase order received successfully' });
     } catch (error: any) {
-      console.error('Error receiving purchase order:', error);
+      console.error('❌ Error receiving purchase order:', error);
       res.status(400).json({ error: error.message || 'Failed to receive purchase order' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/purchase-orders/:orderId/confirm', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      
+      // Get the purchase order to verify it exists
+      const po = await storage.getPurchaseOrder(orderId, salonId);
+      if (!po) {
+        return res.status(404).json({ error: 'Purchase order not found' });
+      }
+      
+      // Update status to confirmed
+      await storage.updatePurchaseOrderStatus(orderId, 'confirmed');
+      
+      res.json({ success: true, status: 'confirmed', message: 'Purchase order confirmed successfully' });
+    } catch (error: any) {
+      console.error('Error confirming purchase order:', error);
+      res.status(400).json({ error: error.message || 'Failed to confirm purchase order' });
+    }
+  });
+
+  app.post('/api/salons/:salonId/purchase-orders/:orderId/deliver', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
+    try {
+      const { salonId, orderId } = req.params;
+      
+      // Get the purchase order to verify it exists
+      const po = await storage.getPurchaseOrder(orderId, salonId);
+      if (!po) {
+        return res.status(404).json({ error: 'Purchase order not found' });
+      }
+      
+      // Update status to delivered and set actual delivery date
+      await storage.updatePurchaseOrderStatus(orderId, 'delivered');
+      
+      res.json({ success: true, status: 'delivered', message: 'Purchase order marked as delivered successfully' });
+    } catch (error: any) {
+      console.error('Error marking purchase order as delivered:', error);
+      res.status(400).json({ error: error.message || 'Failed to mark as delivered' });
     }
   });
 
@@ -9699,23 +10062,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/salons/:salonId/purchase-orders/:orderId/receive', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
-    try {
-      const { salonId, orderId } = req.params;
-      const { items } = req.body;
-      const userId = req.user.id;
-      
-      if (!Array.isArray(items)) {
-        return res.status(400).json({ error: 'Items array is required' });
-      }
-      
-      await storage.receivePurchaseOrder(orderId, userId, items);
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error receiving purchase order:', error);
-      res.status(500).json({ error: 'Failed to receive purchase order' });
-    }
-  });
 
   app.post('/api/salons/:salonId/purchase-orders/:orderId/cancel', isAuthenticated, requireSalonAccess(), async (req: any, res) => {
     try {
@@ -12353,29 +12699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Product Details - Get single product with variants (PUBLIC)
-  app.get('/api/products/:productId', async (req, res) => {
-    try {
-      const { productId } = req.params;
-      const { includeVariants = 'true' } = req.query;
-
-      const product = await storage.getProductById(
-        productId,
-        includeVariants === 'true'
-      );
-
-      if (!product) {
-        return res.status(404).json({ error: 'Product not found' });
-      }
-
-      res.json({ success: true, data: { product } });
-    } catch (error: any) {
-      console.error('Error fetching product:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Product Search - Search across products (PUBLIC)
+  // Product Search - Search across products (PUBLIC) - MUST BE BEFORE :productId route
   app.get('/api/products/search', async (req, res) => {
     try {
       const { 
@@ -12387,11 +12711,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         limit = '50' 
       } = req.query;
 
-      if (!query) {
-        return res.status(400).json({ error: 'Search query is required' });
+      // If no query provided, return all retail products
+      if (!query || query === '') {
+        const rawProducts = await storage.getRetailProducts(salonId as string || '', {
+          categoryId: categoryId as string,
+          minPrice: minPrice ? parseInt(minPrice as string) : undefined,
+          maxPrice: maxPrice ? parseInt(maxPrice as string) : undefined,
+          limit: parseInt(limit as string),
+        });
+        
+        // Transform products for shop frontend and enforce ALL visibility gates
+        // Product must meet ALL 4 conditions from PRODUCT_ECOMMERCE_SPECIFICATION:
+        // 1. availableForRetail = true
+        // 2. isActive = true  
+        // 3. retailPriceInPaisa > 0
+        // 4. Effective stock > 0 (based on stock mode):
+        //    - If useAllocatedStock=1: retailStockAllocated > 0
+        //    - If useAllocatedStock=0: currentStock > 0
+        const products = rawProducts
+          .filter((p: any) => {
+            const effectiveStock = (p.retailConfig?.useAllocatedStock === 0)
+              ? parseFloat(String(p.currentStock || 0))
+              : parseFloat(String(p.retailConfig?.retailStockAllocated || 0));
+            
+            return p.availableForRetail === 1 &&
+              p.isActive === 1 &&
+              (p.retailPriceInPaisa || 0) > 0 &&
+              effectiveStock > 0;
+          })
+          .map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            brand: p.brand,
+            retailPriceInPaisa: p.retailPriceInPaisa,
+            retailImages: p.retailConfig?.retailImages || [],
+            // Hybrid stock mode: Use warehouse stock if useAllocatedStock=0, else use allocated stock
+            stock: (p.retailConfig?.useAllocatedStock === 0) 
+              ? parseFloat(String(p.currentStock || 0))
+              : parseFloat(String(p.retailConfig?.retailStockAllocated || 0)),
+            averageRating: null, // TODO: Implement ratings
+            reviewCount: 0, // TODO: Implement reviews
+            salonId: p.salonId,
+          }));
+        
+        return res.json({ success: true, data: { products } });
       }
 
-      const products = await storage.searchProducts(query as string, {
+      const rawProducts = await storage.searchProducts(query as string, {
         salonId: salonId as string,
         categoryId: categoryId as string,
         minPrice: minPrice ? parseInt(minPrice as string) : undefined,
@@ -12399,9 +12765,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
         limit: parseInt(limit as string),
       });
 
+      // Transform products for shop frontend and enforce ALL visibility gates
+      // Product must meet ALL 4 conditions from PRODUCT_ECOMMERCE_SPECIFICATION:
+      // 1. availableForRetail = true
+      // 2. isActive = true
+      // 3. retailPriceInPaisa > 0
+      // 4. Effective stock > 0 (based on stock mode):
+      //    - If useAllocatedStock=1: retailStockAllocated > 0
+      //    - If useAllocatedStock=0: currentStock > 0
+      const products = rawProducts
+        .filter((p: any) => {
+          const effectiveStock = (p.retailConfig?.useAllocatedStock === 0)
+            ? parseFloat(String(p.currentStock || 0))
+            : parseFloat(String(p.retailConfig?.retailStockAllocated || 0));
+          
+          return p.availableForRetail === 1 &&
+            p.isActive === 1 &&
+            (p.retailPriceInPaisa || 0) > 0 &&
+            effectiveStock > 0;
+        })
+        .map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          brand: p.brand,
+          retailPriceInPaisa: p.retailPriceInPaisa,
+          retailImages: p.retailConfig?.retailImages || [],
+          // Hybrid stock mode: Use warehouse stock if useAllocatedStock=0, else use allocated stock
+          stock: (p.retailConfig?.useAllocatedStock === 0) 
+            ? parseFloat(String(p.currentStock || 0))
+            : parseFloat(String(p.retailConfig?.retailStockAllocated || 0)),
+          averageRating: null, // TODO: Implement ratings
+          reviewCount: 0, // TODO: Implement reviews
+          salonId: p.salonId,
+        }));
+
       res.json({ success: true, data: { products } });
     } catch (error: any) {
       console.error('Error searching products:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Product Details - Get single product with variants (PUBLIC)
+  app.get('/api/products/:productId', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const { includeVariants = 'true' } = req.query;
+
+      const rawProduct = await storage.getProductById(
+        productId,
+        includeVariants === 'true'
+      );
+
+      if (!rawProduct) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      // Transform product for customer-facing page (use retail stock)
+      const product = {
+        id: rawProduct.id,
+        name: rawProduct.name,
+        brand: rawProduct.brand,
+        description: rawProduct.description,
+        retailPriceInPaisa: rawProduct.retailPriceInPaisa,
+        costPriceInPaisa: rawProduct.costPriceInPaisa,
+        retailImages: rawProduct.retailConfig?.retailImages || [],
+        // Hybrid stock mode: Use warehouse stock if useAllocatedStock=0, else use allocated stock
+        stock: (rawProduct.retailConfig?.useAllocatedStock === 0) 
+          ? parseFloat(String(rawProduct.currentStock || 0))
+          : parseFloat(String(rawProduct.retailConfig?.retailStockAllocated || 0)),
+        averageRating: null, // TODO: Implement ratings
+        reviewCount: 0, // TODO: Implement reviews
+        categoryId: rawProduct.categoryId,
+        salonId: rawProduct.salonId,
+      };
+
+      res.json({ success: true, data: { product } });
+    } catch (error: any) {
+      console.error('Error fetching product:', error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -12424,10 +12865,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user!.id;
       const { salonId } = req.query;
 
+      // If no salonId provided, return all cart items across all salons
       if (!salonId) {
-        return res.status(400).json({ error: 'salonId is required' });
+        const items = await storage.getUserCartItems(userId);
+        
+        // Transform items to match cart structure
+        const transformedItems = items.map(item => {
+          // Get retail price from config or use priceAtAdd
+          const retailPriceInPaisa = item.product?.retailConfig?.retailPriceInPaisa 
+            ? parseInt(item.product.retailConfig.retailPriceInPaisa.toString())
+            : item.priceAtAdd;
+          
+          // Get retail images from config
+          const retailImages = item.product?.retailConfig?.retailImages || [];
+          const productImage = retailImages.length > 0 ? retailImages[0] : null;
+          
+          // Determine stock based on use_allocated_stock flag
+          const useAllocatedStock = item.product?.retailConfig?.useAllocatedStock || 0;
+          const stock = useAllocatedStock === 1
+            ? (item.product?.retailConfig?.retailStockAllocated 
+                ? parseFloat(item.product.retailConfig.retailStockAllocated.toString()) 
+                : 0)
+            : (item.product?.currentStock 
+                ? parseFloat(item.product.currentStock.toString()) 
+                : 0);
+          
+          return {
+            id: item.id,
+            productId: item.productId,
+            productName: item.product?.name || 'Unknown Product',
+            productImage,
+            variantId: item.variantId,
+            variantValue: item.variant?.variantValue || null,
+            quantity: item.quantity,
+            unitPriceInPaisa: retailPriceInPaisa,
+            totalPriceInPaisa: retailPriceInPaisa * item.quantity,
+            stock,
+            isAvailable: item.product?.isActive && stock >= item.quantity,
+          };
+        });
+        
+        // Calculate totals
+        const subtotalInPaisa = transformedItems.reduce((sum, item) => sum + item.totalPriceInPaisa, 0);
+        const taxInPaisa = Math.round(subtotalInPaisa * 0.18); // 18% GST
+        const deliveryChargeInPaisa = subtotalInPaisa >= 50000 ? 0 : 5000; // Free delivery above ₹500
+        const totalInPaisa = subtotalInPaisa + taxInPaisa + deliveryChargeInPaisa;
+        
+        const cart = {
+          id: 'combined', // Virtual cart ID for combined items
+          items: transformedItems,
+          subtotalInPaisa,
+          discountInPaisa: 0,
+          deliveryChargeInPaisa,
+          taxInPaisa,
+          totalInPaisa,
+          appliedCoupon: null,
+        };
+        
+        return res.json({ success: true, data: { cart } });
       }
 
+      // If salonId provided, return salon-specific cart
       const cart = await storage.getActiveCart(userId, salonId as string);
       res.json({ success: true, data: { cart: cart || null } });
     } catch (error: any) {
@@ -12555,16 +13053,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { salonId, cartId, deliveryAddress, paymentMethod, fulfillmentType } = validation.data;
+      let { salonId, cartId, deliveryAddress, addressId, paymentMethod, fulfillmentType } = validation.data;
 
-      // Get active cart
-      const cart = await storage.getActiveCart(userId, salonId);
-      if (!cart || cart.id !== cartId) {
-        return res.status(404).json({ error: 'Cart not found' });
+      // Get cart items - either from specific cart or all user's cart items
+      let cartItems: Array<{
+        productId: string;
+        variantId?: string;
+        quantity: number;
+        salonId?: string;
+      }> = [];
+      
+      if (cartId && cartId !== 'combined' && salonId) {
+        // Traditional single-salon cart
+        const cart = await storage.getActiveCart(userId, salonId);
+        if (!cart || cart.id !== cartId) {
+          return res.status(404).json({ error: 'Cart not found' });
+        }
+        cartItems = cart.items || [];
+      } else {
+        // Cross-salon cart - get all items
+        const userItems = await storage.getUserCartItems(userId);
+        cartItems = userItems.map(item => ({
+          productId: item.productId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          salonId: item.salonId,
+        }));
       }
 
-      if (!cart.items || cart.items.length === 0) {
+      if (cartItems.length === 0) {
         return res.status(400).json({ error: 'Cart is empty' });
+      }
+
+      // Derive salonId from first cart item if not provided
+      if (!salonId) {
+        salonId = cartItems[0].salonId!;
+      }
+
+      // Validate all items are from the same salon (multi-salon orders not yet supported)
+      const invalidItems = cartItems.filter(item => item.salonId !== salonId);
+      if (invalidItems.length > 0) {
+        return res.status(400).json({ 
+          error: 'Cannot place order with items from multiple salons. Please checkout one salon at a time.' 
+        });
+      }
+
+      // Get or create cart for this salon
+      if (!cartId || cartId === 'combined') {
+        const salonCart = await storage.createOrGetCart(userId, salonId);
+        cartId = salonCart.id;
+      }
+
+      // Handle saved address lookup
+      if (fulfillmentType === 'delivery' && addressId && !deliveryAddress) {
+        const savedAddress = await db
+          .select()
+          .from(schema.addresses)
+          .where(and(
+            eq(schema.addresses.id, addressId),
+            eq(schema.addresses.userId, userId)
+          ))
+          .limit(1);
+
+        if (savedAddress.length === 0) {
+          return res.status(404).json({ error: 'Saved address not found' });
+        }
+
+        const addr = savedAddress[0];
+        deliveryAddress = {
+          fullName: addr.fullName,
+          phone: addr.phone,
+          addressLine1: addr.addressLine1,
+          addressLine2: addr.addressLine2 || undefined,
+          city: addr.city,
+          state: addr.state,
+          pincode: addr.pincode,
+        };
       }
 
       // Server-side price calculation and stock validation

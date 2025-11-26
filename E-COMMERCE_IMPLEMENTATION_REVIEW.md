@@ -51,6 +51,110 @@ A comprehensive deep-dive review of the entire e-commerce implementation reveals
 
 ---
 
+## 1.1. PRODUCT VISIBILITY & LISTING RULES ✅ DOCUMENTED
+
+### Product Visibility in Customer-Facing Shop
+
+**Critical Rule:** A product appears in the customer-facing shop **ONLY** when ALL of the following conditions are met:
+
+#### Required Database Flags:
+1. ✅ `availableForRetail = true` - Product explicitly enabled for retail sales
+2. ✅ `isActive = true` - Product not soft-deleted or deactivated  
+3. ✅ `retailPriceInPaisa > 0` - Valid retail price configured (non-zero integer in paisa)
+
+#### SQL WHERE Clause (Backend Filter):
+```sql
+WHERE available_for_retail = true 
+  AND is_active = true 
+  AND retail_price_in_paisa > 0
+  AND salon_id = :salonId
+```
+
+#### API Endpoints That Apply These Rules:
+- `GET /api/products/search` - Cross-salon product search (salonId optional)
+- `GET /api/salons/:salonId/products/retail` - Salon-specific product listing
+- Both endpoints return **ONLY** products meeting all 3 visibility criteria
+
+### How Business Users List Products in Shop
+
+**Step-by-Step Configuration Process:**
+
+1. **Navigate to Inventory Dashboard**
+   - Go to Business Partner App → Inventory Management
+   - View all products in inventory system
+
+2. **Select Product to List**
+   - Click on product card
+   - Opens Product Details modal/screen
+
+3. **Enable Retail Sales**
+   - Toggle "List in Shop" switch to ON
+   - This sets `availableForRetail = true`
+
+4. **Configure Retail Settings** (via `/api/salons/:salonId/products/:productId/retail-config`):
+   - **Retail Price** (required): Customer-facing price in rupees (auto-converts to paisa)
+   - **Retail Stock** (optional): Dedicated stock allocation for retail vs service
+   - **Retail Description** (optional): Customer-friendly description  
+   - **Retail Images** (optional): Product images for shop display
+   - **SEO Metadata** (optional): Meta title, description, keywords
+
+5. **Save Configuration**
+   - System validates: `retailPriceInPaisa > 0`
+   - Updates database with retail config
+   - Product **immediately visible** in customer-facing shop
+
+6. **Verification**
+   - Product shows "✅ Listed" badge in inventory dashboard
+   - Appears in Shop page at `/shop` route
+   - Searchable via product search API
+
+### Data Transformation Layer
+
+**Backend to Frontend Mapping:**
+- `currentStock` (string in DB) → `stock` (number for frontend)
+- `retailImages` (array from retail config) → merged with product images
+- `isActive` (boolean) → filtered out if false (not returned to frontend)
+- `availableForRetail` (boolean) → filtered out if false (not returned to frontend)
+
+**Example API Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "products": [
+      {
+        "id": "2dae7bd8-23eb-48a5-8415-5c66d767e103",
+        "name": "pr001",
+        "brand": "ABC",
+        "retailPriceInPaisa": 25000,
+        "retailImages": [],
+        "stock": 100,
+        "averageRating": null,
+        "reviewCount": 0,
+        "salonId": "105d554c-8392-4e1e-96a2-1d6db71851fb"
+      }
+    ]
+  }
+}
+```
+
+### Unlisting Products from Shop
+
+**To Remove from Shop (keep in inventory):**
+1. Navigate to product in Inventory Dashboard
+2. Toggle "List in Shop" to OFF
+3. Sets `availableForRetail = false`
+4. Product **immediately hidden** from customer-facing shop
+5. Remains in inventory system for service use
+
+**Backend Behavior:**
+- Product still exists in database (`isActive = true`)
+- Not returned by retail product APIs (filtered by `availableForRetail = false`)
+- Stock remains allocated for service bookings
+- Can be re-enabled at any time
+
+---
+
 ## 2. BACKEND APIs - IMPLEMENTATION STATUS
 
 ### Customer Product APIs (5/5) ✅

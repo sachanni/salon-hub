@@ -116,7 +116,7 @@ import {
   deliverySettings, productViews
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne, like, isNotNull, lt } from "drizzle-orm";
+import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne, like, isNotNull, lt, gt } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
@@ -1276,6 +1276,7 @@ export interface IStorage {
   // Shopping Cart Operations
   createOrGetCart(userId: string, salonId: string): Promise<ShoppingCart>;
   getActiveCart(userId: string, salonId: string): Promise<(ShoppingCart & { items?: Array<CartItem & { product?: Product; variant?: ProductVariant }> }) | undefined>;
+  getUserCartItems(userId: string): Promise<Array<CartItem & { product?: Product & { retailConfig?: ProductRetailConfig }; variant?: ProductVariant; salonId?: string }>>;
   addCartItem(cartId: string, item: {
     productId: string;
     variantId?: string;
@@ -7266,9 +7267,28 @@ export class DatabaseStorage implements IStorage {
       throw new Error('Purchase order not found or does not belong to this salon');
     }
 
-    return await db.select().from(purchaseOrderItems)
+    // Join with products table to get product name and SKU
+    const items = await db
+      .select({
+        id: purchaseOrderItems.id,
+        purchaseOrderId: purchaseOrderItems.purchaseOrderId,
+        productId: purchaseOrderItems.productId,
+        quantity: purchaseOrderItems.quantity,
+        unit: purchaseOrderItems.unit,
+        unitCostInPaisa: purchaseOrderItems.unitCostInPaisa,
+        totalCostInPaisa: purchaseOrderItems.totalCostInPaisa,
+        receivedQuantity: purchaseOrderItems.receivedQuantity,
+        notes: purchaseOrderItems.notes,
+        createdAt: purchaseOrderItems.createdAt,
+        product_name: products.name,
+        sku: products.sku,
+      })
+      .from(purchaseOrderItems)
+      .leftJoin(products, eq(purchaseOrderItems.productId, products.id))
       .where(eq(purchaseOrderItems.purchaseOrderId, purchaseOrderId))
       .orderBy(purchaseOrderItems.createdAt);
+
+    return items as any;
   }
 
   async createPurchaseOrder(po: InsertPurchaseOrder, items: InsertPurchaseOrderItem[]): Promise<{ po: PurchaseOrder, items: PurchaseOrderItem[] }> {
@@ -7299,9 +7319,14 @@ export class DatabaseStorage implements IStorage {
 
     // Use transaction to create PO and items atomically
     return await db.transaction(async (tx) => {
+      // Generate unique order number using randomUUID for better collision resistance
+      const uuid = randomUUID().replace(/-/g, '').substring(0, 12).toUpperCase();
+      const orderNumber = `PO-${Date.now().toString(36)}-${uuid}`;
+      
       // Create purchase order
       const [newPO] = await tx.insert(purchaseOrders).values({
         ...po,
+        orderNumber,
         subtotalInPaisa: subtotal,
         totalInPaisa: total,
         status: 'draft',
@@ -7365,13 +7390,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async receivePurchaseOrder(id: string, salonId: string, receivedBy: string, receivedItems: { itemId: string, receivedQuantity: string }[]): Promise<void> {
-    // Validate PO exists and is approved
+    // Validate PO exists and is delivered
     const po = await this.getPurchaseOrder(id, salonId);
     if (!po) {
       throw new Error('Purchase order not found or does not belong to this salon');
     }
-    if (po.status !== 'approved') {
-      throw new Error('Only approved purchase orders can be received');
+    if (po.status !== 'delivered') {
+      throw new Error('Only delivered purchase orders can be received');
     }
 
     // Get PO items
@@ -7424,6 +7449,16 @@ export class DatabaseStorage implements IStorage {
           const receivedQty = parseFloat(receivedItem.receivedQuantity);
           const newStock = currentStock + receivedQty;
 
+          // Check if receivedBy user has a staff record
+          const [staffRecord] = await tx
+            .select()
+            .from(staff)
+            .where(and(
+              eq(staff.userId, receivedBy),
+              eq(staff.salonId, salonId)
+            ))
+            .limit(1);
+
           // Create stock movement
           await tx.insert(stockMovements).values({
             salonId,
@@ -7439,7 +7474,7 @@ export class DatabaseStorage implements IStorage {
             reference: po.orderNumber,
             referenceId: po.id,
             referenceType: 'purchase_order',
-            staffId: receivedBy,
+            staffId: staffRecord?.id || null,
           });
 
           // Update product stock
@@ -7452,6 +7487,12 @@ export class DatabaseStorage implements IStorage {
         }
       }
     });
+  }
+
+  async updatePurchaseOrderStatus(id: string, status: string): Promise<void> {
+    await db.update(purchaseOrders)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(purchaseOrders.id, id));
   }
 
   async deletePurchaseOrder(id: string, salonId: string): Promise<void> {
@@ -8577,10 +8618,18 @@ export class DatabaseStorage implements IStorage {
     offset?: number;
   }): Promise<Array<Product & { retailConfig?: ProductRetailConfig; variants?: ProductVariant[] }>> {
     const conditions = [
-      eq(products.salonId, salonId),
+      // GATE 1: Product must be active
       eq(products.isActive, 1),
+      // GATE 2: Product must be available for retail
       eq(products.availableForRetail, 1),
+      // GATE 3: Product must have retail price configured
+      gt(products.retailPriceInPaisa, 0),
     ];
+
+    // Only filter by salon if salonId is provided
+    if (salonId && salonId !== '') {
+      conditions.push(eq(products.salonId, salonId));
+    }
 
     if (filters?.categoryId) {
       conditions.push(eq(products.categoryId, filters.categoryId));
@@ -8617,10 +8666,18 @@ export class DatabaseStorage implements IStorage {
       .offset(filters?.offset || 0)
       .orderBy(desc(products.createdAt));
 
-    // If featured filter, apply it on retail config
+    // Apply filters that depend on retail config
     let filteredResults = results;
+    
+    // GATE 4: Product must have retail stock allocated
+    filteredResults = filteredResults.filter(r => {
+      const retailStock = r.retailConfig?.retailStockAllocated;
+      return retailStock && parseFloat(String(retailStock)) > 0;
+    });
+    
+    // Featured filter
     if (filters?.featured !== undefined) {
-      filteredResults = results.filter(r => r.retailConfig?.featured === (filters.featured ? 1 : 0));
+      filteredResults = filteredResults.filter(r => r.retailConfig?.featured === (filters.featured ? 1 : 0));
     }
 
     // Get variants for each product
@@ -8683,7 +8740,46 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
-   * Search products across salons
+   * Get product by ID for specific salon (SECURE: prevents cross-salon access)
+   */
+  async getProductByIdForSalon(productId: string, salonId: string, includeVariants = true): Promise<(Product & { retailConfig?: ProductRetailConfig; variants?: ProductVariant[] }) | undefined> {
+    const [result] = await db
+      .select({
+        product: products,
+        retailConfig: productRetailConfig,
+      })
+      .from(products)
+      .leftJoin(productRetailConfig, eq(products.id, productRetailConfig.productId))
+      .where(and(
+        eq(products.id, productId),
+        eq(products.salonId, salonId)
+      ));
+
+    if (!result) {
+      return undefined;
+    }
+
+    let variants: ProductVariant[] | undefined;
+    if (includeVariants) {
+      variants = await db
+        .select()
+        .from(productVariants)
+        .where(and(
+          eq(productVariants.productId, productId),
+          eq(productVariants.isActive, 1)
+        ))
+        .orderBy(asc(productVariants.displayOrder));
+    }
+
+    return {
+      ...result.product,
+      retailConfig: result.retailConfig || undefined,
+      variants: variants && variants.length > 0 ? variants : undefined,
+    };
+  }
+
+  /**
+   * Search products across salons (customer-facing with ALL 4 visibility gates)
    */
   async searchProducts(query: string, filters?: {
     salonId?: string;
@@ -8693,8 +8789,12 @@ export class DatabaseStorage implements IStorage {
     limit?: number;
   }): Promise<Array<Product & { retailConfig?: ProductRetailConfig }>> {
     const conditions = [
+      // GATE 1: Product must be active
       eq(products.isActive, 1),
+      // GATE 2: Product must be available for retail
       eq(products.availableForRetail, 1),
+      // GATE 3: Product must have retail price configured
+      gt(products.retailPriceInPaisa, 0),
       or(
         sql`LOWER(${products.name}) LIKE LOWER(${`%${query}%`})`,
         sql`LOWER(${products.description}) LIKE LOWER(${`%${query}%`})`,
@@ -8729,7 +8829,13 @@ export class DatabaseStorage implements IStorage {
       .limit(filters?.limit || 50)
       .orderBy(desc(products.createdAt));
 
-    return results.map(r => ({
+    // GATE 4: Product must have retail stock allocated (filter after join)
+    const filteredResults = results.filter(r => {
+      const retailStock = r.retailConfig?.retailStockAllocated;
+      return retailStock && parseFloat(String(retailStock)) > 0;
+    });
+
+    return filteredResults.map(r => ({
       ...r.product,
       retailConfig: r.retailConfig || undefined,
     }));
@@ -8828,6 +8934,51 @@ export class DatabaseStorage implements IStorage {
         variant: i.variant || undefined,
       })),
     };
+  }
+
+  /**
+   * Get all cart items for a user across all salons
+   */
+  async getUserCartItems(userId: string): Promise<Array<CartItem & { product?: Product & { retailConfig?: ProductRetailConfig }; variant?: ProductVariant; salonId?: string }>> {
+    // Get all active carts for the user
+    const activeCarts = await db
+      .select()
+      .from(shoppingCarts)
+      .where(and(
+        eq(shoppingCarts.userId, userId),
+        eq(shoppingCarts.status, 'active')
+      ));
+
+    if (activeCarts.length === 0) {
+      return [];
+    }
+
+    // Get all cart items with product details and retail config
+    const cartIds = activeCarts.map(c => c.id);
+    const items = await db
+      .select({
+        item: cartItems,
+        product: products,
+        retailConfig: productRetailConfig,
+        variant: productVariants,
+        cart: shoppingCarts,
+      })
+      .from(cartItems)
+      .leftJoin(products, eq(cartItems.productId, products.id))
+      .leftJoin(productRetailConfig, eq(cartItems.productId, productRetailConfig.productId))
+      .leftJoin(productVariants, eq(cartItems.variantId, productVariants.id))
+      .leftJoin(shoppingCarts, eq(cartItems.cartId, shoppingCarts.id))
+      .where(inArray(cartItems.cartId, cartIds));
+
+    return items.map(i => ({
+      ...i.item,
+      product: i.product ? {
+        ...i.product,
+        retailConfig: i.retailConfig || undefined,
+      } : undefined,
+      variant: i.variant || undefined,
+      salonId: i.cart?.salonId,
+    }));
   }
 
   /**
@@ -9434,7 +9585,7 @@ export class DatabaseStorage implements IStorage {
       // Update existing config
       await db.update(productRetailConfig)
         .set({
-          retailStockAllocated: config.retailStockAllocated || undefined,
+          retailStockAllocated: config.retailStockAllocated !== undefined ? String(config.retailStockAllocated) : undefined,
           retailDescription: config.retailDescription || undefined,
           retailImageUrls: config.retailImageUrls || undefined,
           featured: config.featured !== undefined ? (config.featured ? 1 : 0) : undefined,
@@ -9449,13 +9600,80 @@ export class DatabaseStorage implements IStorage {
       await db.insert(productRetailConfig).values({
         productId,
         salonId,
-        retailStockAllocated: config.retailStockAllocated || 0,
+        retailStockAllocated: String(config.retailStockAllocated || 0),
         retailDescription: config.retailDescription,
         retailImageUrls: config.retailImageUrls || [],
         featured: config.featured ? 1 : 0,
         metaTitle: config.metaTitle,
         metaDescription: config.metaDescription,
         searchKeywords: config.searchKeywords || []
+      });
+    }
+  }
+
+  async allocateRetailStock(
+    productId: string, 
+    salonId: string, 
+    data: {
+      retailStockAllocated: number;
+      retailPriceInPaisa?: number;
+      useAllocatedStock?: number;
+      lowStockThreshold?: number;
+    }
+  ): Promise<void> {
+    // CRITICAL: Verify product belongs to salon before updating
+    const product = await db.select()
+      .from(products)
+      .where(and(
+        eq(products.id, productId),
+        eq(products.salonId, salonId)
+      ))
+      .limit(1);
+    
+    if (product.length === 0) {
+      throw new Error('Product not found or does not belong to this salon');
+    }
+    
+    // Check if retail config exists
+    const existing = await db.select()
+      .from(productRetailConfig)
+      .where(eq(productRetailConfig.productId, productId))
+      .limit(1);
+
+    const updateData: any = {
+      retailStockAllocated: String(data.retailStockAllocated),
+      updatedAt: new Date()
+    };
+    
+    if (data.retailPriceInPaisa !== undefined) {
+      updateData.retailPriceInPaisa = data.retailPriceInPaisa;
+    }
+    
+    if (data.useAllocatedStock !== undefined) {
+      updateData.useAllocatedStock = data.useAllocatedStock;
+    }
+    
+    if (data.lowStockThreshold !== undefined) {
+      updateData.lowStockThreshold = String(data.lowStockThreshold);
+    }
+
+    if (existing.length > 0) {
+      // Update existing config
+      await db.update(productRetailConfig)
+        .set(updateData)
+        .where(eq(productRetailConfig.productId, productId));
+    } else {
+      // Create new config
+      await db.insert(productRetailConfig).values({
+        productId,
+        salonId,
+        retailStockAllocated: String(data.retailStockAllocated),
+        retailPriceInPaisa: data.retailPriceInPaisa,
+        useAllocatedStock: data.useAllocatedStock ?? 1,
+        lowStockThreshold: data.lowStockThreshold !== undefined ? String(data.lowStockThreshold) : '5',
+        featured: 0,
+        retailImageUrls: [],
+        searchKeywords: []
       });
     }
   }

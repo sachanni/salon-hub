@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import * as React from 'react';
 import { useParams } from 'wouter';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -61,6 +62,9 @@ import {
   ShoppingCart,
   BarChart3,
 } from 'lucide-react';
+import { POListView } from '@/components/PurchaseOrders/POListView';
+import { PODetailView } from '@/components/PurchaseOrders/PODetailView';
+import { CreatePODialog } from '@/components/PurchaseOrders/CreatePODialog';
 
 interface InventoryManagementProps {
   salonId?: string;
@@ -1261,17 +1265,18 @@ function StockMovementsTab({ salonId, products, movements, loading }: any) {
 }
 
 function PurchaseOrdersTab({ salonId, vendors, products, orders, loading }: any) {
+  const [selectedPO, setSelectedPO] = React.useState(null);
+
+  if (selectedPO) {
+    return <PODetailView salonId={salonId} po={selectedPO} onBack={() => setSelectedPO(null)} />;
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Purchase Orders</CardTitle>
-        <CardDescription>Manage orders from vendors</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="text-muted-foreground p-4">
-          Purchase order workflow: Draft → Approve → Receive
-        </div>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <CreatePODialog salonId={salonId} onSuccess={() => {}} />
+      </div>
+      <POListView salonId={salonId} onSelectPO={setSelectedPO} />
+    </div>
   );
 }

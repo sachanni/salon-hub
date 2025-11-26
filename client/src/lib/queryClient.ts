@@ -58,8 +58,6 @@ export const getQueryFn: <T>(options: {
       }
     }
     
-    console.log('QueryClient fetching:', url);
-    
     try {
       const res = await fetch(url, {
         credentials: "include",
@@ -70,10 +68,7 @@ export const getQueryFn: <T>(options: {
         }
       });
 
-      console.log('QueryClient response:', url, 'status:', res.status, 'ok:', res.ok);
-
       if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-        console.log('QueryClient 401 - returning null');
         return null;
       }
 
@@ -81,29 +76,23 @@ export const getQueryFn: <T>(options: {
       
       // Check if response is JSON
       const contentType = res.headers.get('content-type');
-      console.log('QueryClient content-type:', contentType);
       
       if (!contentType || !contentType.includes('application/json')) {
-        console.log('QueryClient no JSON content-type - returning {}');
         return {} as unknown as T;
       }
       
       // Parse JSON response
       const text = await res.text();
-      console.log('QueryClient text length:', text?.length || 0);
       
       if (!text || text.trim() === '') {
-        console.log('QueryClient empty text - returning null');
         return null as unknown as T;
       }
       
       try {
         const jsonResponse = JSON.parse(text);
-        console.log('QueryClient parsed successfully:', url);
         
         // Auto-unwrap standard API response format: { success, data }
         if (jsonResponse && typeof jsonResponse === 'object' && 'success' in jsonResponse && 'data' in jsonResponse) {
-          console.log('QueryClient auto-unwrapping standard response envelope');
           return jsonResponse.data as T;
         }
         

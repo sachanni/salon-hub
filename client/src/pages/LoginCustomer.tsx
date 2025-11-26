@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Heart, Eye, EyeOff, Sparkles, Star, Calendar } from "lucide-react";
 import { PasswordResetModal } from "@/components/PasswordResetModal";
+import { handleLoginSuccess } from "@/lib/auth";
 
 export default function LoginCustomer() {
   const [formData, setFormData] = useState({
@@ -44,6 +45,11 @@ export default function LoginCustomer() {
       const data = await response.json();
 
       if (response.ok) {
+        // Store JWT access token if provided (for mobile app support)
+        if (data.accessToken) {
+          handleLoginSuccess(data.accessToken);
+        }
+        
         toast({
           title: "Welcome back!",
           description: "You've been logged in successfully.",

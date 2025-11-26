@@ -45,7 +45,8 @@ export default function ShoppingCart() {
     queryKey: ['/api/cart'],
   });
 
-  const cart = (cartData as { data?: { cart?: Cart } })?.data?.cart;
+  // QueryClient auto-unwraps {success, data} response envelope
+  const cart = (cartData as { cart?: Cart })?.cart;
   const availableItems = cart?.items.filter(item => item.isAvailable) || [];
   const unavailableItems = cart?.items.filter(item => !item.isAvailable) || [];
 

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { storage } from "../storage";
+import { verifyAccessToken, extractBearerToken } from "../utils/jwt";
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -95,14 +96,45 @@ export function requireRole(allowedRoles: string[]) {
   };
 }
 
-// Middleware to populate req.user from session for email/password auth
+// Middleware to populate req.user from session OR JWT token (hybrid authentication)
+// This provides backward compatibility with existing session-based auth while supporting new JWT tokens
 export async function populateUserFromSession(req: any, res: Response, next: NextFunction) {
   // Skip if user is already populated (e.g., by Passport)
   if (req.user) {
     return next();
   }
 
-  // Check if we have a userId in the session
+  // Try JWT token first (for mobile apps and API clients)
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    const token = extractBearerToken(authHeader);
+    if (token) {
+      try {
+        const decoded = verifyAccessToken(token);
+        const dbUser = await storage.getUserById(decoded.userId);
+        
+        if (dbUser) {
+          const userRoles = await storage.getUserRoles(dbUser.id);
+          const orgMemberships = await storage.getUserOrganizations(dbUser.id);
+          
+          req.user = {
+            id: dbUser.id,
+            email: dbUser.email || '',
+            roles: userRoles.map(role => role.name),
+            orgMemberships,
+            authMethod: 'jwt' // Track which auth method was used
+          };
+          
+          return next();
+        }
+      } catch (error) {
+        // JWT verification failed, fall through to session check
+        console.debug('JWT verification failed, trying session:', error);
+      }
+    }
+  }
+
+  // Fall back to session-based auth (for web browsers)
   if (!req.session?.userId) {
     return next(); // Let downstream middleware handle auth errors
   }
@@ -122,7 +154,8 @@ export async function populateUserFromSession(req: any, res: Response, next: Nex
       id: userId,
       email: dbUser.email || '',
       roles: userRoles.map(role => role.name),
-      orgMemberships
+      orgMemberships,
+      authMethod: 'session' // Track which auth method was used
     };
     
     next();
