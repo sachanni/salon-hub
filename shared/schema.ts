@@ -4427,3 +4427,655 @@ export const updateDeliverySettingsSchema = z.object({
   deliveryInstructions: z.string().optional(),
 });
 export type UpdateDeliverySettingsInput = z.infer<typeof updateDeliverySettingsSchema>;
+
+// ========================================================================
+// EVENT MANAGEMENT SYSTEM TABLES
+// ========================================================================
+
+// Event Types/Categories (Workshop, Masterclass, Product Launch, etc.)
+export const eventTypes = pgTable("event_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 50 }).notNull(),
+  description: text("description"),
+  icon: varchar("icon", { length: 50 }),
+  color: varchar("color", { length: 20 }),
+  isActive: integer("is_active").notNull().default(1),
+  orderIndex: integer("order_index").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertEventTypeSchema = createInsertSchema(eventTypes).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertEventType = z.infer<typeof insertEventTypeSchema>;
+export type EventType = typeof eventTypes.$inferSelect;
+
+// Events - Main Event Table
+export const events = pgTable("events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  organizationId: varchar("organization_id").references(() => organizations.id),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  
+  title: varchar("title", { length: 200 }).notNull(),
+  slug: varchar("slug", { length: 200 }).unique(),
+  description: text("description"),
+  shortDescription: varchar("short_description", { length: 500 }),
+  eventTypeId: varchar("event_type_id").references(() => eventTypes.id),
+  
+  startDate: varchar("start_date", { length: 10 }).notNull(),
+  endDate: varchar("end_date", { length: 10 }),
+  startTime: varchar("start_time", { length: 8 }).notNull(),
+  endTime: varchar("end_time", { length: 8 }).notNull(),
+  timezone: varchar("timezone", { length: 50 }).default("Asia/Kolkata"),
+  durationMinutes: integer("duration_minutes"),
+  
+  venueType: varchar("venue_type", { length: 20 }).default("salon"),
+  venueName: varchar("venue_name", { length: 200 }),
+  venueAddress: text("venue_address"),
+  venueCity: varchar("venue_city", { length: 100 }),
+  venueState: varchar("venue_state", { length: 100 }),
+  venuePincode: varchar("venue_pincode", { length: 10 }),
+  venueLatitude: decimal("venue_latitude", { precision: 9, scale: 6 }),
+  venueLongitude: decimal("venue_longitude", { precision: 9, scale: 6 }),
+  venueInstructions: text("venue_instructions"),
+  
+  maxCapacity: integer("max_capacity").notNull().default(20),
+  currentRegistrations: integer("current_registrations").default(0),
+  minCapacity: integer("min_capacity").default(1),
+  registrationStartDate: varchar("registration_start_date", { length: 10 }),
+  registrationEndDate: varchar("registration_end_date", { length: 10 }),
+  
+  status: varchar("status", { length: 20 }).default("draft"),
+  visibility: varchar("visibility", { length: 20 }).default("public"),
+  isFeatured: integer("is_featured").default(0),
+  
+  coverImageUrl: text("cover_image_url"),
+  galleryImages: jsonb("gallery_images").default(sql`'[]'::jsonb`),
+  videoUrl: text("video_url"),
+  
+  metaTitle: varchar("meta_title", { length: 200 }),
+  metaDescription: varchar("meta_description", { length: 500 }),
+  socialLinks: jsonb("social_links").default(sql`'{}'::jsonb`),
+  
+  cancellationPolicy: jsonb("cancellation_policy").default(sql`'{"7_plus_days": 100, "3_to_6_days": 75, "1_to_2_days": 50, "same_day": 0}'::jsonb`),
+  termsConditions: text("terms_conditions"),
+  
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("events_salon_id_idx").on(table.salonId),
+  index("events_status_idx").on(table.status),
+  index("events_start_date_idx").on(table.startDate),
+]);
+
+export const insertEventSchema = createInsertSchema(events).omit({
+  id: true,
+  currentRegistrations: true,
+  publishedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertEvent = z.infer<typeof insertEventSchema>;
+export type Event = typeof events.$inferSelect;
+
+// Event Speakers
+export const eventSpeakers = pgTable("event_speakers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id),
+  name: varchar("name", { length: 200 }).notNull(),
+  title: varchar("title", { length: 200 }),
+  bio: text("bio"),
+  photoUrl: text("photo_url"),
+  credentials: text("credentials"),
+  socialLinks: jsonb("social_links").default(sql`'{}'::jsonb`),
+  orderIndex: integer("order_index").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("event_speakers_event_id_idx").on(table.eventId),
+]);
+
+export const insertEventSpeakerSchema = createInsertSchema(eventSpeakers).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertEventSpeaker = z.infer<typeof insertEventSpeakerSchema>;
+export type EventSpeaker = typeof eventSpeakers.$inferSelect;
+
+// Event Schedules/Agenda
+export const eventSchedules = pgTable("event_schedules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description"),
+  startTime: varchar("start_time", { length: 8 }).notNull(),
+  endTime: varchar("end_time", { length: 8 }).notNull(),
+  speakerId: varchar("speaker_id").references(() => eventSpeakers.id),
+  orderIndex: integer("order_index").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("event_schedules_event_id_idx").on(table.eventId),
+]);
+
+export const insertEventScheduleSchema = createInsertSchema(eventSchedules).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertEventSchedule = z.infer<typeof insertEventScheduleSchema>;
+export type EventSchedule = typeof eventSchedules.$inferSelect;
+
+// Ticket Types for Events
+export const eventTicketTypes = pgTable("event_ticket_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  basePricePaisa: integer("base_price_paisa").notNull(),
+  gstPercentage: decimal("gst_percentage", { precision: 5, scale: 2 }).default("18.00"),
+  quantityAvailable: integer("quantity_available"),
+  quantitySold: integer("quantity_sold").default(0),
+  saleStartDate: timestamp("sale_start_date"),
+  saleEndDate: timestamp("sale_end_date"),
+  discountPercentage: decimal("discount_percentage", { precision: 5, scale: 2 }).default("0"),
+  discountLabel: varchar("discount_label", { length: 50 }),
+  includes: jsonb("includes").default(sql`'[]'::jsonb`),
+  isActive: integer("is_active").default(1),
+  orderIndex: integer("order_index").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("event_ticket_types_event_id_idx").on(table.eventId),
+]);
+
+export const insertEventTicketTypeSchema = createInsertSchema(eventTicketTypes).omit({
+  id: true,
+  quantitySold: true,
+  createdAt: true,
+});
+export type InsertEventTicketType = z.infer<typeof insertEventTicketTypeSchema>;
+export type EventTicketType = typeof eventTicketTypes.$inferSelect;
+
+// Group Discounts
+export const eventGroupDiscounts = pgTable("event_group_discounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  minGroupSize: integer("min_group_size").notNull(),
+  maxGroupSize: integer("max_group_size"),
+  discountPercentage: decimal("discount_percentage", { precision: 5, scale: 2 }).notNull(),
+  isActive: integer("is_active").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertEventGroupDiscountSchema = createInsertSchema(eventGroupDiscounts).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertEventGroupDiscount = z.infer<typeof insertEventGroupDiscountSchema>;
+export type EventGroupDiscount = typeof eventGroupDiscounts.$inferSelect;
+
+// Promo Codes
+export const eventPromoCodes = pgTable("event_promo_codes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "cascade" }),
+  code: varchar("code", { length: 50 }).notNull().unique(),
+  discountType: varchar("discount_type", { length: 20 }).notNull(),
+  discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
+  maxUses: integer("max_uses"),
+  currentUses: integer("current_uses").default(0),
+  minOrderAmountPaisa: integer("min_order_amount_paisa"),
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"),
+  isActive: integer("is_active").default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertEventPromoCodeSchema = createInsertSchema(eventPromoCodes).omit({
+  id: true,
+  currentUses: true,
+  createdAt: true,
+});
+export type InsertEventPromoCode = z.infer<typeof insertEventPromoCodeSchema>;
+export type EventPromoCode = typeof eventPromoCodes.$inferSelect;
+
+// Event Registrations
+export const eventRegistrations = pgTable("event_registrations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  userId: varchar("user_id").references(() => users.id),
+  ticketTypeId: varchar("ticket_type_id").notNull().references(() => eventTicketTypes.id),
+  bookingId: varchar("booking_id", { length: 20 }).notNull().unique(),
+  
+  attendeeName: varchar("attendee_name", { length: 200 }).notNull(),
+  attendeeEmail: varchar("attendee_email", { length: 255 }).notNull(),
+  attendeePhone: varchar("attendee_phone", { length: 20 }).notNull(),
+  attendeeAgeGroup: varchar("attendee_age_group", { length: 20 }),
+  
+  experienceLevel: varchar("experience_level", { length: 20 }),
+  dietaryPreference: varchar("dietary_preference", { length: 50 }),
+  specialRequirements: text("special_requirements"),
+  
+  ticketPricePaisa: integer("ticket_price_paisa").notNull(),
+  discountAmountPaisa: integer("discount_amount_paisa").default(0),
+  promoCodeId: varchar("promo_code_id").references(() => eventPromoCodes.id),
+  gstAmountPaisa: integer("gst_amount_paisa").notNull(),
+  totalAmountPaisa: integer("total_amount_paisa").notNull(),
+  
+  status: varchar("status", { length: 20 }).default("pending"),
+  paymentStatus: varchar("payment_status", { length: 20 }).default("pending"),
+  paymentOrderId: varchar("payment_order_id", { length: 100 }),
+  paymentTransactionId: varchar("payment_transaction_id", { length: 100 }),
+  
+  qrCodeData: varchar("qr_code_data", { length: 255 }).unique(),
+  checkedInAt: timestamp("checked_in_at"),
+  checkedInBy: varchar("checked_in_by").references(() => users.id),
+  
+  cancelledAt: timestamp("cancelled_at"),
+  cancellationReason: text("cancellation_reason"),
+  refundAmountPaisa: integer("refund_amount_paisa"),
+  refundStatus: varchar("refund_status", { length: 20 }),
+  refundProcessedAt: timestamp("refund_processed_at"),
+  
+  expiresAt: timestamp("expires_at"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("event_registrations_event_id_idx").on(table.eventId),
+  index("event_registrations_user_id_idx").on(table.userId),
+  index("event_registrations_booking_id_idx").on(table.bookingId),
+  index("event_registrations_status_idx").on(table.status),
+  index("event_registrations_expires_at_idx").on(table.expiresAt),
+]);
+
+export const insertEventRegistrationSchema = createInsertSchema(eventRegistrations).omit({
+  id: true,
+  qrCodeData: true,
+  checkedInAt: true,
+  checkedInBy: true,
+  cancelledAt: true,
+  cancellationReason: true,
+  refundAmountPaisa: true,
+  refundStatus: true,
+  refundProcessedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertEventRegistration = z.infer<typeof insertEventRegistrationSchema>;
+export type EventRegistration = typeof eventRegistrations.$inferSelect;
+
+// Registration Payments
+export const eventRegistrationPayments = pgTable("event_registration_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  registrationId: varchar("registration_id").notNull().references(() => eventRegistrations.id),
+  amountPaisa: integer("amount_paisa").notNull(),
+  paymentMethod: varchar("payment_method", { length: 50 }),
+  paymentProvider: varchar("payment_provider", { length: 50 }),
+  providerOrderId: varchar("provider_order_id", { length: 100 }),
+  providerPaymentId: varchar("provider_payment_id", { length: 100 }),
+  providerSignature: varchar("provider_signature", { length: 255 }),
+  status: varchar("status", { length: 20 }).default("pending"),
+  paymentMetadata: jsonb("payment_metadata").default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("event_registration_payments_registration_id_idx").on(table.registrationId),
+]);
+
+export const insertEventRegistrationPaymentSchema = createInsertSchema(eventRegistrationPayments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertEventRegistrationPayment = z.infer<typeof insertEventRegistrationPaymentSchema>;
+export type EventRegistrationPayment = typeof eventRegistrationPayments.$inferSelect;
+
+// Event Reviews
+export const eventReviews = pgTable("event_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  registrationId: varchar("registration_id").notNull().references(() => eventRegistrations.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  
+  overallRating: integer("overall_rating").notNull(),
+  instructorRating: integer("instructor_rating"),
+  contentRating: integer("content_rating"),
+  venueRating: integer("venue_rating"),
+  valueRating: integer("value_rating"),
+  organizationRating: integer("organization_rating"),
+  
+  likedAspects: jsonb("liked_aspects").default(sql`'[]'::jsonb`),
+  reviewText: text("review_text"),
+  reviewPhotos: jsonb("review_photos").default(sql`'[]'::jsonb`),
+  
+  status: varchar("status", { length: 20 }).default("pending"),
+  moderatedBy: varchar("moderated_by").references(() => users.id),
+  moderatedAt: timestamp("moderated_at"),
+  
+  isFeatured: integer("is_featured").default(0),
+  helpfulCount: integer("helpful_count").default(0),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("event_reviews_event_id_idx").on(table.eventId),
+  index("event_reviews_user_id_idx").on(table.userId),
+]);
+
+export const insertEventReviewSchema = createInsertSchema(eventReviews).omit({
+  id: true,
+  status: true,
+  moderatedBy: true,
+  moderatedAt: true,
+  isFeatured: true,
+  helpfulCount: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertEventReview = z.infer<typeof insertEventReviewSchema>;
+export type EventReview = typeof eventReviews.$inferSelect;
+
+// Event Notifications
+export const eventNotifications = pgTable("event_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  eventId: varchar("event_id").references(() => events.id),
+  registrationId: varchar("registration_id").references(() => eventRegistrations.id),
+  type: varchar("type", { length: 50 }).notNull(),
+  category: varchar("category", { length: 30 }).notNull(),
+  priority: varchar("priority", { length: 10 }).default("normal"),
+  title: varchar("title", { length: 200 }).notNull(),
+  message: text("message").notNull(),
+  actionUrl: varchar("action_url", { length: 500 }),
+  isRead: integer("is_read").default(0),
+  readAt: timestamp("read_at"),
+  channels: jsonb("channels").default(sql`'["in_app"]'::jsonb`),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("event_notifications_user_id_idx").on(table.userId),
+  index("event_notifications_event_id_idx").on(table.eventId),
+]);
+
+export const insertEventNotificationSchema = createInsertSchema(eventNotifications).omit({
+  id: true,
+  isRead: true,
+  readAt: true,
+  deliveredAt: true,
+  createdAt: true,
+});
+export type InsertEventNotification = z.infer<typeof insertEventNotificationSchema>;
+export type EventNotification = typeof eventNotifications.$inferSelect;
+
+// Notification Preferences
+export const eventNotificationPreferences = pgTable("event_notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id).unique(),
+  emailNewRegistration: integer("email_new_registration").default(1),
+  emailEventReminder: integer("email_event_reminder").default(1),
+  emailLowAttendance: integer("email_low_attendance").default(1),
+  emailCancellation: integer("email_cancellation").default(1),
+  pushNewRegistration: integer("push_new_registration").default(1),
+  pushEventReminder: integer("push_event_reminder").default(1),
+  pushLowAttendance: integer("push_low_attendance").default(1),
+  pushCancellation: integer("push_cancellation").default(1),
+  smsEventReminder: integer("sms_event_reminder").default(0),
+  smsCancellation: integer("sms_cancellation").default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertEventNotificationPreferencesSchema = createInsertSchema(eventNotificationPreferences).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertEventNotificationPreferences = z.infer<typeof insertEventNotificationPreferencesSchema>;
+export type EventNotificationPreferences = typeof eventNotificationPreferences.$inferSelect;
+
+// Daily Event Analytics
+export const eventAnalyticsDaily = pgTable("event_analytics_daily", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  date: varchar("date", { length: 10 }).notNull(),
+  totalRegistrations: integer("total_registrations").default(0),
+  newRegistrations: integer("new_registrations").default(0),
+  cancellations: integer("cancellations").default(0),
+  totalRevenuePaisa: integer("total_revenue_paisa").default(0),
+  refundsPaisa: integer("refunds_paisa").default(0),
+  pageViews: integer("page_views").default(0),
+  uniqueVisitors: integer("unique_visitors").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("event_analytics_daily_event_id_idx").on(table.eventId),
+  uniqueIndex("event_analytics_daily_event_date_unique").on(table.eventId, table.date),
+]);
+
+export const insertEventAnalyticsDailySchema = createInsertSchema(eventAnalyticsDaily).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertEventAnalyticsDaily = z.infer<typeof insertEventAnalyticsDailySchema>;
+export type EventAnalyticsDaily = typeof eventAnalyticsDaily.$inferSelect;
+
+// Event Views Log
+export const eventViews = pgTable("event_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  userId: varchar("user_id").references(() => users.id),
+  sessionId: varchar("session_id", { length: 100 }),
+  source: varchar("source", { length: 50 }),
+  platform: varchar("platform", { length: 20 }),
+  referrer: text("referrer"),
+  deviceType: varchar("device_type", { length: 20 }),
+  browser: varchar("browser", { length: 50 }),
+  os: varchar("os", { length: 50 }),
+  viewedAt: timestamp("viewed_at").defaultNow(),
+}, (table) => [
+  index("event_views_event_id_idx").on(table.eventId),
+  index("event_views_viewed_at_idx").on(table.viewedAt),
+]);
+
+export const insertEventViewSchema = createInsertSchema(eventViews).omit({
+  id: true,
+  viewedAt: true,
+});
+export type InsertEventView = z.infer<typeof insertEventViewSchema>;
+export type EventView = typeof eventViews.$inferSelect;
+
+// ========================================================================
+// EVENT MANAGEMENT RELATIONS
+// ========================================================================
+
+export const eventTypesRelations = relations(eventTypes, ({ many }) => ({
+  events: many(events),
+}));
+
+export const eventsRelations = relations(events, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [events.salonId],
+    references: [salons.id],
+  }),
+  organization: one(organizations, {
+    fields: [events.organizationId],
+    references: [organizations.id],
+  }),
+  creator: one(users, {
+    fields: [events.createdBy],
+    references: [users.id],
+  }),
+  eventType: one(eventTypes, {
+    fields: [events.eventTypeId],
+    references: [eventTypes.id],
+  }),
+  speakers: many(eventSpeakers),
+  schedules: many(eventSchedules),
+  ticketTypes: many(eventTicketTypes),
+  groupDiscounts: many(eventGroupDiscounts),
+  registrations: many(eventRegistrations),
+  reviews: many(eventReviews),
+  notifications: many(eventNotifications),
+  analyticsDaily: many(eventAnalyticsDaily),
+  views: many(eventViews),
+}));
+
+export const eventSpeakersRelations = relations(eventSpeakers, ({ one, many }) => ({
+  event: one(events, {
+    fields: [eventSpeakers.eventId],
+    references: [events.id],
+  }),
+  user: one(users, {
+    fields: [eventSpeakers.userId],
+    references: [users.id],
+  }),
+  schedules: many(eventSchedules),
+}));
+
+export const eventSchedulesRelations = relations(eventSchedules, ({ one }) => ({
+  event: one(events, {
+    fields: [eventSchedules.eventId],
+    references: [events.id],
+  }),
+  speaker: one(eventSpeakers, {
+    fields: [eventSchedules.speakerId],
+    references: [eventSpeakers.id],
+  }),
+}));
+
+export const eventTicketTypesRelations = relations(eventTicketTypes, ({ one, many }) => ({
+  event: one(events, {
+    fields: [eventTicketTypes.eventId],
+    references: [events.id],
+  }),
+  registrations: many(eventRegistrations),
+}));
+
+export const eventRegistrationsRelations = relations(eventRegistrations, ({ one, many }) => ({
+  event: one(events, {
+    fields: [eventRegistrations.eventId],
+    references: [events.id],
+  }),
+  user: one(users, {
+    fields: [eventRegistrations.userId],
+    references: [users.id],
+  }),
+  ticketType: one(eventTicketTypes, {
+    fields: [eventRegistrations.ticketTypeId],
+    references: [eventTicketTypes.id],
+  }),
+  promoCode: one(eventPromoCodes, {
+    fields: [eventRegistrations.promoCodeId],
+    references: [eventPromoCodes.id],
+  }),
+  payments: many(eventRegistrationPayments),
+  reviews: many(eventReviews),
+}));
+
+export const eventRegistrationPaymentsRelations = relations(eventRegistrationPayments, ({ one }) => ({
+  registration: one(eventRegistrations, {
+    fields: [eventRegistrationPayments.registrationId],
+    references: [eventRegistrations.id],
+  }),
+}));
+
+export const eventReviewsRelations = relations(eventReviews, ({ one }) => ({
+  event: one(events, {
+    fields: [eventReviews.eventId],
+    references: [events.id],
+  }),
+  registration: one(eventRegistrations, {
+    fields: [eventReviews.registrationId],
+    references: [eventRegistrations.id],
+  }),
+  user: one(users, {
+    fields: [eventReviews.userId],
+    references: [users.id],
+  }),
+}));
+
+// ========================================================================
+// EVENT MANAGEMENT API VALIDATION SCHEMAS
+// ========================================================================
+
+export const createEventSchema = z.object({
+  salonId: z.string().uuid(),
+  title: z.string().min(1).max(200),
+  description: z.string().optional(),
+  shortDescription: z.string().max(500).optional(),
+  eventTypeId: z.string().uuid().optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  startTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
+  venueType: z.enum(['salon', 'external', 'online']).default('salon'),
+  venueName: z.string().max(200).optional(),
+  venueAddress: z.string().optional(),
+  venueCity: z.string().max(100).optional(),
+  venueState: z.string().max(100).optional(),
+  venuePincode: z.string().max(10).optional(),
+  venueLatitude: z.number().optional(),
+  venueLongitude: z.number().optional(),
+  maxCapacity: z.number().int().min(1).default(20),
+  minCapacity: z.number().int().min(1).default(1),
+  visibility: z.enum(['public', 'private', 'invite_only']).default('public'),
+  coverImageUrl: z.string().url().optional(),
+  galleryImages: z.array(z.string().url()).optional(),
+  cancellationPolicy: z.object({
+    "7_plus_days": z.number().min(0).max(100),
+    "3_to_6_days": z.number().min(0).max(100),
+    "1_to_2_days": z.number().min(0).max(100),
+    "same_day": z.number().min(0).max(100),
+  }).optional(),
+});
+export type CreateEventInput = z.infer<typeof createEventSchema>;
+
+export const updateEventSchema = createEventSchema.partial();
+export type UpdateEventInput = z.infer<typeof updateEventSchema>;
+
+export const createTicketTypeSchema = z.object({
+  eventId: z.string().uuid(),
+  name: z.string().min(1).max(100),
+  description: z.string().optional(),
+  basePricePaisa: z.number().int().min(0),
+  gstPercentage: z.number().min(0).max(100).default(18),
+  quantityAvailable: z.number().int().min(1).optional(),
+  saleStartDate: z.string().optional(),
+  saleEndDate: z.string().optional(),
+  discountPercentage: z.number().min(0).max(100).default(0),
+  discountLabel: z.string().max(50).optional(),
+  includes: z.array(z.string()).optional(),
+});
+export type CreateTicketTypeInput = z.infer<typeof createTicketTypeSchema>;
+
+export const eventRegistrationSchema = z.object({
+  eventId: z.string().uuid(),
+  ticketTypeId: z.string().uuid(),
+  attendeeName: z.string().min(1).max(200),
+  attendeeEmail: z.string().email(),
+  attendeePhone: z.string().min(10).max(20),
+  attendeeAgeGroup: z.string().max(20).optional(),
+  experienceLevel: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
+  dietaryPreference: z.string().max(50).optional(),
+  specialRequirements: z.string().max(500).optional(),
+  promoCode: z.string().max(50).optional(),
+});
+export type EventRegistrationInput = z.infer<typeof eventRegistrationSchema>;
+
+export const eventReviewSchema = z.object({
+  eventId: z.string().uuid(),
+  registrationId: z.string().uuid(),
+  overallRating: z.number().int().min(1).max(5),
+  instructorRating: z.number().int().min(1).max(5).optional(),
+  contentRating: z.number().int().min(1).max(5).optional(),
+  venueRating: z.number().int().min(1).max(5).optional(),
+  valueRating: z.number().int().min(1).max(5).optional(),
+  organizationRating: z.number().int().min(1).max(5).optional(),
+  likedAspects: z.array(z.string()).optional(),
+  reviewText: z.string().max(2000).optional(),
+  reviewPhotos: z.array(z.string().url()).max(5).optional(),
+});
+export type EventReviewInput = z.infer<typeof eventReviewSchema>;
+
+export const cancelRegistrationSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+export type CancelRegistrationInput = z.infer<typeof cancelRegistrationSchema>;

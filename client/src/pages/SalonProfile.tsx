@@ -33,6 +33,107 @@ import { PlatformOffersCarousel } from '@/components/PlatformOffersCarousel';
 import { ReviewSection } from '@/components/reviews/ReviewSection';
 import { cn } from '@/lib/utils';
 import { Map } from '@/components/ui/map';
+import SalonCard from '@/components/SalonCard';
+
+interface NearbySalon {
+  id: string;
+  name: string;
+  rating: string;
+  reviewCount: number;
+  address: string;
+  city: string;
+  category: string;
+  image?: string;
+  imageUrls?: string[];
+  distance_km: number;
+  hasGoogleReviews?: boolean;
+}
+
+interface NearbySalonsSectionProps {
+  salonId: string;
+}
+
+const NearbySalonsSection: React.FC<NearbySalonsSectionProps> = ({ salonId }) => {
+  const { data: nearbySalons, isLoading, error, refetch } = useQuery<NearbySalon[]>({
+    queryKey: ['nearby-salons', salonId],
+    queryFn: async () => {
+      const response = await fetch(`/api/salons/${salonId}/nearby?limit=6`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch nearby salons');
+      }
+      return response.json();
+    },
+    enabled: !!salonId,
+    retry: 2,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="animate-pulse">
+            <div className="bg-gray-200 h-48 rounded-t-lg"></div>
+            <div className="bg-white p-4 rounded-b-lg space-y-3">
+              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12 bg-red-50 rounded-lg border border-red-200">
+        <div className="flex flex-col items-center gap-3">
+          <MapPin className="w-12 h-12 text-red-400" />
+          <div>
+            <p className="text-red-600 font-medium mb-1">Failed to load nearby salons</p>
+            <p className="text-red-500 text-sm">Unable to fetch nearby salons. Please try again.</p>
+          </div>
+          <Button
+            onClick={() => refetch()}
+            variant="outline"
+            className="mt-2"
+          >
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!nearbySalons || nearbySalons.length === 0) {
+    return (
+      <div className="text-center py-12 bg-gray-50 rounded-lg">
+        <MapPin className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+        <p className="text-gray-500">No nearby salons found</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {nearbySalons.map((salon) => (
+        <SalonCard
+          key={salon.id}
+          id={salon.id}
+          name={salon.name}
+          rating={parseFloat(salon.rating || '0')}
+          reviewCount={salon.reviewCount}
+          location={`${salon.address}, ${salon.city}`}
+          category={salon.category}
+          image={salon.image || ''}
+          imageUrls={salon.imageUrls}
+          distance={salon.distance_km}
+          priceRange="$$"
+          hasGoogleReviews={salon.hasGoogleReviews}
+        />
+      ))}
+    </div>
+  );
+};
 
 interface Salon {
   id: string;
@@ -1000,6 +1101,16 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
               </div>
 
               <ReviewSection salonId={salonId} />
+            </section>
+
+            {/* Nearby Salons Section */}
+            <section className="scroll-mt-[200px] mt-12">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Nearby Salons</h2>
+                <p className="text-gray-600">Discover more salons in the area</p>
+              </div>
+
+              <NearbySalonsSection salonId={salonId} />
             </section>
           </div>
 

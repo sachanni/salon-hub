@@ -1,12 +1,8 @@
-import dotenv from 'dotenv';
-// CRITICAL: Load .env file and override system environment variables FIRST
-// This must happen before any other imports that use environment variables
-dotenv.config({ override: true });
-
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { registrationCleanupService } from "./services/registration-cleanup.service";
 
 const app = express();
 // Increased limit to support batch image uploads (base64-encoded)
@@ -79,4 +75,6 @@ app.use((req, res, next) => {
   }, () => {
     log(`serving on port ${port}`);
   });
+  
+  registrationCleanupService.start();
 })();

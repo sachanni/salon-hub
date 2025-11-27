@@ -60,7 +60,10 @@ import {
   ChevronRight,
   Plus,
   Check,
-  Trash2
+  Trash2,
+  CalendarDays,
+  FileEdit,
+  History
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link, useLocation } from "wouter";
@@ -74,6 +77,10 @@ import CalendarManagement from "@/pages/CalendarManagement";
 import PackageManagement from "@/components/business-dashboard/PackageManagement";
 import BusinessOffers from "@/pages/BusinessOffers";
 import { Map } from "@/components/ui/map";
+import EventDashboard from "@/pages/EventDashboard";
+import CreateEvent from "@/pages/CreateEvent";
+import DraftEvents from "@/pages/DraftEvents";
+import PastEvents from "@/pages/PastEvents";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -467,6 +474,17 @@ export default function BusinessDashboard() {
         { id: "inventory", label: "Inventory Management", icon: Package },
         { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles },
         { id: "offers", label: "Offers & Promotions", icon: Gift }
+      ]
+    },
+    {
+      id: "events",
+      label: "Events Management",
+      icon: CalendarDays,
+      items: [
+        { id: "events-dashboard", label: "Event Dashboard", icon: BarChart },
+        { id: "create-event", label: "Create Event", icon: Plus },
+        { id: "draft-events", label: "Draft Events", icon: FileEdit },
+        { id: "past-events", label: "Past Events", icon: History }
       ]
     },
     {
@@ -1572,6 +1590,20 @@ export default function BusinessDashboard() {
           <CalendarManagement salonId={salonId || ''} />
         </div>
       );
+    }
+
+    // Handle event management tabs - render in sidebar layout
+    if (activeTab === "events-dashboard") {
+      return <EventDashboard />;
+    }
+    if (activeTab === "create-event") {
+      return <CreateEvent />;
+    }
+    if (activeTab === "draft-events") {
+      return <DraftEvents />;
+    }
+    if (activeTab === "past-events") {
+      return <PastEvents />;
     }
 
     const Component = components[activeTab as keyof typeof components];

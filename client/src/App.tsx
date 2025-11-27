@@ -51,6 +51,24 @@ import OrderDetails from "@/pages/OrderDetails";
 import OrderHistory from "@/pages/OrderHistory";
 import Wishlist from "@/pages/Wishlist";
 import Shop from "@/pages/Shop";
+import EventDashboard from "@/pages/EventDashboard";
+import EventsListing from "@/pages/EventsListing";
+import EventReviewPage from "@/pages/EventReviewPage";
+import EventDetails from "@/pages/EventDetails";
+import CreateEvent from "@/pages/CreateEvent";
+import DraftEventBuilder from "@/pages/DraftEventBuilder";
+import ManageSpeakers from "@/pages/ManageSpeakers";
+import ManageTickets from "@/pages/ManageTickets";
+import ManageSchedule from "@/pages/ManageSchedule";
+import ManageEvent from "@/pages/ManageEvent";
+import EventRegistration from "@/pages/EventRegistration";
+import RegistrationConfirmation from "@/pages/RegistrationConfirmation";
+import EventCheckIn from "@/pages/EventCheckIn";
+import EventAnalytics from "@/pages/EventAnalytics";
+import CancelRegistration from "@/pages/CancelRegistration";
+import DraftEvents from "@/pages/DraftEvents";
+import NotificationCenter from "@/pages/NotificationCenter";
+import PastEvents from "@/pages/PastEvents";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -137,6 +155,31 @@ function Router() {
         {/* Premium Features */}
         <Route path="/ai-look-advisor" component={AILookAdvisor} />
         <Route path="/premium/ai-look" component={AILookAdvisor} />
+        
+        {/* Event Management Routes */}
+        <Route path="/events" component={EventsListing} />
+        <Route path="/events/:eventId" component={EventDetails} />
+        <Route path="/events/:eventId/register" component={EventRegistration} />
+        <Route path="/events/:eventId/review" component={EventReviewPage} />
+        <Route path="/events/registration/:registrationId/confirmation" component={RegistrationConfirmation} />
+        <Route path="/registrations/:bookingId/cancel" component={CancelRegistration} />
+        
+        {/* Business Event Routes */}
+        <Route path="/events/drafts" component={DraftEvents} />
+        <Route path="/events/past" component={PastEvents} />
+        <Route path="/notifications" component={NotificationCenter} />
+        <Route path="/business/events" component={EventDashboard} />
+        <Route path="/business/events/dashboard" component={EventDashboard} />
+        <Route path="/business/events/create" component={CreateEvent} />
+        <Route path="/business/events/builder" component={DraftEventBuilder} />
+        <Route path="/business/events/manage-speakers" component={ManageSpeakers} />
+        <Route path="/business/events/manage-tickets" component={ManageTickets} />
+        <Route path="/business/events/manage-schedule" component={ManageSchedule} />
+        <Route path="/business/events/drafts" component={DraftEvents} />
+        <Route path="/business/events/past" component={PastEvents} />
+        <Route path="/business/events/:eventId/check-in" component={EventCheckIn} />
+        <Route path="/business/events/:eventId/analytics" component={EventAnalytics} />
+        <Route path="/business/events/:eventId" component={ManageEvent} />
         
         {/* Test/Debug Routes */}
         <Route path="/test/makeup-render" component={TestMakeupRender} />

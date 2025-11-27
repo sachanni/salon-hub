@@ -84,7 +84,9 @@ export default function SalonCard({
   const defaultSalonImage = 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=600&h=400&fit=crop&crop=center';
 
   // Use first image from gallery, or primary image, or fallback
-  const heroImage = imageUrls.length > 0 ? imageUrls[0] : (showFallback ? defaultSalonImage : image);
+  // Safely handle null/undefined imageUrls
+  const safeImageUrls = Array.isArray(imageUrls) ? imageUrls : [];
+  const heroImage = safeImageUrls.length > 0 ? safeImageUrls[0] : (showFallback ? defaultSalonImage : image);
 
   // Get first 3 available time slots for live availability chip
   const upcomingSlots = availableTimeSlots

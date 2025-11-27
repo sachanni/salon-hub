@@ -1,4 +1,4 @@
-import { User, Menu, LogOut, Settings as SettingsIcon, LayoutDashboard, Wallet, Gift, Sparkles, X, ShoppingCart, Heart, Package, Store } from "lucide-react";
+import { User, Menu, LogOut, Settings as SettingsIcon, LayoutDashboard, Wallet, Gift, Sparkles, X, ShoppingCart, Heart, Package, Store, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
@@ -82,6 +82,16 @@ export default function Header() {
                 data-testid="link-home"
               >
                 Home
+              </Button>
+            </Link>
+            <Link href="/events">
+              <Button 
+                variant="ghost" 
+                className="text-foreground"
+                data-testid="link-events"
+              >
+                <Calendar className="h-4 w-4 mr-2" />
+                Events
               </Button>
             </Link>
             <Link href="/shop">
@@ -344,6 +354,12 @@ export default function Header() {
                     <Link href="/" onClick={closeMobileMenu}>
                       <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-home">
                         Home
+                      </Button>
+                    </Link>
+                    <Link href="/events" onClick={closeMobileMenu}>
+                      <Button variant="ghost" className="w-full justify-start" data-testid="mobile-link-events">
+                        <Calendar className="mr-2 h-4 w-4" />
+                        Events
                       </Button>
                     </Link>
                     <Link href="/shop" onClick={closeMobileMenu}>

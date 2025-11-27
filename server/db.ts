@@ -1,25 +1,17 @@
-import dotenv from 'dotenv';
-// Load .env file first before accessing environment variables
-dotenv.config({ override: true });
-
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
 import * as schema from "@shared/schema";
 
-// Prefer HTTP fetch over WebSocket for pooled queries in serverless (lower latency, better reuse)
-// DISABLED: Causing null result issues with Drizzle ORM
-// neonConfig.poolQueryViaFetch = true;
-
 // Enable WebSocket constructor to avoid fetch issues
 neonConfig.webSocketConstructor = ws;
 
-// Prefer EXTERNAL_DATABASE_URL (persistent Neon DB), fallback to built-in DATABASE_URL
-const databaseUrl = process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL;
+// Use Replit's DATABASE_URL
+const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error(
-    "EXTERNAL_DATABASE_URL or DATABASE_URL must be set. Please add your database connection string.",
+    "DATABASE_URL must be set. Please add your database connection string.",
   );
 }
 
