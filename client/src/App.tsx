@@ -10,6 +10,7 @@ import { useJWTAuth } from '@/lib/auth';
 import { SessionExpiryWarning } from '@/components/SessionExpiryWarning';
 import Header from "@/components/Header";
 import Home from "@/pages/Home";
+import Salons from "@/pages/Salons";
 import Join from "@/pages/Join";
 import Login from "@/pages/Login";
 import JoinCustomer from "@/pages/JoinCustomer";
@@ -77,6 +78,7 @@ function Router() {
       <Header />
       <Switch>
         <Route path="/" component={Home} />
+        <Route path="/salons" component={Salons} />
         <Route path="/shop" component={Shop} />
         <Route path="/join" component={Join} />
         <Route path="/join/customer" component={JoinCustomer} />

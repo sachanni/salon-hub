@@ -80,8 +80,31 @@ export default function SalonCard({
   // Determine if we should show fallback image
   const showFallback = !image || imageError || image === 'none' || image.trim() === '';
   
-  // Default salon image URL
-  const defaultSalonImage = 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?w=600&h=400&fit=crop&crop=center';
+  // Generate a unique fallback image URL based on salon ID
+  // Using different Unsplash salon images to ensure variety
+  const salonImageOptions = [
+    'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=600&h=400&fit=crop', // Modern salon
+    'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600&h=400&fit=crop', // Hair salon
+    'https://images.unsplash.com/photo-1633681926022-84c23e8cb2d6?w=600&h=400&fit=crop', // Beauty salon
+    'https://images.unsplash.com/photo-1600948836101-f9ffda59d250?w=600&h=400&fit=crop', // Spa interior
+    'https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?w=600&h=400&fit=crop', // Barber shop
+    'https://images.unsplash.com/photo-1559599101-f09722fb4948?w=600&h=400&fit=crop', // Nail salon
+    'https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=600&h=400&fit=crop', // Massage room
+    'https://images.unsplash.com/photo-1595476108010-b4d1f102b1b1?w=600&h=400&fit=crop', // Wellness spa
+  ];
+  
+  // Generate consistent index from salon ID to ensure same salon always gets same fallback
+  const getImageIndex = (salonId: string) => {
+    let hash = 0;
+    for (let i = 0; i < salonId.length; i++) {
+      const char = salonId.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash) % salonImageOptions.length;
+  };
+  
+  const defaultSalonImage = salonImageOptions[getImageIndex(id)];
 
   // Use first image from gallery, or primary image, or fallback
   // Safely handle null/undefined imageUrls
@@ -143,10 +166,10 @@ export default function SalonCard({
             <div className="flex items-center gap-1.5">
               <Star className="h-4 w-4 fill-yellow-400 text-yellow-400 flex-shrink-0" />
               <span className="text-sm font-semibold text-gray-900" data-testid={`text-rating-${id}`}>
-                {rating.toFixed(1)}
+                {typeof rating === 'number' ? rating.toFixed(1) : '0.0'}
               </span>
               <span className="text-sm text-gray-600">
-                ({reviewCount})
+                ({reviewCount || 0})
               </span>
             </div>
             

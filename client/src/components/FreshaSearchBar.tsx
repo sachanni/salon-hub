@@ -823,10 +823,12 @@ export default function FreshaSearchBar({
 
   return (
     <div className="w-full max-w-4xl mx-auto px-4 md:px-0">
-      {/* Main Search Bar */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-2 md:p-1">
-        {/* Mobile: Stacked Layout | Desktop: Horizontal Layout */}
-        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-1">
+      {/* Main Search Bar - Clean Purple Border Design */}
+      <div className="relative">
+        {/* Main container with purple border */}
+        <div className="bg-white rounded-[28px] p-2 md:p-1 border-[3px] border-purple-200 shadow-sm hover:border-purple-300 hover:shadow-md transition-all duration-200">
+          {/* Mobile: Stacked Layout | Desktop: Horizontal Layout */}
+          <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-1 bg-white rounded-[24px] text-[14px] font-medium text-justify">
           {/* Service Selection */}
           <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0" ref={serviceRef}>
             <button
@@ -873,7 +875,7 @@ export default function FreshaSearchBar({
               <div className="absolute top-full left-0 right-0 md:left-0 md:right-auto md:w-96 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-[9999] max-h-[70vh] overflow-y-auto">
                 {!showSubServices ? (
                   // Show main categories
-                  <>
+                  (<>
                     <div className="px-4 py-3 border-b border-gray-100">
                       <h3 className="text-sm font-semibold text-gray-900">Treatments</h3>
                     </div>
@@ -894,10 +896,10 @@ export default function FreshaSearchBar({
                         <span className="font-medium text-gray-900">{category.name}</span>
                       </button>
                     ))}
-                  </>
+                  </>)
                 ) : (
                   // Show sub-services for selected category
-                  <>
+                  (<>
                     <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
                       <button
                         onClick={() => {
@@ -931,7 +933,7 @@ export default function FreshaSearchBar({
                           <span className="text-gray-900">{service.name}</span>
                         </button>
                       ))}
-                  </>
+                  </>)
                 )}
               </div>
             )}
@@ -1273,8 +1275,8 @@ export default function FreshaSearchBar({
             Search
           </Button>
         </div>
+        </div>
       </div>
-
       {/* Radius Selector */}
       <div className="mt-4 flex items-center justify-center gap-2">
         <span className="text-sm text-gray-600">Search radius:</span>

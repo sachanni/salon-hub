@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Star, Clock, Phone, Navigation, Filter, List, Map, ArrowLeft, Calendar, Heart, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MapPin, Star, Clock, Phone, Filter, ArrowLeft, Calendar, Heart, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,8 +8,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import ErrorBoundary from './ErrorBoundary';
 import FilterPanel, { FilterState } from './FilterPanel';
-import CategoryTabs from './CategoryTabs';
 import MapboxSalonMap from './MapboxSalonMap';
+import SearchResultsHeader from './SearchResultsHeader';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -98,6 +98,8 @@ interface SalonMapViewProps {
       searchParams: SearchParams;
       onBackToSearch: () => void;
       searchLocationName?: string;
+      onToggleToGrid?: () => void;
+      onSalonCountChange?: (count: number) => void;
     }
 
 // Real Leaflet map component with proper error handling
@@ -532,16 +534,6 @@ const MapComponent: React.FC<{
           }
         `}</style>
       
-      {/* Map Controls */}
-      <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
-        <Button size="sm" variant="outline" className="bg-white shadow-md">
-          <Navigation className="w-4 h-4" />
-        </Button>
-        <Button size="sm" variant="outline" className="bg-white shadow-md">
-          <Map className="w-4 h-4" />
-        </Button>
-      </div>
-
       {/* Map Legend */}
       <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg p-4 text-xs z-10 border border-gray-200">
         <div className="flex items-center gap-3 mb-2">
@@ -579,7 +571,9 @@ const MapComponent: React.FC<{
 const SalonMapView: React.FC<SalonMapViewProps> = ({
   searchParams,
   onBackToSearch,
-  searchLocationName
+  searchLocationName,
+  onToggleToGrid,
+  onSalonCountChange
 }) => {
   const [salons, setSalons] = useState<Salon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -587,10 +581,8 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   const [selectedSalonId, setSelectedSalonId] = useState<string | null>(null);
   const [timeSlotsData, setTimeSlotsData] = useState<Record<string, TimeSlotsData>>({});
   const [loadingTimeSlots, setLoadingTimeSlots] = useState<Record<string, boolean>>({});
-  const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
   const [sortBy, setSortBy] = useState<'distance' | 'rating' | 'name'>('distance');
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState('all');
   const [currentImageIndex, setCurrentImageIndex] = useState<Record<string, number>>({});
   // Original search coordinates - for directions origin (updates only on new search, not "Search This Area")
   const [originalSearchCoordinates, setOriginalSearchCoordinates] = useState<{lat: number; lng: number} | undefined>(searchParams.coordinates);
@@ -649,9 +641,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
         }
 
         // Apply category filter
-        if (selectedCategory && selectedCategory !== 'all') {
-          params.append('category', selectedCategory);
-        } else if (searchParams.category) {
+        if (searchParams.category) {
           params.append('category', searchParams.category);
         }
 
@@ -706,7 +696,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
     };
 
     fetchSalons();
-  }, [currentSearchCoordinates, searchParams.radius, searchParams.service, searchParams.category, searchParams.time, searchParams.date, sortBy, filters, selectedCategory]);
+  }, [currentSearchCoordinates, searchParams.radius, searchParams.service, searchParams.category, searchParams.time, searchParams.date, sortBy, filters]);
 
   // Fetch time slots for all salons when they are loaded
   useEffect(() => {
@@ -716,6 +706,13 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
       });
     }
   }, [salons]);
+
+  // Notify parent of salon count changes
+  useEffect(() => {
+    if (onSalonCountChange && !loading) {
+      onSalonCountChange(salons.length);
+    }
+  }, [salons.length, loading, onSalonCountChange]);
 
   const handleSalonClick = (salon: Salon) => {
     // Just set selected salon - popup will show inline (industry standard behavior)
@@ -926,79 +923,21 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col">
-      {/* Ultra-Compact Header - Minimal Height */}
-      <div className="bg-white border-b border-gray-200 px-4 py-1 flex-shrink-0">
-        <div className="max-w-7xl mx-auto flex items-center justify-between h-6">
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onBackToSearch}
-              className="text-gray-600 hover:text-gray-900 p-0 h-5"
-            >
-              <ArrowLeft className="w-3 h-3" />
-            </Button>
-            <span className="text-xs font-medium text-gray-900">
-              {salons.length} salons found
-            </span>
-          </div>
-          
-          <div className="flex items-center gap-1">
-            <Button
-              variant={viewMode === 'list' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setViewMode('list')}
-              className="px-2 py-0.5 text-xs h-5"
-            >
-              <List className="w-3 h-3 mr-1" />
-              List
-            </Button>
-            <Button
-              variant={viewMode === 'map' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setViewMode('map')}
-              className="px-2 py-0.5 text-xs h-5"
-            >
-              <Map className="w-3 h-3 mr-1" />
-              Map
-            </Button>
-          </div>
-        </div>
-      </div>
-
       <div className="flex flex-1 overflow-hidden min-w-0">
         {/* Sidebar - Responsive: Full width on mobile, sidebar on desktop */}
         <div className="w-full md:w-[550px] md:min-w-[480px] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
-          {/* Enhanced Header */}
-          <div className="p-4 md:p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-xl md:text-lg font-semibold text-gray-900">
-                  {salons.length} salons found
-                </h2>
-                <p className="text-base md:text-sm text-gray-600">
-                  Near {searchLocationName || 'your location'}
-                </p>
-              </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="p-2 hover:bg-white/80"
-                onClick={() => setIsFilterPanelOpen(true)}
-                data-testid="button-open-filters"
-              >
-                <Filter className="w-5 h-5 md:w-4 md:h-4" />
-              </Button>
-            </div>
-            
-            {/* Category Tabs */}
-            <div className="mt-3 -mx-4 px-4">
-              <CategoryTabs
-                selectedCategory={selectedCategory}
-                onCategoryChange={setSelectedCategory}
-              />
-            </div>
-          </div>
+          {/* Shared Header Component */}
+          <SearchResultsHeader
+            salonCount={salons.length}
+            locationName={searchLocationName || 'your location'}
+            onOpenFilters={() => setIsFilterPanelOpen(true)}
+            viewMode="map"
+            onToggleView={(mode) => {
+              if (mode === 'grid' && onToggleToGrid) {
+                onToggleToGrid();
+              }
+            }}
+          />
 
           {/* Salon List */}
           <ScrollArea className="flex-1">
@@ -1276,56 +1215,44 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
 
         {/* Map View */}
         <div className="flex-1 h-full relative min-w-0">
-          {viewMode === 'map' ? (
-            <ErrorBoundary
-              fallback={
-                <div className="h-full flex items-center justify-center bg-gray-50">
-                  <div className="text-center">
-                    <div className="text-red-500 mb-4">
-                      <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Map Error</h3>
-                    <p className="text-gray-600 mb-4">Unable to load the map component</p>
-                    <button
-                      onClick={() => window.location.reload()}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                    >
-                      Refresh Page
-                    </button>
+          <ErrorBoundary
+            fallback={
+              <div className="h-full flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                  <div className="text-red-500 mb-4">
+                    <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
                   </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Map Error</h3>
+                  <p className="text-gray-600 mb-4">Unable to load the map component</p>
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  >
+                    Refresh Page
+                  </button>
                 </div>
-              }
-            >
-              <MapboxSalonMap
-                salons={salons}
-                userLocation={undefined}
-                searchLocation={currentSearchCoordinates}
-                onSalonClick={handleSalonClick}
-                selectedSalonId={selectedSalonId || undefined}
-                searchLocationName={searchLocationName}
-                searchRadius={searchParams.radius}
-                onSearchThisArea={(newCenter) => {
-                  // Update search coordinates to trigger re-fetch
-                  setCurrentSearchCoordinates(newCenter);
-                }}
-              />
-            </ErrorBoundary>
-          ) : (
-            <div className="h-full bg-gray-100 flex items-center justify-center">
-              <div className="text-center">
-                <List className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">List view is the same as sidebar</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Switch to map view to see salon locations
-                </p>
               </div>
-            </div>
-          )}
+            }
+          >
+            <MapboxSalonMap
+              salons={salons}
+              userLocation={undefined}
+              searchLocation={currentSearchCoordinates}
+              onSalonClick={handleSalonClick}
+              selectedSalonId={selectedSalonId || undefined}
+              searchLocationName={searchLocationName}
+              searchRadius={searchParams.radius}
+              onSearchThisArea={(newCenter) => {
+                // Update search coordinates to trigger re-fetch
+                setCurrentSearchCoordinates(newCenter);
+              }}
+            />
+          </ErrorBoundary>
           
           {/* Floating Action Button for Quick Booking */}
-          {viewMode === 'map' && salons.length > 0 && (
+          {salons.length > 0 && (
             <div className="absolute bottom-6 right-6 z-10">
               <Button
                 size="lg"

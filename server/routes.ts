@@ -22,6 +22,7 @@ import { createClient, type RedisClientType } from "redis";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { OfferCalculator } from "./offerCalculator";
 import { getGooglePlacesService } from "./services/googlePlaces";
+import { calculateDistance } from "./geocodingUtils";
 import { z } from "zod";
 import {
   generateAccessToken,
@@ -33,7 +34,11 @@ import {
 } from "./utils/jwt";
 import aiLookRoutes from "./routes/ai-look.routes";
 import eventRoutes from "./routes/events.routes";
+import { registerMobileAuthRoutes } from "./routes/mobile-auth.routes";
+import { registerShopRoutes } from "./routes/shop.routes";
+import paymentRoutes from "./routes/payment.routes";
 import { tempImageStorage } from "./services/tempImageStorage";
+import { authenticateMobileUser } from "./middleware/authMobile";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -7755,7 +7760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userLng = parseFloat(lng as string);
         const radius = radiusKm ? parseFloat(radiusKm as string) : 50; // Default 50km
 
-        // Calculate straight-line distance for each salon
+        // Calculate straight-line distance for each salon (Haversine formula)
         salonsWithDistance = salons
           .map((salon) => ({
             ...salon,
@@ -7764,7 +7769,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               userLng,
               salon.latitude,
               salon.longitude,
-            ),
+            ) / 1000, // Convert meters to kilometers
           }))
           .filter((salon) => salon.distance <= radius)
           .sort((a, b) => a.distance - b.distance); // Sort by distance
@@ -16512,9 +16517,130 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // AI Personal Look Advisor routes (Premium feature)
   app.use("/api/premium/ai-look", isAuthenticated, aiLookRoutes);
 
+  // Mobile authentication routes (token-based, no cookies)
+  registerMobileAuthRoutes(app);
+
+  // ===============================================
+  // MOBILE USER PROFILE ROUTES
+  // ===============================================
+
+  // Get user statistics for profile dashboard
+  app.get("/api/mobile/users/stats", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+
+      // Get upcoming bookings count (future bookings)
+      const now = new Date().toISOString().split('T')[0];
+      const upcomingBookings = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.bookings)
+        .where(
+          and(
+            eq(schema.bookings.userId, userId),
+            or(
+              eq(schema.bookings.status, 'pending'),
+              eq(schema.bookings.status, 'confirmed')
+            ),
+            sql`${schema.bookings.bookingDate} >= ${now}`
+          )
+        );
+
+      // Get total bookings count (all time)
+      const totalBookingsResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.bookings)
+        .where(eq(schema.bookings.userId, userId));
+
+      // Get total spent from orders (shop + bookings)
+      const shopOrdersTotal = await db
+        .select({ total: sql<number>`COALESCE(SUM(${schema.productOrders.totalAmountPaisa}), 0)` })
+        .from(schema.productOrders)
+        .where(eq(schema.productOrders.userId, userId));
+
+      const bookingsTotal = await db
+        .select({ total: sql<number>`COALESCE(SUM(${schema.bookings.finalAmountPaisa}), 0)` })
+        .from(schema.bookings)
+        .where(
+          and(
+            eq(schema.bookings.userId, userId),
+            ne(schema.bookings.status, 'cancelled')
+          )
+        );
+
+      const totalSpentPaisa = (shopOrdersTotal[0]?.total || 0) + (bookingsTotal[0]?.total || 0);
+
+      // Get favorite service (most booked service)
+      const favoriteServiceResult = await db
+        .select({
+          serviceName: schema.services.name,
+          count: sql<number>`count(*)`,
+        })
+        .from(schema.bookings)
+        .leftJoin(schema.services, eq(schema.bookings.serviceId, schema.services.id))
+        .where(eq(schema.bookings.userId, userId))
+        .groupBy(schema.services.id, schema.services.name)
+        .orderBy(sql`count(*) DESC`)
+        .limit(1);
+
+      const favoriteService = favoriteServiceResult[0]?.serviceName || 'None';
+      const favoriteServiceCount = favoriteServiceResult[0]?.count || 0;
+
+      res.json({
+        success: true,
+        stats: {
+          upcomingBookings: Number(upcomingBookings[0]?.count || 0),
+          totalBookings: Number(totalBookingsResult[0]?.count || 0),
+          totalSpent: totalSpentPaisa,
+          favoriteService,
+          favoriteServiceCount: Number(favoriteServiceCount),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching user stats:", error);
+      res.status(500).json({ error: "Failed to fetch user statistics" });
+    }
+  });
+
+  // Update user profile
+  app.patch("/api/mobile/users/profile", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { firstName, lastName, phoneNumber } = req.body;
+
+      const updates: any = {};
+      if (firstName !== undefined) updates.firstName = firstName;
+      if (lastName !== undefined) updates.lastName = lastName;
+      if (phoneNumber !== undefined) updates.phoneNumber = phoneNumber;
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      await storage.updateUser(userId, updates);
+
+      const updatedUser = await storage.getUser(userId);
+
+      res.json({
+        success: true,
+        message: "Profile updated successfully",
+        user: updatedUser,
+      });
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  console.log('✅ Mobile user profile routes registered');
+
   // Event Management System routes
   // Note: Auth is handled within routes - public routes separate from business routes
   app.use("/api/events", eventRoutes);
+
+  // Shop E-commerce routes (Mobile-first product browsing, cart, wishlist, orders, reviews)
+  registerShopRoutes(app);
+  app.use('/api/payment', paymentRoutes);
+  console.log('✅ Payment routes registered');
 
   // ===============================================
   // PRODUCT E-COMMERCE ROUTES

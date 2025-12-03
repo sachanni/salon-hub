@@ -4353,7 +4353,10 @@ export const createProductOrderSchema = z.object({
     state: z.string(),
     pincode: z.string(),
   })]).optional(),
-  paymentMethod: z.enum(['cod', 'online', 'upi']).default('cod'),
+  paymentMethod: z.enum(['cod', 'online', 'upi', 'razorpay', 'pay_at_salon']).default('cod'),
+  razorpayPaymentId: z.string().optional(),
+  razorpayOrderId: z.string().optional(),
+  razorpaySignature: z.string().optional(),
 });
 
 export const cancelOrderSchema = z.object({

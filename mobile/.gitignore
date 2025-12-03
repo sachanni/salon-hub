@@ -1,0 +1,52 @@
+# Expo
+.expo/
+dist/
+web-build/
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.pnpm-debug.log*
+
+# OS
+.DS_Store
+*.pem
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# TypeScript
+*.tsbuildinfo
+
+# Temporary files
+*.log
+*.tmp
+.cache/
+.temp/
+
+# React Native
+.gradle/
+build/
+*.apk
+*.aab
+*.ipa
+
+# Assets (if using large files)
+# Uncomment if you want to exclude large assets
+# src/assets/*.jpg
+# src/assets/*.png
+# src/assets/*.mp4

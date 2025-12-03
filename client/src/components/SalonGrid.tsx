@@ -1,10 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import SalonCard from "./SalonCard";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, RefreshCw, MapPin } from "lucide-react";
-import salonImage1 from '@assets/generated_images/Modern_luxury_salon_interior_aa8eed5a.png';
-import salonImage2 from '@assets/generated_images/Modern_nail_salon_interior_132903e9.png';
-import salonImage3 from '@assets/generated_images/Relaxing_spa_massage_room_1508aeb5.png';
 
 // Helper function to format distance for display (meters for nearby, km for far)
 const formatDistance = (distanceKm: number): string => {
@@ -51,9 +49,10 @@ interface SalonGridProps {
   subtitle?: string;
   searchParams?: SearchParams;
   onBookingClick?: (salonName: string, salonId: string) => void;
+  onSalonCountChange?: (count: number) => void;
 }
 
-export default function SalonGrid({ title, subtitle, searchParams, onBookingClick }: SalonGridProps) {
+export default function SalonGrid({ title, subtitle, searchParams, onBookingClick, onSalonCountChange }: SalonGridProps) {
   // Build API URL with query parameters
   const buildApiUrl = () => {
     if (searchParams?.coordinates) {
@@ -63,7 +62,7 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
       const params = new URLSearchParams();
       params.append('lat', searchParams.coordinates.lat.toString());
       params.append('lng', searchParams.coordinates.lng.toString());
-      params.append('radiusKm', (searchParams.radius || 0.5).toString());
+      params.append('radiusKm', (searchParams.radius || 10).toString());
       if (searchParams.service) params.append('q', searchParams.service);
       if (searchParams.category) params.append('category', searchParams.category);
       if (searchParams.time) params.append('time', searchParams.time);
@@ -150,20 +149,16 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
   // NEVER use mock data - production apps should show real data or proper error states
   const displaySalons = salons;
 
+  // Notify parent of salon count changes
+  useEffect(() => {
+    if (onSalonCountChange && !isLoading) {
+      onSalonCountChange(displaySalons.length);
+    }
+  }, [displaySalons.length, isLoading, onSalonCountChange]);
+
   return (
     <section className="py-8 sm:py-16">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8 sm:mb-12">
-          <h2 className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4" data-testid="text-section-title">
-            {title}
-          </h2>
-          {subtitle && (
-            <p className="text-muted-foreground text-base sm:text-lg max-w-2xl mx-auto px-4 sm:px-0" data-testid="text-section-subtitle">
-              {subtitle}
-            </p>
-          )}
-        </div>
-        
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {isLoading ? (
             // Loading skeleton state
@@ -215,15 +210,8 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
               </div>
             </div>
           ) : (
-            // Display actual salon results
-            displaySalons.map((salon: Salon, index: number) => {
-              const imageMap = [salonImage1, salonImage2, salonImage3];
-              const salonWithImage = {
-                ...salon,
-                // Only use fallback images if no real image is provided
-                image: salon.image || imageMap[index % imageMap.length] || salonImage1
-              };
-              
+            // Display actual salon results - SalonCard handles fallback images internally
+            displaySalons.map((salon: Salon) => {
               // Extract search query and time filter for highlighting
               const searchQuery = searchParams?.service || searchParams?.category || '';
               const timeFilter = searchParams?.time || '';
@@ -231,7 +219,7 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
               return (
                 <SalonCard 
                   key={salon.id} 
-                  {...salonWithImage} 
+                  {...salon}
                   onBookingClick={onBookingClick}
                   searchQuery={searchQuery}
                   timeFilter={timeFilter}

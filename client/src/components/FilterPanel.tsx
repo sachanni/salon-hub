@@ -61,10 +61,11 @@ const FilterPanel = ({ isOpen, onClose, onApplyFilters, currentFilters }: Filter
         data-testid="filter-backdrop"
       />
 
-      {/* Filter Panel - Slide from right */}
+      {/* Filter Panel - Dropdown from filter button (left-aligned) */}
       <div className={cn(
-        "fixed right-0 top-0 h-full w-full sm:w-96 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-out",
-        isOpen ? "translate-x-0" : "translate-x-full"
+        "fixed left-4 right-4 top-20 h-[calc(100vh-6rem)] max-w-sm bg-white shadow-2xl z-50 rounded-2xl transform transition-all duration-300 ease-out overflow-hidden",
+        "sm:left-8 sm:right-auto sm:max-w-sm md:max-w-md",
+        isOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
       )}>
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
