@@ -21,6 +21,7 @@ import { CategoryCard } from '../components/CategoryCard';
 import { OfferCard } from '../components/OfferCard';
 import { CategorySkeleton, OfferSkeleton, SalonSkeleton } from '../components/SkeletonLoader';
 import { locationService, LocationData, LocationError } from '../services/locationService';
+import { offersAPI } from '../services/api';
 import SideMenu from '../components/SideMenu';
 import type { Salon, Category, SpecialOffer } from '../types/salon';
 
@@ -80,6 +81,7 @@ export const HomeScreen = () => {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [searchRadius, setSearchRadius] = useState<number>(10); // Default 10km (optimal for salon services)
   const [radiusExpanded, setRadiusExpanded] = useState<boolean>(false);
+  const [offerCount, setOfferCount] = useState<number>(0);
 
   const normalizeSalonData = (data: any): Salon[] => {
     try {
@@ -211,7 +213,21 @@ export const HomeScreen = () => {
   // Auto-detect location on mount (mobile-specific)
   useEffect(() => {
     detectLocation();
+    fetchOfferCount();
   }, []);
+
+  const fetchOfferCount = async () => {
+    try {
+      const response = await offersAPI.getOfferCount();
+      if (response.success && typeof response.count === 'number') {
+        setOfferCount(response.count);
+      } else {
+        setOfferCount(6);
+      }
+    } catch (err) {
+      setOfferCount(6);
+    }
+  };
 
   // Debounced filter application
   useEffect(() => {
@@ -284,14 +300,15 @@ export const HomeScreen = () => {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
-      }
-    >
-      {/* Header Section */}
+    <View style={styles.mainContainer}>
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
+        }
+      >
+        {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
@@ -567,7 +584,7 @@ export const HomeScreen = () => {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Special Offers</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/offers')}>
             <Text style={styles.viewAllText}>View All</Text>
           </TouchableOpacity>
         </View>
@@ -867,11 +884,38 @@ export const HomeScreen = () => {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+
+      {/* Floating Offers Button */}
+      <TouchableOpacity
+        style={styles.floatingOffersButton}
+        onPress={() => router.push('/offers')}
+        activeOpacity={0.9}
+      >
+        <LinearGradient
+          colors={['#EC4899', '#8B5CF6']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.floatingOffersGradient}
+        >
+          <Text style={styles.floatingOffersIcon}>🎁</Text>
+          <Text style={styles.floatingOffersText}>Offers</Text>
+          {offerCount > 0 && (
+            <View style={styles.floatingOffersBadge}>
+              <Text style={styles.floatingOffersBadgeText}>{offerCount > 99 ? '99+' : offerCount}</Text>
+            </View>
+          )}
+        </LinearGradient>
+      </TouchableOpacity>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
@@ -1278,7 +1322,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   lastSection: {
-    paddingBottom: 32,
+    paddingBottom: 80,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1668,5 +1712,46 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  floatingOffersButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    borderRadius: 25,
+    shadowColor: '#EC4899',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  floatingOffersGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  floatingOffersIcon: {
+    fontSize: 18,
+  },
+  floatingOffersText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  floatingOffersBadge: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  floatingOffersBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#EC4899',
   },
 });

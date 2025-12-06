@@ -15,6 +15,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { salonAPI } from '../services/api';
 import { Salon, Service, StaffMember, SalonReview } from '../types/navigation';
+import { useChat } from '../contexts/ChatContext';
+import { useAuth } from '../contexts/AuthContext';
+import { chatService } from '../services/chatService';
 
 const { width } = Dimensions.get('window');
 
@@ -22,9 +25,11 @@ const TABS = ['Photos', 'Services', 'Team', 'Reviews', 'About'] as const;
 type TabType = typeof TABS[number];
 
 export default function SalonDetailScreen() {
-  const params = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams();
   const router = useRouter();
-  const salonId = params.id;
+  const salonId = params.id as string;
+  const { isAuthenticated } = useAuth();
+  const { startConversation, setActiveConversation } = useChat();
 
   const [salon, setSalon] = useState<Salon | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -33,6 +38,7 @@ export default function SalonDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('Photos');
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [startingChat, setStartingChat] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -71,6 +77,46 @@ export default function SalonDetailScreen() {
     if (salon?.latitude && salon?.longitude) {
       const url = `https://www.google.com/maps/dir/?api=1&destination=${salon.latitude},${salon.longitude}`;
       Linking.openURL(url);
+    }
+  };
+
+  const handleChat = async () => {
+    if (!isAuthenticated) {
+      Alert.alert(
+        'Sign In Required',
+        'Please sign in to chat with this salon.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign In', onPress: () => router.push('/onboarding/mobile-verification') },
+        ]
+      );
+      return;
+    }
+
+    if (!salonId) return;
+
+    setStartingChat(true);
+    try {
+      const existingConversation = await chatService.getConversationForSalon(salonId);
+      
+      if (existingConversation) {
+        setActiveConversation(existingConversation);
+        router.push({
+          pathname: '/chat/[conversationId]',
+          params: { conversationId: existingConversation.id },
+        });
+      } else {
+        const conversation = await startConversation({ salonId });
+        router.push({
+          pathname: '/chat/[conversationId]',
+          params: { conversationId: conversation.id },
+        });
+      }
+    } catch (error) {
+      console.error('Failed to start chat:', error);
+      Alert.alert('Error', 'Failed to start chat. Please try again.');
+    } finally {
+      setStartingChat(false);
     }
   };
 
@@ -190,6 +236,20 @@ export default function SalonDetailScreen() {
                 <TouchableOpacity style={styles.callButton} onPress={handleCall}>
                   <Ionicons name="call" size={18} color="#8B5CF6" />
                   <Text style={styles.callButtonText}>Call</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.chatButton} 
+                  onPress={handleChat}
+                  disabled={startingChat}
+                >
+                  {startingChat ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="chatbubble" size={18} color="#FFFFFF" />
+                      <Text style={styles.chatButtonText}>Chat</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.directionsButton} onPress={handleDirections}>
                   <Ionicons name="navigate" size={18} color="#8B5CF6" />
@@ -483,8 +543,7 @@ const styles = StyleSheet.create({
     left: 28,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    backdropFilter: 'blur(4px)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
@@ -632,6 +691,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#8B5CF6',
+  },
+  chatButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    backgroundColor: '#9333EA',
+    borderRadius: 12,
+  },
+  chatButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   servicesSection: {
     padding: 16,

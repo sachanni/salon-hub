@@ -11,8 +11,9 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { userAPI, bookingAPI, shopAPI } from '../services/api';
+import { userAPI, bookingAPI, shopAPI, notificationAPI } from '../services/api';
 import { ActivityIndicator } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 
 interface UserData {
   firstName: string;
@@ -66,12 +67,21 @@ export default function ProfileScreen() {
   const [isLoadingBookings, setIsLoadingBookings] = useState(false);
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     loadUserData();
     loadPreferences();
     loadUserStats();
+    loadUnreadCount();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUnreadCount();
+      loadUserData();
+    }, [])
+  );
 
   useEffect(() => {
     if (params.tab) {
@@ -178,6 +188,17 @@ export default function ProfileScreen() {
     }
   };
 
+  const loadUnreadCount = async () => {
+    try {
+      const response = await notificationAPI.getUnreadCount();
+      if (response.success) {
+        setUnreadNotifications(response.unreadCount || 0);
+      }
+    } catch (error) {
+      console.error('Error loading unread count:', error);
+    }
+  };
+
   const getPaymentStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
@@ -247,9 +268,15 @@ export default function ProfileScreen() {
             <Text style={styles.userName}>{userData.firstName} {userData.lastName}!</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.notificationButton}>
+        <TouchableOpacity style={styles.notificationButton} onPress={() => router.push('/notifications' as any)}>
           <Ionicons name="notifications-outline" size={24} color="#6B7280" />
-          <View style={styles.notificationDot} />
+          {unreadNotifications > 0 && (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>
+                {unreadNotifications > 99 ? '99+' : unreadNotifications}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -362,9 +389,9 @@ export default function ProfileScreen() {
               <Text style={styles.memberBadgeText}>Member since {userData.memberSince}</Text>
             </View>
           </View>
-          <View style={styles.editButtonDisabled}>
-            <Ionicons name="create-outline" size={20} color="#D1D5DB" />
-          </View>
+          <TouchableOpacity style={styles.editButton} onPress={() => router.push('/edit-profile' as any)}>
+            <Ionicons name="create-outline" size={20} color="#8B5CF6" />
+          </TouchableOpacity>
         </View>
 
         {/* Tab Content - Show appropriate section based on active tab */}
@@ -621,29 +648,79 @@ export default function ProfileScreen() {
         {activeTab === 'settings' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
+              <Ionicons name="gift-outline" size={18} color="#E91E63" />
+              <Text style={styles.sectionTitle}>Rewards & Engagement</Text>
+            </View>
+            <View style={styles.settingsCard}>
+              <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/rewards' as any)}>
+                <Ionicons name="star" size={20} color="#F59E0B" />
+                <Text style={styles.settingText}>Rewards & Points</Text>
+                <View style={styles.settingBadge}>
+                  <Text style={styles.settingBadgeText}>NEW</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push('/favorites' as any)}>
+                <Ionicons name="heart" size={20} color="#EF4444" />
+                <Text style={styles.settingText}>My Favorites</Text>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push('/referrals' as any)}>
+                <Ionicons name="gift" size={20} color="#10B981" />
+                <Text style={styles.settingText}>Refer & Earn</Text>
+                <View style={styles.settingBadge}>
+                  <Text style={styles.settingBadgeText}>NEW</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+              <Ionicons name="wallet-outline" size={18} color="#8B5CF6" />
+              <Text style={styles.sectionTitle}>Wallet & Payments</Text>
+            </View>
+            <View style={styles.settingsCard}>
+              <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/wallet' as any)}>
+                <Ionicons name="wallet-outline" size={20} color="#8B5CF6" />
+                <Text style={styles.settingText}>My Wallet</Text>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push('/notifications' as any)}>
+                <Ionicons name="notifications-outline" size={20} color="#F59E0B" />
+                <Text style={styles.settingText}>Notifications</Text>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
               <Ionicons name="settings-outline" size={18} color="#8B5CF6" />
               <Text style={styles.sectionTitle}>App Settings</Text>
             </View>
             <View style={styles.settingsCard}>
-              <TouchableOpacity style={styles.settingItem}>
+              <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/language' as any)}>
                 <Ionicons name="language-outline" size={20} color="#6B7280" />
                 <Text style={styles.settingText}>Language</Text>
                 <Text style={styles.settingValue}>English</Text>
                 <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]}>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push('/help-support' as any)}>
                 <Ionicons name="help-circle-outline" size={20} color="#6B7280" />
                 <Text style={styles.settingText}>Help & Support</Text>
                 <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]}>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push({ pathname: '/web-page', params: { type: 'privacy', title: 'Privacy Policy' } } as any)}>
                 <Ionicons name="shield-checkmark-outline" size={20} color="#6B7280" />
                 <Text style={styles.settingText}>Privacy Policy</Text>
                 <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]}>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push({ pathname: '/web-page', params: { type: 'terms', title: 'Terms of Service' } } as any)}>
                 <Ionicons name="document-text-outline" size={20} color="#6B7280" />
                 <Text style={styles.settingText}>Terms of Service</Text>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push({ pathname: '/web-page', params: { type: 'about', title: 'About Us' } } as any)}>
+                <Ionicons name="information-circle-outline" size={20} color="#6B7280" />
+                <Text style={styles.settingText}>About Us</Text>
                 <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
               </TouchableOpacity>
             </View>
@@ -711,6 +788,25 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#FFFFFF',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    backgroundColor: '#EF4444',
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    paddingHorizontal: 4,
+  },
+  notificationBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
   content: {
     flex: 1,
@@ -1022,6 +1118,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#111827',
+  },
+  settingBadge: {
+    backgroundColor: '#E91E63',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  settingBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   settingValue: {
     fontSize: 14,

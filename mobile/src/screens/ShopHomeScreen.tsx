@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, memo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,108 +6,195 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Image,
-  ActivityIndicator,
+  RefreshControl,
+  Pressable,
   FlatList,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
-import { shopAPI } from '../services/api';
 import { Category, Product, ProductMetadata } from '../types/shop';
 import { ProductListSkeleton, CategoryChipSkeleton } from '../components/LoadingSkeleton';
+import { useShopCategories, useShopProducts, useCart, queryKeys } from '../hooks/useQueries';
+import CachedImage from '../components/CachedImage';
+import { shopAPI } from '../services/api';
+
+const CategoryItem = memo(({ item, onPress }: { item: Category; onPress: () => void }) => (
+  <Pressable 
+    style={styles.categoryCard}
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={`${item.name} category with ${item.productCount || 0} items`}
+  >
+    <View style={styles.categoryIcon}>
+      <Ionicons name="pricetag" size={24} color="#8B5CF6" />
+    </View>
+    <Text style={styles.categoryName} numberOfLines={2}>{item.name}</Text>
+    <Text style={styles.categoryCount}>{item.productCount || 0} items</Text>
+  </Pressable>
+));
+
+const ProductItem = memo(({ item, onPress, formatPrice }: { item: Product; onPress: () => void; formatPrice: (paisa: number) => string }) => {
+  const metadata: ProductMetadata = useMemo(() => 
+    item.metadata 
+      ? (typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata)
+      : {},
+    [item.metadata]
+  );
+  const imageUrl = metadata?.images?.[0];
+  const rating = metadata?.averageRating || 0;
+
+  return (
+    <Pressable 
+      style={styles.productCard}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.name} by ${item.brand}, ${formatPrice(item.retailPriceInPaisa)}`}
+    >
+      {imageUrl ? (
+        <CachedImage 
+          source={{ uri: imageUrl }} 
+          style={styles.productImage}
+          contentFit="cover"
+          transition={200}
+        />
+      ) : (
+        <View style={[styles.productImage, styles.productPlaceholder]}>
+          <Ionicons name="image-outline" size={40} color="#999" />
+        </View>
+      )}
+      <View style={styles.productInfo}>
+        <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+        <Text style={styles.productBrand}>{item.brand}</Text>
+        <View style={styles.productFooter}>
+          <Text style={styles.productPrice}>{formatPrice(item.retailPriceInPaisa)}</Text>
+          {rating > 0 && (
+            <View style={styles.ratingBadge}>
+              <Ionicons name="star" size={12} color="#FFA500" />
+              <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+
+const ErrorState = memo(({ onRetry }: { onRetry: () => void }) => (
+  <View style={errorStyles.container}>
+    <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+    <Text style={errorStyles.title}>Failed to load shop</Text>
+    <Text style={errorStyles.message}>Please check your connection and try again</Text>
+    <Pressable style={errorStyles.retryButton} onPress={onRetry}>
+      <Ionicons name="refresh" size={20} color="#FFFFFF" />
+      <Text style={errorStyles.retryButtonText}>Retry</Text>
+    </Pressable>
+  </View>
+));
+
+const errorStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  message: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+});
 
 export default function ShopHomeScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [cartItemCount, setCartItemCount] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  const { 
+    data: categoriesData, 
+    isLoading: categoriesLoading, 
+    isError: categoriesError,
+    refetch: refetchCategories 
+  } = useShopCategories();
+  const { 
+    data: productsData, 
+    isLoading: productsLoading, 
+    isError: productsError,
+    refetch: refetchProducts 
+  } = useShopProducts({ limit: 10 });
+  const { data: cartData, refetch: refetchCart } = useCart();
+
+  const categories = useMemo(() => categoriesData?.categories || [], [categoriesData]);
+  const featuredProducts = useMemo(() => productsData?.products || [], [productsData]);
+  const cartItemCount = useMemo(() => cartData?.items?.length || 0, [cartData]);
+  
+  const loading = categoriesLoading || productsLoading;
+  const hasError = categoriesError || productsError;
 
   useEffect(() => {
-    loadShopData();
-  }, []);
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.shop.wishlist,
+      queryFn: () => shopAPI.getWishlist(),
+    });
+  }, [queryClient]);
 
-  const loadShopData = async () => {
-    try {
-      setLoading(true);
-      const [categoriesData, productsData, cartData] = await Promise.all([
-        shopAPI.getCategories(),
-        shopAPI.getProducts({ limit: 10 }),
-        shopAPI.getCart().catch(() => ({ cart: [], items: [] })),
-      ]);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refetchCategories(), refetchProducts(), refetchCart()]);
+    setRefreshing(false);
+  }, [refetchCategories, refetchProducts, refetchCart]);
 
-      setCategories(categoriesData.categories || []);
-      setFeaturedProducts(productsData.products || []);
-      setCartItemCount(cartData.items?.length || 0);
-    } catch (error) {
-      console.error('Error loading shop data:', error);
-      Alert.alert('Error', 'Failed to load shop data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSearch = () => {
+  const handleSearch = useCallback(() => {
     if (searchQuery.trim()) {
       router.push(`/shop/products?search=${encodeURIComponent(searchQuery)}`);
     }
-  };
+  }, [searchQuery, router]);
 
-  const formatPrice = (paisa: number) => {
+  const formatPrice = useCallback((paisa: number) => {
     return `₹${(paisa / 100).toFixed(2)}`;
-  };
+  }, []);
 
-  const renderCategory = ({ item }: { item: Category }) => (
-    <TouchableOpacity
-      style={styles.categoryCard}
-      onPress={() => router.push(`/shop/products?category=${item.name}`)}
-    >
-      <View style={styles.categoryIcon}>
-        <Ionicons name="pricetag" size={24} color="#8B5CF6" />
-      </View>
-      <Text style={styles.categoryName} numberOfLines={2}>{item.name}</Text>
-      <Text style={styles.categoryCount}>{item.productCount || 0} items</Text>
-    </TouchableOpacity>
-  );
+  const renderCategory = useCallback((item: Category) => (
+    <CategoryItem 
+      item={item} 
+      onPress={() => router.push(`/shop/products?category=${item.name}`)} 
+    />
+  ), [router]);
 
-  const renderProduct = ({ item }: { item: Product }) => {
-    // Safely parse metadata with fallback
-    const metadata: ProductMetadata = item.metadata 
-      ? (typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata)
-      : {};
-    const imageUrl = metadata?.images?.[0];
-    const rating = metadata?.averageRating || 0;
+  const renderProduct = useCallback((item: Product) => (
+    <ProductItem 
+      item={item} 
+      onPress={() => router.push(`/shop/product/${item.id}`)} 
+      formatPrice={formatPrice}
+    />
+  ), [router, formatPrice]);
 
-    return (
-      <TouchableOpacity
-        style={styles.productCard}
-        onPress={() => router.push(`/shop/product/${item.id}`)}
-      >
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.productImage} />
-        ) : (
-          <View style={[styles.productImage, styles.productPlaceholder]}>
-            <Ionicons name="image-outline" size={40} color="#999" />
-          </View>
-        )}
-        <View style={styles.productInfo}>
-          <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
-          <Text style={styles.productBrand}>{item.brand}</Text>
-          <View style={styles.productFooter}>
-            <Text style={styles.productPrice}>{formatPrice(item.retailPriceInPaisa)}</Text>
-            {rating > 0 && (
-              <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={12} color="#FFA500" />
-                <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const categoryKeyExtractor = useCallback((item: Category) => item.name, []);
+  const productKeyExtractor = useCallback((item: Product) => item.id, []);
 
   if (loading) {
     return (
@@ -131,6 +218,19 @@ export default function ShopHomeScreen() {
             <ProductListSkeleton count={6} />
           </View>
         </ScrollView>
+      </View>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <Text style={styles.headerTitle}>Shop</Text>
+          </View>
+        </View>
+        <ErrorState onRetry={onRefresh} />
       </View>
     );
   }
@@ -168,7 +268,13 @@ export default function ShopHomeScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#8B5CF6']} />
+        }
+      >
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Shop by Category</Text>
@@ -176,11 +282,11 @@ export default function ShopHomeScreen() {
               <Text style={styles.seeAllText}>See All</Text>
             </TouchableOpacity>
           </View>
-          <FlatList
+          <FlatList<Category>
             horizontal
             data={categories}
-            renderItem={renderCategory}
-            keyExtractor={(item) => item.name}
+            renderItem={({ item }) => renderCategory(item)}
+            keyExtractor={categoryKeyExtractor}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.categoriesList}
           />
@@ -193,10 +299,10 @@ export default function ShopHomeScreen() {
               <Text style={styles.seeAllText}>See All</Text>
             </TouchableOpacity>
           </View>
-          <FlatList
+          <FlatList<Product>
             data={featuredProducts}
-            renderItem={renderProduct}
-            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => renderProduct(item)}
+            keyExtractor={productKeyExtractor}
             numColumns={2}
             scrollEnabled={false}
             columnWrapperStyle={styles.productRow}

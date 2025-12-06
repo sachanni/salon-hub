@@ -23,6 +23,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import BookingModal from "@/components/BookingModal";
+import MyBeautyProfile from "@/components/customer/MyBeautyProfile";
 import { 
   Calendar, 
   History, 
@@ -1863,6 +1864,11 @@ export default function CustomerDashboard() {
                   </div>
                 </CardContent>
               </Card>
+            </div>
+
+            {/* My Beauty Profile Section */}
+            <div className="mt-6">
+              <MyBeautyProfile />
             </div>
           </TabsContent>
 

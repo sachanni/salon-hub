@@ -37,8 +37,19 @@ import eventRoutes from "./routes/events.routes";
 import { registerMobileAuthRoutes } from "./routes/mobile-auth.routes";
 import { registerShopRoutes } from "./routes/shop.routes";
 import paymentRoutes from "./routes/payment.routes";
+import { registerWalletRoutes } from "./routes/wallet.routes";
+import { registerNotificationRoutes } from "./routes/notification.routes";
 import { tempImageStorage } from "./services/tempImageStorage";
 import { authenticateMobileUser } from "./middleware/authMobile";
+import loyaltyRoutes from "./routes/loyalty";
+import favoritesRoutes from "./routes/favorites";
+import referralsRoutes from "./routes/referrals";
+import chatRoutes from "./routes/chat.routes";
+import aiConsultantRoutes, { initializeAIConsultantRoutes } from "./routes/ai-consultant.routes";
+import { initializeChatSocket } from "./services/chat.service";
+import clientProfileRoutes from "./routes/client-profiles.routes";
+import depositsRoutes, { publicDepositsRouter } from "./routes/deposits.routes";
+import giftCardsRoutes, { publicGiftCardsRouter } from "./routes/gift-cards.routes";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -455,6 +466,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Chat token endpoint - issue JWT tokens for web chat (session-protected)
+  app.get("/api/chat/token", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Generate a short-lived access token for chat (15 minutes)
+      const chatToken = generateAccessToken(userId, user.email || '');
+      
+      res.json({
+        token: chatToken,
+        expiresIn: 900, // 15 minutes in seconds
+        userId: user.id,
+        userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User',
+        userAvatar: user.profileImageUrl
+      });
+    } catch (error) {
+      console.error("Error generating chat token:", error);
+      res.status(500).json({ error: "Failed to generate chat token" });
     }
   });
 
@@ -16034,6 +16071,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // Get customer's gift cards (web session auth - for CustomerWallet.tsx)
+  app.get(
+    "/api/customer/gift-cards",
+    isAuthenticated,
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const userId = req.user!.id;
+
+        const purchased = await db
+          .select({
+            id: schema.giftCards.id,
+            code: schema.giftCards.code,
+            balancePaisa: schema.giftCards.balancePaisa,
+            originalValuePaisa: schema.giftCards.originalValuePaisa,
+            status: schema.giftCards.status,
+            expiresAt: schema.giftCards.expiresAt,
+            recipientName: schema.giftCards.recipientName,
+            recipientEmail: schema.giftCards.recipientEmail,
+            salonId: schema.giftCards.salonId,
+            salonName: schema.salons.name,
+            purchasedAt: schema.giftCards.purchasedAt,
+            qrCodeUrl: schema.giftCards.qrCodeUrl,
+          })
+          .from(schema.giftCards)
+          .leftJoin(schema.salons, eq(schema.giftCards.salonId, schema.salons.id))
+          .where(eq(schema.giftCards.purchasedBy, userId))
+          .orderBy(sql`${schema.giftCards.createdAt} DESC`);
+
+        const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+        const userEmail = user[0]?.email;
+        const userPhone = user[0]?.phone;
+
+        let received: any[] = [];
+        if (userEmail || userPhone) {
+          const conditions = [];
+          if (userEmail) conditions.push(eq(schema.giftCards.recipientEmail, userEmail));
+          if (userPhone) conditions.push(eq(schema.giftCards.recipientPhone, userPhone));
+
+          received = await db
+            .select({
+              id: schema.giftCards.id,
+              code: schema.giftCards.code,
+              balancePaisa: schema.giftCards.balancePaisa,
+              originalValuePaisa: schema.giftCards.originalValuePaisa,
+              status: schema.giftCards.status,
+              expiresAt: schema.giftCards.expiresAt,
+              personalMessage: schema.giftCards.personalMessage,
+              salonId: schema.giftCards.salonId,
+              salonName: schema.salons.name,
+              deliveredAt: schema.giftCards.deliveredAt,
+              qrCodeUrl: schema.giftCards.qrCodeUrl,
+            })
+            .from(schema.giftCards)
+            .leftJoin(schema.salons, eq(schema.giftCards.salonId, schema.salons.id))
+            .where(and(or(...conditions), eq(schema.giftCards.status, "active")))
+            .orderBy(sql`${schema.giftCards.deliveredAt} DESC`);
+        }
+
+        res.json({ purchased, received });
+      } catch (error: any) {
+        console.error("Error fetching customer gift cards:", error);
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
   // Get available offers for customer
   app.get("/api/offers", async (req: AuthenticatedRequest, res) => {
     try {
@@ -16520,6 +16623,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mobile authentication routes (token-based, no cookies)
   registerMobileAuthRoutes(app);
 
+  // Mobile wallet routes
+  registerWalletRoutes(app);
+
+  // Mobile notification routes
+  registerNotificationRoutes(app);
+
   // ===============================================
   // MOBILE USER PROFILE ROUTES
   // ===============================================
@@ -16641,6 +16750,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerShopRoutes(app);
   app.use('/api/payment', paymentRoutes);
   console.log('✅ Payment routes registered');
+
+  // Loyalty & Rewards routes
+  app.use('/api/mobile/loyalty', authenticateMobileUser, loyaltyRoutes);
+  console.log('✅ Loyalty & Rewards routes registered');
+
+  // Favorites routes (salons & stylists)
+  app.use('/api/mobile/favorites', authenticateMobileUser, favoritesRoutes);
+  console.log('✅ Favorites routes registered');
+
+  // Referral Program routes
+  app.use('/api/mobile/referrals', authenticateMobileUser, referralsRoutes);
+  console.log('✅ Referral routes registered');
+
+  // Chat routes (real-time messaging between customers and salons)
+  app.use('/api/chat', authenticateMobileUser, chatRoutes);
+  console.log('✅ Chat routes registered');
+
+  // AI Beauty Consultant routes (AI-powered beauty advice)
+  // Auth is handled internally - supports both session (web) and JWT (mobile)
+  app.use('/api/ai-consultant', aiConsultantRoutes);
+  // Initialize AI consultant and validate Gemini API key
+  initializeAIConsultantRoutes().then(available => {
+    console.log(`✅ AI Beauty Consultant routes registered ${available ? '(Gemini API available)' : '(Gemini API unavailable)'}`);
+  }).catch(error => {
+    console.error('Failed to initialize AI consultant routes:', error);
+  });
+
+  // Client Notes & Preferences (Formula Tracking) routes
+  app.use('/api/business', isAuthenticated, clientProfileRoutes);
+  console.log('✅ Client Profile routes registered');
+  
+  app.use('/api/business', isAuthenticated, depositsRoutes);
+  console.log('✅ Deposits routes registered');
+  
+  app.use('/api/deposits', publicDepositsRouter);
+  console.log('✅ Public Deposits routes registered');
+  
+  app.use('/api/business/gift-cards', isAuthenticated, giftCardsRoutes);
+  app.use('/api/gift-cards', publicGiftCardsRouter);
+  console.log('✅ Gift Cards routes registered');
 
   // ===============================================
   // PRODUCT E-COMMERCE ROUTES
@@ -18132,6 +18281,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   const httpServer = createServer(app);
+
+  // Initialize Socket.IO for real-time chat (must be after httpServer creation)
+  initializeChatSocket(httpServer);
 
   return httpServer;
 }

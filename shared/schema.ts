@@ -5082,3 +5082,1821 @@ export const cancelRegistrationSchema = z.object({
   reason: z.string().max(500).optional(),
 });
 export type CancelRegistrationInput = z.infer<typeof cancelRegistrationSchema>;
+
+// ===============================================
+// USER NOTIFICATIONS - General notifications for mobile app
+// ===============================================
+export const userNotifications = pgTable("user_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  type: varchar("type", { length: 50 }).notNull(), // booking, payment, wallet, promo, system
+  referenceId: varchar("reference_id"), // bookingId, orderId, etc.
+  referenceType: varchar("reference_type", { length: 50 }), // booking, order, wallet, etc.
+  isRead: integer("is_read").notNull().default(0),
+  readAt: timestamp("read_at"),
+  imageUrl: varchar("image_url"),
+  actionUrl: varchar("action_url"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("user_notifications_user_id_idx").on(table.userId),
+  index("user_notifications_created_at_idx").on(table.createdAt),
+]);
+
+export const insertUserNotificationSchema = createInsertSchema(userNotifications).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserNotification = z.infer<typeof insertUserNotificationSchema>;
+export type UserNotification = typeof userNotifications.$inferSelect;
+
+// ===============================================
+// LOYALTY & REWARDS SYSTEM
+// ===============================================
+
+// Loyalty Tiers - Bronze, Silver, Gold, Platinum
+export const loyaltyTiers = pgTable("loyalty_tiers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 50 }).notNull().unique(), // bronze, silver, gold, platinum
+  displayName: varchar("display_name", { length: 100 }).notNull(), // Bronze, Silver, Gold, Platinum
+  minPoints: integer("min_points").notNull().default(0), // Minimum points to reach this tier
+  maxPoints: integer("max_points"), // Maximum points for this tier (null for highest tier)
+  pointsMultiplier: decimal("points_multiplier", { precision: 3, scale: 2 }).notNull().default('1.00'), // Points earned multiplier
+  discountPercentage: decimal("discount_percentage", { precision: 5, scale: 2 }).notNull().default('0.00'), // Discount on bookings
+  benefits: jsonb("benefits").default('[]'), // Array of benefit descriptions
+  iconUrl: varchar("icon_url"), // Tier badge icon
+  colorHex: varchar("color_hex", { length: 7 }).default('#CD7F32'), // Bronze color by default
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type LoyaltyTier = typeof loyaltyTiers.$inferSelect;
+export type InsertLoyaltyTier = typeof loyaltyTiers.$inferInsert;
+
+// User Points - Tracks user's current points and tier
+export const userPoints = pgTable("user_points", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  currentPoints: integer("current_points").notNull().default(0), // Redeemable points
+  lifetimePoints: integer("lifetime_points").notNull().default(0), // Total points ever earned (for tier calculation)
+  currentTierId: varchar("current_tier_id").references(() => loyaltyTiers.id),
+  tierExpiresAt: timestamp("tier_expires_at"), // When current tier status expires
+  lastPointsEarnedAt: timestamp("last_points_earned_at"),
+  lastPointsRedeemedAt: timestamp("last_points_redeemed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("user_points_user_id_idx").on(table.userId),
+  index("user_points_lifetime_points_idx").on(table.lifetimePoints),
+]);
+
+export type UserPoints = typeof userPoints.$inferSelect;
+export type InsertUserPoints = typeof userPoints.$inferInsert;
+
+// Point Transactions - History of points earned/redeemed
+export const pointTransactions = pgTable("point_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 20 }).notNull(), // earn, redeem, expire, bonus, referral
+  points: integer("points").notNull(), // Positive for earn, negative for redeem/expire
+  balanceAfter: integer("balance_after").notNull(), // Points balance after this transaction
+  source: varchar("source", { length: 50 }).notNull(), // booking, review, referral, promotion, birthday, signup
+  referenceId: varchar("reference_id"), // bookingId, reviewId, etc.
+  referenceType: varchar("reference_type", { length: 50 }), // booking, review, referral, reward
+  description: text("description").notNull(), // Human readable description
+  expiresAt: timestamp("expires_at"), // When these points expire (for earned points)
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("point_transactions_user_id_idx").on(table.userId),
+  index("point_transactions_created_at_idx").on(table.createdAt),
+  index("point_transactions_type_idx").on(table.type),
+]);
+
+export type PointTransaction = typeof pointTransactions.$inferSelect;
+export type InsertPointTransaction = typeof pointTransactions.$inferInsert;
+
+// Rewards Catalog - Available rewards for redemption
+export const rewards = pgTable("rewards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description"),
+  shortDescription: varchar("short_description", { length: 200 }),
+  pointsCost: integer("points_cost").notNull(), // Points required to redeem
+  rewardType: varchar("reward_type", { length: 50 }).notNull(), // discount, free_service, product, voucher, experience
+  rewardValue: integer("reward_value"), // Value in paisa for discounts/vouchers
+  rewardPercentage: decimal("reward_percentage", { precision: 5, scale: 2 }), // Percentage discount
+  category: varchar("category", { length: 50 }), // hair, spa, nails, makeup, products
+  imageUrl: varchar("image_url"),
+  termsConditions: text("terms_conditions"),
+  validityDays: integer("validity_days").default(30), // Days until reward expires after redemption
+  minTierRequired: varchar("min_tier_required").references(() => loyaltyTiers.id), // Minimum tier to redeem
+  maxRedemptionsPerUser: integer("max_redemptions_per_user"), // Limit per user
+  totalQuantity: integer("total_quantity"), // Total available (null = unlimited)
+  redeemedCount: integer("redeemed_count").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("rewards_points_cost_idx").on(table.pointsCost),
+  index("rewards_reward_type_idx").on(table.rewardType),
+  index("rewards_is_active_idx").on(table.isActive),
+]);
+
+export type Reward = typeof rewards.$inferSelect;
+export type InsertReward = typeof rewards.$inferInsert;
+
+// User Redeemed Rewards - Track redeemed rewards
+export const userRedeemedRewards = pgTable("user_redeemed_rewards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rewardId: varchar("reward_id").notNull().references(() => rewards.id, { onDelete: "cascade" }),
+  pointsSpent: integer("points_spent").notNull(),
+  redemptionCode: varchar("redemption_code", { length: 20 }).notNull().unique(), // Unique code for this redemption
+  status: varchar("status", { length: 20 }).notNull().default('active'), // active, used, expired, cancelled
+  usedAt: timestamp("used_at"),
+  usedAtSalonId: varchar("used_at_salon_id").references(() => salons.id),
+  usedAtBookingId: varchar("used_at_booking_id"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("user_redeemed_rewards_user_id_idx").on(table.userId),
+  index("user_redeemed_rewards_status_idx").on(table.status),
+  index("user_redeemed_rewards_expires_at_idx").on(table.expiresAt),
+]);
+
+export type UserRedeemedReward = typeof userRedeemedRewards.$inferSelect;
+export type InsertUserRedeemedReward = typeof userRedeemedRewards.$inferInsert;
+
+// ===============================================
+// FAVORITES - Salons & Stylists
+// ===============================================
+
+// Favorite Salons
+export const favoriteSalons = pgTable("favorite_salons", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("favorite_salons_user_id_idx").on(table.userId),
+  index("favorite_salons_salon_id_idx").on(table.salonId),
+  uniqueIndex("favorite_salons_user_salon_unique").on(table.userId, table.salonId),
+]);
+
+export type FavoriteSalon = typeof favoriteSalons.$inferSelect;
+export type InsertFavoriteSalon = typeof favoriteSalons.$inferInsert;
+
+// Favorite Stylists
+export const favoriteStylists = pgTable("favorite_stylists", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("favorite_stylists_user_id_idx").on(table.userId),
+  index("favorite_stylists_staff_id_idx").on(table.staffId),
+  uniqueIndex("favorite_stylists_user_staff_unique").on(table.userId, table.staffId),
+]);
+
+export type FavoriteStylist = typeof favoriteStylists.$inferSelect;
+export type InsertFavoriteStylist = typeof favoriteStylists.$inferInsert;
+
+// ===============================================
+// REFERRAL PROGRAM
+// ===============================================
+
+// Referral Codes - Unique codes for each user
+export const referralCodes = pgTable("referral_codes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  code: varchar("code", { length: 20 }).notNull().unique(), // e.g., JOHN2024, BEAUTY123
+  referrerRewardPoints: integer("referrer_reward_points").notNull().default(200), // Points for referrer
+  refereeRewardPoints: integer("referee_reward_points").notNull().default(100), // Points for new user
+  refereeDiscountPercentage: decimal("referee_discount_percentage", { precision: 5, scale: 2 }).default('10.00'), // Discount for first booking
+  maxUses: integer("max_uses"), // Maximum times this code can be used (null = unlimited)
+  usedCount: integer("used_count").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  expiresAt: timestamp("expires_at"), // Optional expiry date
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("referral_codes_code_idx").on(table.code),
+  index("referral_codes_user_id_idx").on(table.userId),
+]);
+
+export type ReferralCode = typeof referralCodes.$inferSelect;
+export type InsertReferralCode = typeof referralCodes.$inferInsert;
+
+// Referrals - Track who referred whom
+export const referrals = pgTable("referrals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  referrerId: varchar("referrer_id").notNull().references(() => users.id, { onDelete: "cascade" }), // User who referred
+  refereeId: varchar("referee_id").notNull().references(() => users.id, { onDelete: "cascade" }), // New user who signed up
+  referralCodeId: varchar("referral_code_id").notNull().references(() => referralCodes.id, { onDelete: "cascade" }),
+  status: varchar("status", { length: 20 }).notNull().default('pending'), // pending, completed, rewarded, expired
+  referrerPointsAwarded: integer("referrer_points_awarded").default(0), // Points given to referrer
+  refereePointsAwarded: integer("referee_points_awarded").default(0), // Points given to referee
+  refereeFirstBookingId: varchar("referee_first_booking_id"), // First booking by referred user
+  refereeFirstBookingAt: timestamp("referee_first_booking_at"),
+  rewardedAt: timestamp("rewarded_at"), // When both parties were rewarded
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("referrals_referrer_id_idx").on(table.referrerId),
+  index("referrals_referee_id_idx").on(table.refereeId),
+  index("referrals_status_idx").on(table.status),
+  uniqueIndex("referrals_referee_unique").on(table.refereeId), // Each user can only be referred once
+]);
+
+export type Referral = typeof referrals.$inferSelect;
+export type InsertReferral = typeof referrals.$inferInsert;
+
+// Referral Relations
+export const referralCodesRelations = relations(referralCodes, ({ one, many }) => ({
+  user: one(users, {
+    fields: [referralCodes.userId],
+    references: [users.id],
+  }),
+  referrals: many(referrals),
+}));
+
+export const referralsRelations = relations(referrals, ({ one }) => ({
+  referrer: one(users, {
+    fields: [referrals.referrerId],
+    references: [users.id],
+    relationName: 'referrer',
+  }),
+  referee: one(users, {
+    fields: [referrals.refereeId],
+    references: [users.id],
+    relationName: 'referee',
+  }),
+  referralCode: one(referralCodes, {
+    fields: [referrals.referralCodeId],
+    references: [referralCodes.id],
+  }),
+}));
+
+// Loyalty Relations
+export const userPointsRelations = relations(userPoints, ({ one }) => ({
+  user: one(users, {
+    fields: [userPoints.userId],
+    references: [users.id],
+  }),
+  currentTier: one(loyaltyTiers, {
+    fields: [userPoints.currentTierId],
+    references: [loyaltyTiers.id],
+  }),
+}));
+
+export const pointTransactionsRelations = relations(pointTransactions, ({ one }) => ({
+  user: one(users, {
+    fields: [pointTransactions.userId],
+    references: [users.id],
+  }),
+}));
+
+export const userRedeemedRewardsRelations = relations(userRedeemedRewards, ({ one }) => ({
+  user: one(users, {
+    fields: [userRedeemedRewards.userId],
+    references: [users.id],
+  }),
+  reward: one(rewards, {
+    fields: [userRedeemedRewards.rewardId],
+    references: [rewards.id],
+  }),
+  salon: one(salons, {
+    fields: [userRedeemedRewards.usedAtSalonId],
+    references: [salons.id],
+  }),
+}));
+
+// Favorites Relations
+export const favoriteSalonsRelations = relations(favoriteSalons, ({ one }) => ({
+  user: one(users, {
+    fields: [favoriteSalons.userId],
+    references: [users.id],
+  }),
+  salon: one(salons, {
+    fields: [favoriteSalons.salonId],
+    references: [salons.id],
+  }),
+}));
+
+export const favoriteStylistsRelations = relations(favoriteStylists, ({ one }) => ({
+  user: one(users, {
+    fields: [favoriteStylists.userId],
+    references: [users.id],
+  }),
+  stylist: one(staff, {
+    fields: [favoriteStylists.staffId],
+    references: [staff.id],
+  }),
+}));
+
+// =====================================================
+// CHAT SYSTEM TABLES
+// =====================================================
+
+// Chat Conversations - Links customer with salon for pre-booking discussions
+export const chatConversations = pgTable("chat_conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: varchar("status", { length: 20 }).notNull().default('active'), // active, archived, closed
+  context: varchar("context", { length: 50 }).default('pre_booking'), // pre_booking, booking_inquiry, support
+  relatedBookingId: varchar("related_booking_id"), // Optional: if conversation relates to a specific booking
+  relatedServiceId: varchar("related_service_id"), // Optional: if discussing a specific service
+  assignedStaffId: varchar("assigned_staff_id").references(() => staff.id, { onDelete: "set null" }), // Staff handling this chat
+  lastMessageAt: timestamp("last_message_at"),
+  lastMessagePreview: text("last_message_preview"), // First 100 chars of last message for list view
+  customerUnreadCount: integer("customer_unread_count").notNull().default(0),
+  staffUnreadCount: integer("staff_unread_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("chat_conversations_salon_id_idx").on(table.salonId),
+  index("chat_conversations_customer_id_idx").on(table.customerId),
+  index("chat_conversations_assigned_staff_idx").on(table.assignedStaffId),
+  index("chat_conversations_status_idx").on(table.status),
+  index("chat_conversations_last_message_at_idx").on(table.lastMessageAt),
+  uniqueIndex("chat_conversations_salon_customer_unique").on(table.salonId, table.customerId),
+]);
+
+export type ChatConversation = typeof chatConversations.$inferSelect;
+export type InsertChatConversation = typeof chatConversations.$inferInsert;
+
+// Chat Participants - Tracks all users who can view/participate in a conversation
+export const chatParticipants = pgTable("chat_participants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => chatConversations.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: varchar("role", { length: 20 }).notNull(), // customer, staff, admin
+  staffId: varchar("staff_id").references(() => staff.id, { onDelete: "cascade" }), // Only if role is 'staff'
+  joinedAt: timestamp("joined_at").defaultNow(),
+  lastReadAt: timestamp("last_read_at"),
+  isActive: integer("is_active").notNull().default(1), // 0 if left the conversation
+}, (table) => [
+  index("chat_participants_conversation_id_idx").on(table.conversationId),
+  index("chat_participants_user_id_idx").on(table.userId),
+  uniqueIndex("chat_participants_conversation_user_unique").on(table.conversationId, table.userId),
+]);
+
+export type ChatParticipant = typeof chatParticipants.$inferSelect;
+export type InsertChatParticipant = typeof chatParticipants.$inferInsert;
+
+// Chat Messages - Individual messages in a conversation
+export const chatMessages = pgTable("chat_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => chatConversations.id, { onDelete: "cascade" }),
+  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  senderRole: varchar("sender_role", { length: 20 }).notNull(), // customer, staff
+  senderName: text("sender_name"), // Cached sender name for display
+  senderAvatar: text("sender_avatar"), // Cached sender avatar URL
+  messageType: varchar("message_type", { length: 20 }).notNull().default('text'), // text, image, file, system
+  body: text("body"), // Message text content
+  attachmentUrl: text("attachment_url"), // URL for image/file attachments
+  attachmentType: varchar("attachment_type", { length: 50 }), // image/jpeg, application/pdf, etc.
+  attachmentName: text("attachment_name"), // Original filename
+  attachmentSize: integer("attachment_size"), // File size in bytes
+  metadata: jsonb("metadata"), // Additional data (e.g., service details, booking info)
+  isEdited: integer("is_edited").notNull().default(0),
+  editedAt: timestamp("edited_at"),
+  isDeleted: integer("is_deleted").notNull().default(0),
+  deletedAt: timestamp("deleted_at"),
+  sentAt: timestamp("sent_at").defaultNow(),
+  deliveredAt: timestamp("delivered_at"),
+}, (table) => [
+  index("chat_messages_conversation_id_idx").on(table.conversationId),
+  index("chat_messages_sender_id_idx").on(table.senderId),
+  index("chat_messages_sent_at_idx").on(table.sentAt),
+  index("chat_messages_conversation_sent_idx").on(table.conversationId, table.sentAt),
+]);
+
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatMessage = typeof chatMessages.$inferInsert;
+
+// Message Read Receipts - Track who has read each message (for per-user read tracking)
+export const chatMessageReads = pgTable("chat_message_reads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").notNull().references(() => chatMessages.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  readAt: timestamp("read_at").defaultNow(),
+}, (table) => [
+  index("chat_message_reads_message_id_idx").on(table.messageId),
+  index("chat_message_reads_user_id_idx").on(table.userId),
+  uniqueIndex("chat_message_reads_message_user_unique").on(table.messageId, table.userId),
+]);
+
+export type ChatMessageRead = typeof chatMessageReads.$inferSelect;
+export type InsertChatMessageRead = typeof chatMessageReads.$inferInsert;
+
+// Chat Relations
+export const chatConversationsRelations = relations(chatConversations, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [chatConversations.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [chatConversations.customerId],
+    references: [users.id],
+  }),
+  assignedStaff: one(staff, {
+    fields: [chatConversations.assignedStaffId],
+    references: [staff.id],
+  }),
+  participants: many(chatParticipants),
+  messages: many(chatMessages),
+}));
+
+export const chatParticipantsRelations = relations(chatParticipants, ({ one }) => ({
+  conversation: one(chatConversations, {
+    fields: [chatParticipants.conversationId],
+    references: [chatConversations.id],
+  }),
+  user: one(users, {
+    fields: [chatParticipants.userId],
+    references: [users.id],
+  }),
+  staffMember: one(staff, {
+    fields: [chatParticipants.staffId],
+    references: [staff.id],
+  }),
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one, many }) => ({
+  conversation: one(chatConversations, {
+    fields: [chatMessages.conversationId],
+    references: [chatConversations.id],
+  }),
+  sender: one(users, {
+    fields: [chatMessages.senderId],
+    references: [users.id],
+  }),
+  readReceipts: many(chatMessageReads),
+}));
+
+export const chatMessageReadsRelations = relations(chatMessageReads, ({ one }) => ({
+  message: one(chatMessages, {
+    fields: [chatMessageReads.messageId],
+    references: [chatMessages.id],
+  }),
+  user: one(users, {
+    fields: [chatMessageReads.userId],
+    references: [users.id],
+  }),
+}));
+
+// Chat Zod Schemas for validation
+export const insertChatConversationSchema = createInsertSchema(chatConversations).pick({
+  salonId: true,
+  customerId: true,
+  context: true,
+  relatedBookingId: true,
+  relatedServiceId: true,
+});
+
+export const insertChatMessageSchema = createInsertSchema(chatMessages).pick({
+  conversationId: true,
+  body: true,
+  messageType: true,
+  attachmentUrl: true,
+  attachmentType: true,
+  attachmentName: true,
+  attachmentSize: true,
+  metadata: true,
+});
+
+// =====================================================
+// CLIENT NOTES & PREFERENCES SYSTEM (Feature 1)
+// =====================================================
+
+// Client Profiles - Extended customer profiles per salon (salon-specific relationship)
+export const clientProfiles = pgTable("client_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  // Hair-specific structured fields
+  hairType: varchar("hair_type", { length: 50 }), // straight, wavy, curly, coily
+  hairCondition: varchar("hair_condition", { length: 50 }), // healthy, damaged, color-treated
+  hairLength: varchar("hair_length", { length: 50 }), // short, medium, long
+  hairDensity: varchar("hair_density", { length: 50 }), // thin, medium, thick
+  scalpCondition: varchar("scalp_condition", { length: 50 }), // normal, oily, dry, sensitive
+  
+  // Skin-specific structured fields
+  skinType: varchar("skin_type", { length: 50 }), // oily, dry, combination, sensitive, normal
+  skinConcerns: text("skin_concerns").array(), // Array of concerns: acne, aging, hyperpigmentation, etc
+  
+  // Allergy & sensitivity information (critical for safety)
+  allergies: text("allergies").array(), // Array of known allergies
+  sensitivities: text("sensitivities").array(), // Array of sensitivities
+  contraindications: text("contraindications"), // Free text for medical contraindications
+  
+  // Preference fields
+  preferredStylistId: varchar("preferred_stylist_id").references(() => staff.id, { onDelete: "set null" }),
+  communicationStyle: varchar("communication_style", { length: 50 }), // chatty, quiet, professional
+  beveragePreference: varchar("beverage_preference", { length: 100 }), // tea, coffee, water, none
+  musicPreference: varchar("music_preference", { length: 100 }), // pop, classical, ambient, none
+  specialRequirements: text("special_requirements"), // Free text for any special needs
+  
+  // Customer-provided preferences
+  preferredProducts: text("preferred_products").array(), // Products customer likes
+  dislikedProducts: text("disliked_products").array(), // Products customer dislikes
+  
+  // Tracking fields
+  lastVisitDate: timestamp("last_visit_date"),
+  totalVisits: integer("total_visits").notNull().default(0),
+  lifetimeSpendPaisa: integer("lifetime_spend_paisa").notNull().default(0),
+  
+  // VIP/loyalty status for this salon
+  isVip: integer("is_vip").notNull().default(0),
+  vipNotes: text("vip_notes"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  index("client_profiles_salon_id_idx").on(table.salonId),
+  index("client_profiles_customer_id_idx").on(table.customerId),
+  index("client_profiles_preferred_stylist_idx").on(table.preferredStylistId),
+  uniqueIndex("client_profiles_salon_customer_unique").on(table.salonId, table.customerId),
+]);
+
+export type ClientProfile = typeof clientProfiles.$inferSelect;
+export type InsertClientProfile = typeof clientProfiles.$inferInsert;
+
+// Client Notes - Free-text notes with timestamps and author
+export const clientNotes = pgTable("client_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientProfileId: varchar("client_profile_id").notNull().references(() => clientProfiles.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }), // Optional link to specific appointment
+  serviceId: varchar("service_id").references(() => services.id, { onDelete: "set null" }), // Optional link to specific service
+  
+  noteType: varchar("note_type", { length: 50 }).notNull().default('general'), // general, appointment, formula, complaint, compliment
+  title: varchar("title", { length: 200 }), // Optional title for the note
+  content: text("content").notNull(), // The actual note content
+  
+  // Priority/visibility flags
+  isPinned: integer("is_pinned").notNull().default(0), // Pinned notes show first
+  isAlertNote: integer("is_alert_note").notNull().default(0), // Alert notes show as popups
+  isVisibleToCustomer: integer("is_visible_to_customer").notNull().default(0), // Can customer see this note
+  
+  // Author tracking
+  authorId: varchar("author_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  authorStaffId: varchar("author_staff_id").references(() => staff.id, { onDelete: "set null" }),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("client_notes_client_profile_id_idx").on(table.clientProfileId),
+  index("client_notes_booking_id_idx").on(table.bookingId),
+  index("client_notes_author_id_idx").on(table.authorId),
+  index("client_notes_note_type_idx").on(table.noteType),
+  index("client_notes_is_pinned_idx").on(table.isPinned),
+]);
+
+export type ClientNote = typeof clientNotes.$inferSelect;
+export type InsertClientNote = typeof clientNotes.$inferInsert;
+
+// Client Formulas - Structured formula data for hair color, treatments, etc.
+export const clientFormulas = pgTable("client_formulas", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientProfileId: varchar("client_profile_id").notNull().references(() => clientProfiles.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }), // Link to appointment when formula was used
+  
+  formulaType: varchar("formula_type", { length: 50 }).notNull(), // hair_color, highlights, treatment, perm, relaxer
+  formulaName: varchar("formula_name", { length: 200 }).notNull(), // User-friendly name for this formula
+  
+  // Hair color specific fields
+  baseColor: varchar("base_color", { length: 100 }), // Base color used
+  targetColor: varchar("target_color", { length: 100 }), // Desired result color
+  developer: varchar("developer", { length: 50 }), // Developer volume (10, 20, 30, 40)
+  mixingRatio: varchar("mixing_ratio", { length: 50 }), // e.g., "1:1", "1:2"
+  processingTime: integer("processing_time"), // Time in minutes
+  heatUsed: integer("heat_used").notNull().default(0), // 1 if heat was used
+  
+  // Product details (flexible JSON for various products)
+  products: jsonb("products"), // Array of { brand, name, shade, amount }
+  
+  // Additional formula notes
+  applicationTechnique: text("application_technique"), // How formula was applied
+  sectioning: text("sectioning"), // How hair was sectioned
+  specialInstructions: text("special_instructions"), // Any special instructions
+  
+  // Result tracking
+  resultNotes: text("result_notes"), // How the result turned out
+  resultRating: integer("result_rating"), // 1-5 rating of the result
+  
+  // Flags
+  isActiveFormula: integer("is_active_formula").notNull().default(1), // Current formula vs historical
+  isCustomerFavorite: integer("is_customer_favorite").notNull().default(0), // Customer marked as favorite
+  
+  // Author tracking
+  createdBy: varchar("created_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("client_formulas_client_profile_id_idx").on(table.clientProfileId),
+  index("client_formulas_formula_type_idx").on(table.formulaType),
+  index("client_formulas_booking_id_idx").on(table.bookingId),
+  index("client_formulas_is_active_idx").on(table.isActiveFormula),
+]);
+
+export type ClientFormula = typeof clientFormulas.$inferSelect;
+export type InsertClientFormula = typeof clientFormulas.$inferInsert;
+
+// Client Photos - Before/after photo storage linked to appointments
+export const clientPhotos = pgTable("client_photos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientProfileId: varchar("client_profile_id").notNull().references(() => clientProfiles.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }), // Link to appointment
+  formulaId: varchar("formula_id").references(() => clientFormulas.id, { onDelete: "set null" }), // Optional link to formula used
+  
+  photoType: varchar("photo_type", { length: 20 }).notNull(), // before, after, reference, inspiration
+  photoUrl: text("photo_url").notNull(), // URL to stored photo
+  thumbnailUrl: text("thumbnail_url"), // Compressed thumbnail URL
+  
+  caption: varchar("caption", { length: 500 }), // Optional caption/description
+  serviceType: varchar("service_type", { length: 100 }), // What service this photo relates to
+  
+  // Visibility flags
+  isVisibleToCustomer: integer("is_visible_to_customer").notNull().default(1), // Customer can view
+  isPortfolioPhoto: integer("is_portfolio_photo").notNull().default(0), // Can be used in salon portfolio (with consent)
+  consentGiven: integer("consent_given").notNull().default(0), // Customer gave consent for portfolio use
+  
+  // Metadata
+  takenAt: timestamp("taken_at"), // When photo was taken (can differ from upload)
+  uploadedBy: varchar("uploaded_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("client_photos_client_profile_id_idx").on(table.clientProfileId),
+  index("client_photos_booking_id_idx").on(table.bookingId),
+  index("client_photos_formula_id_idx").on(table.formulaId),
+  index("client_photos_photo_type_idx").on(table.photoType),
+  index("client_photos_is_portfolio_idx").on(table.isPortfolioPhoto),
+]);
+
+export type ClientPhoto = typeof clientPhotos.$inferSelect;
+export type InsertClientPhoto = typeof clientPhotos.$inferInsert;
+
+// Profile Visibility Settings - Salon-level settings for what customers can see
+export const profileVisibilitySettings = pgTable("profile_visibility_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Visibility mode: 'all', 'preferences_only', 'none'
+  visibilityMode: varchar("visibility_mode", { length: 20 }).notNull().default('preferences_only'),
+  
+  // Fine-grained field visibility (when mode is 'custom')
+  showHairProfile: integer("show_hair_profile").notNull().default(1),
+  showSkinProfile: integer("show_skin_profile").notNull().default(1),
+  showAllergies: integer("show_allergies").notNull().default(1),
+  showPreferences: integer("show_preferences").notNull().default(1),
+  showPhotos: integer("show_photos").notNull().default(1),
+  showNotes: integer("show_notes").notNull().default(0), // Staff notes hidden by default
+  showFormulas: integer("show_formulas").notNull().default(0), // Formulas hidden by default
+  showVisitHistory: integer("show_visit_history").notNull().default(1),
+  
+  // Auto-popup settings
+  showProfileOnBooking: integer("show_profile_on_booking").notNull().default(1), // Auto-popup for staff
+  highlightAllergies: integer("highlight_allergies").notNull().default(1), // Red highlight for allergies
+  highlightVip: integer("highlight_vip").notNull().default(1), // VIP badge highlight
+  
+  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  uniqueIndex("profile_visibility_settings_salon_unique").on(table.salonId),
+]);
+
+export type ProfileVisibilitySettings = typeof profileVisibilitySettings.$inferSelect;
+export type InsertProfileVisibilitySettings = typeof profileVisibilitySettings.$inferInsert;
+
+// Client Profile Relations
+export const clientProfilesRelations = relations(clientProfiles, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [clientProfiles.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [clientProfiles.customerId],
+    references: [users.id],
+  }),
+  preferredStylist: one(staff, {
+    fields: [clientProfiles.preferredStylistId],
+    references: [staff.id],
+  }),
+  notes: many(clientNotes),
+  formulas: many(clientFormulas),
+  photos: many(clientPhotos),
+}));
+
+export const clientNotesRelations = relations(clientNotes, ({ one }) => ({
+  clientProfile: one(clientProfiles, {
+    fields: [clientNotes.clientProfileId],
+    references: [clientProfiles.id],
+  }),
+  booking: one(bookings, {
+    fields: [clientNotes.bookingId],
+    references: [bookings.id],
+  }),
+  service: one(services, {
+    fields: [clientNotes.serviceId],
+    references: [services.id],
+  }),
+  author: one(users, {
+    fields: [clientNotes.authorId],
+    references: [users.id],
+  }),
+  authorStaff: one(staff, {
+    fields: [clientNotes.authorStaffId],
+    references: [staff.id],
+  }),
+}));
+
+export const clientFormulasRelations = relations(clientFormulas, ({ one, many }) => ({
+  clientProfile: one(clientProfiles, {
+    fields: [clientFormulas.clientProfileId],
+    references: [clientProfiles.id],
+  }),
+  booking: one(bookings, {
+    fields: [clientFormulas.bookingId],
+    references: [bookings.id],
+  }),
+  photos: many(clientPhotos),
+}));
+
+export const clientPhotosRelations = relations(clientPhotos, ({ one }) => ({
+  clientProfile: one(clientProfiles, {
+    fields: [clientPhotos.clientProfileId],
+    references: [clientProfiles.id],
+  }),
+  booking: one(bookings, {
+    fields: [clientPhotos.bookingId],
+    references: [bookings.id],
+  }),
+  formula: one(clientFormulas, {
+    fields: [clientPhotos.formulaId],
+    references: [clientFormulas.id],
+  }),
+  uploader: one(users, {
+    fields: [clientPhotos.uploadedBy],
+    references: [users.id],
+  }),
+}));
+
+export const profileVisibilitySettingsRelations = relations(profileVisibilitySettings, ({ one }) => ({
+  salon: one(salons, {
+    fields: [profileVisibilitySettings.salonId],
+    references: [salons.id],
+  }),
+}));
+
+// Client Notes & Preferences Zod Schemas
+export const insertClientProfileSchema = createInsertSchema(clientProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateClientProfileSchema = createInsertSchema(clientProfiles).omit({
+  id: true,
+  salonId: true,
+  customerId: true,
+  createdAt: true,
+  createdBy: true,
+}).partial();
+
+export const insertClientNoteSchema = createInsertSchema(clientNotes).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientFormulaSchema = createInsertSchema(clientFormulas).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientPhotoSchema = createInsertSchema(clientPhotos).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertProfileVisibilitySettingsSchema = createInsertSchema(profileVisibilitySettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+// =============================================================================
+// FEATURE 2: NO-SHOW PROTECTION (Deposits & Card-on-File)
+// =============================================================================
+
+// Deposit Settings - Salon-level deposit configuration
+export const depositSettings = pgTable("deposit_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Master toggle
+  isEnabled: integer("is_enabled").notNull().default(0), // 1 = deposits enabled
+  
+  // Deposit amount configuration
+  depositPercentage: integer("deposit_percentage").notNull().default(25), // 20, 25, 50, etc.
+  
+  // Trigger methods (salon owner chooses which to use)
+  usePriceThreshold: integer("use_price_threshold").notNull().default(0), // 1 = enabled
+  priceThresholdPaisa: integer("price_threshold_paisa"), // e.g., 100000 = ₹1000
+  
+  useCategoryBased: integer("use_category_based").notNull().default(0), // 1 = enabled
+  protectedCategories: text("protected_categories").array(), // e.g., ['Bridal', 'Premium']
+  
+  useManualToggle: integer("use_manual_toggle").notNull().default(1), // 1 = enabled (default)
+  
+  // Trusted customer settings
+  allowTrustedCustomerBypass: integer("allow_trusted_customer_bypass").notNull().default(1), // 1 = trusted can skip deposit
+  requireCardOnFile: integer("require_card_on_file").notNull().default(1), // 1 = card required for bypass
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  uniqueIndex("deposit_settings_salon_unique").on(table.salonId),
+]);
+
+export type DepositSettings = typeof depositSettings.$inferSelect;
+export type InsertDepositSettings = typeof depositSettings.$inferInsert;
+
+// Service Deposit Rules - Per-service deposit requirements
+export const serviceDepositRules = pgTable("service_deposit_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  
+  // Manual override for this specific service
+  requiresDeposit: integer("requires_deposit").notNull().default(0), // 1 = deposit required
+  
+  // Optional custom percentage (overrides salon default)
+  customPercentage: integer("custom_percentage"), // null = use salon default
+  
+  // Optional custom minimum deposit amount
+  minimumDepositPaisa: integer("minimum_deposit_paisa"), // e.g., 50000 = ₹500 minimum
+  
+  // Optional maximum deposit cap
+  maximumDepositPaisa: integer("maximum_deposit_paisa"), // Cap the deposit amount
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  uniqueIndex("service_deposit_rules_unique").on(table.salonId, table.serviceId),
+  index("service_deposit_rules_salon_idx").on(table.salonId),
+  index("service_deposit_rules_service_idx").on(table.serviceId),
+]);
+
+export type ServiceDepositRule = typeof serviceDepositRules.$inferSelect;
+export type InsertServiceDepositRule = typeof serviceDepositRules.$inferInsert;
+
+// Cancellation Policies - Salon-specific cancellation windows and fees
+export const cancellationPolicies = pgTable("cancellation_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Cancellation window in hours (12, 24, 48, 72)
+  cancellationWindowHours: integer("cancellation_window_hours").notNull().default(24),
+  
+  // What happens if cancelled within window
+  withinWindowAction: varchar("within_window_action", { length: 30 }).notNull().default('forfeit_full'), 
+  // Options: 'forfeit_full', 'forfeit_partial', 'no_penalty'
+  
+  partialForfeitPercentage: integer("partial_forfeit_percentage").default(50), // % of deposit to forfeit if partial
+  
+  // No-show handling
+  noShowAction: varchar("no_show_action", { length: 30 }).notNull().default('forfeit_full'),
+  // Options: 'forfeit_full', 'forfeit_partial', 'charge_full_service'
+  
+  noShowChargeFull: integer("no_show_charge_full").notNull().default(0), // 1 = charge full service price on no-show
+  
+  // Grace period (extra minutes before marking as no-show)
+  noShowGraceMinutes: integer("no_show_grace_minutes").notNull().default(15),
+  
+  // Policy text (shown to customers)
+  policyText: text("policy_text"), // Custom policy description
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  uniqueIndex("cancellation_policies_salon_unique").on(table.salonId),
+]);
+
+export type CancellationPolicy = typeof cancellationPolicies.$inferSelect;
+export type InsertCancellationPolicy = typeof cancellationPolicies.$inferInsert;
+
+// Trusted Customers - Salon-specific trusted customer list (can skip deposit)
+export const trustedCustomers = pgTable("trusted_customers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  // Trust status
+  trustLevel: varchar("trust_level", { length: 20 }).notNull().default('trusted'), 
+  // Options: 'trusted', 'vip', 'blacklisted'
+  
+  // Reason for trust status
+  reason: text("reason"), // Why customer was marked as trusted/blacklisted
+  
+  // Bypass settings
+  canBypassDeposit: integer("can_bypass_deposit").notNull().default(1), // 1 = can skip deposit
+  hasCardOnFile: integer("has_card_on_file").notNull().default(0), // 1 = card saved
+  cardTokenId: varchar("card_token_id", { length: 100 }), // Razorpay token reference
+  cardLast4: varchar("card_last_4", { length: 4 }), // Last 4 digits for display
+  cardBrand: varchar("card_brand", { length: 20 }), // visa, mastercard, etc.
+  cardExpiryMonth: integer("card_expiry_month"),
+  cardExpiryYear: integer("card_expiry_year"),
+  
+  // Stats for trust calculation
+  totalBookings: integer("total_bookings").notNull().default(0),
+  completedBookings: integer("completed_bookings").notNull().default(0),
+  noShowCount: integer("no_show_count").notNull().default(0),
+  lateCancellationCount: integer("late_cancellation_count").notNull().default(0),
+  
+  // Tracking
+  addedBy: varchar("added_by").references(() => users.id, { onDelete: "set null" }),
+  addedAt: timestamp("added_at").defaultNow(),
+  lastUpdatedAt: timestamp("last_updated_at").defaultNow(),
+  lastUpdatedBy: varchar("last_updated_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  uniqueIndex("trusted_customers_unique").on(table.salonId, table.customerId),
+  index("trusted_customers_salon_idx").on(table.salonId),
+  index("trusted_customers_customer_idx").on(table.customerId),
+  index("trusted_customers_trust_level_idx").on(table.trustLevel),
+]);
+
+export type TrustedCustomer = typeof trustedCustomers.$inferSelect;
+export type InsertTrustedCustomer = typeof trustedCustomers.$inferInsert;
+
+// Deposit Transactions - Track deposits, refunds, forfeitures
+export const depositTransactions = pgTable("deposit_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  
+  // Transaction details
+  transactionType: varchar("transaction_type", { length: 30 }).notNull(), 
+  // Options: 'deposit_collected', 'deposit_refunded', 'deposit_forfeited', 'no_show_charged', 'deposit_applied'
+  
+  amountPaisa: integer("amount_paisa").notNull(), // Transaction amount
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Service details snapshot
+  serviceAmountPaisa: integer("service_amount_paisa").notNull(), // Original service price
+  depositPercentage: integer("deposit_percentage").notNull(), // % used to calculate
+  
+  // Payment gateway details
+  razorpayPaymentId: varchar("razorpay_payment_id", { length: 100 }), // For deposits/charges
+  razorpayRefundId: varchar("razorpay_refund_id", { length: 100 }), // For refunds
+  razorpayOrderId: varchar("razorpay_order_id", { length: 100 }),
+  
+  // Status tracking
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  // Options: 'pending', 'completed', 'failed', 'refund_pending', 'refunded'
+  
+  // Reason/notes
+  reason: text("reason"), // Why refund/forfeit happened
+  notes: text("notes"), // Staff notes
+  
+  // Related to cancellation/no-show
+  cancellationWindowHours: integer("cancellation_window_hours"), // Policy at time of booking
+  cancelledWithinWindow: integer("cancelled_within_window"), // 1 = within penalty window
+  wasNoShow: integer("was_no_show").notNull().default(0), // 1 = no-show
+  
+  // Processing timestamps
+  collectedAt: timestamp("collected_at"), // When deposit was collected
+  processedAt: timestamp("processed_at"), // When transaction completed
+  refundedAt: timestamp("refunded_at"), // When refund was processed
+  forfeitedAt: timestamp("forfeited_at"), // When deposit was forfeited
+  
+  // Tracking
+  processedBy: varchar("processed_by").references(() => users.id, { onDelete: "set null" }), // Staff who processed
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("deposit_transactions_salon_idx").on(table.salonId),
+  index("deposit_transactions_customer_idx").on(table.customerId),
+  index("deposit_transactions_booking_idx").on(table.bookingId),
+  index("deposit_transactions_type_idx").on(table.transactionType),
+  index("deposit_transactions_status_idx").on(table.status),
+  index("deposit_transactions_created_at_idx").on(table.createdAt),
+]);
+
+export type DepositTransaction = typeof depositTransactions.$inferSelect;
+export type InsertDepositTransaction = typeof depositTransactions.$inferInsert;
+
+// Relations for No-Show Protection tables
+export const depositSettingsRelations = relations(depositSettings, ({ one }) => ({
+  salon: one(salons, {
+    fields: [depositSettings.salonId],
+    references: [salons.id],
+  }),
+}));
+
+export const serviceDepositRulesRelations = relations(serviceDepositRules, ({ one }) => ({
+  salon: one(salons, {
+    fields: [serviceDepositRules.salonId],
+    references: [salons.id],
+  }),
+  service: one(services, {
+    fields: [serviceDepositRules.serviceId],
+    references: [services.id],
+  }),
+}));
+
+export const cancellationPoliciesRelations = relations(cancellationPolicies, ({ one }) => ({
+  salon: one(salons, {
+    fields: [cancellationPolicies.salonId],
+    references: [salons.id],
+  }),
+}));
+
+export const trustedCustomersRelations = relations(trustedCustomers, ({ one }) => ({
+  salon: one(salons, {
+    fields: [trustedCustomers.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [trustedCustomers.customerId],
+    references: [users.id],
+  }),
+}));
+
+export const depositTransactionsRelations = relations(depositTransactions, ({ one }) => ({
+  salon: one(salons, {
+    fields: [depositTransactions.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [depositTransactions.customerId],
+    references: [users.id],
+  }),
+  booking: one(bookings, {
+    fields: [depositTransactions.bookingId],
+    references: [bookings.id],
+  }),
+}));
+
+// No-Show Protection Zod Schemas
+export const insertDepositSettingsSchema = createInsertSchema(depositSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateDepositSettingsSchema = createInsertSchema(depositSettings).omit({
+  id: true,
+  salonId: true,
+  createdAt: true,
+}).partial();
+
+export const insertServiceDepositRuleSchema = createInsertSchema(serviceDepositRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCancellationPolicySchema = createInsertSchema(cancellationPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateCancellationPolicySchema = createInsertSchema(cancellationPolicies).omit({
+  id: true,
+  salonId: true,
+  createdAt: true,
+}).partial();
+
+export const insertTrustedCustomerSchema = createInsertSchema(trustedCustomers).omit({
+  id: true,
+  addedAt: true,
+  lastUpdatedAt: true,
+});
+
+export const insertDepositTransactionSchema = createInsertSchema(depositTransactions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// =============================================================================
+// FEATURE 3: GIFT CARDS
+// =============================================================================
+
+// Gift Card Templates - Salon-specific gift card designs
+export const giftCardTemplates = pgTable("gift_card_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Template details
+  name: varchar("name", { length: 100 }).notNull(), // e.g., "Birthday Special", "Holiday Gift"
+  description: text("description"),
+  designUrl: text("design_url"), // URL to the design image
+  designData: jsonb("design_data"), // Custom design configuration (colors, fonts, etc.)
+  
+  // Preset values (optional)
+  presetValuesPaisa: text("preset_values_paisa").array(), // e.g., ['100000', '200000', '500000'] for ₹1000, ₹2000, ₹5000
+  allowCustomValue: integer("allow_custom_value").notNull().default(1), // 1 = allow custom amounts
+  minValuePaisa: integer("min_value_paisa").notNull().default(50000), // Minimum gift card value (₹500)
+  maxValuePaisa: integer("max_value_paisa").notNull().default(2500000), // Maximum gift card value (₹25000)
+  
+  // Display settings
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: integer("is_active").notNull().default(1),
+  isDefault: integer("is_default").notNull().default(0), // 1 = default template
+  
+  // Category for organization
+  category: varchar("category", { length: 50 }), // 'birthday', 'holiday', 'occasion', 'general'
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  index("gift_card_templates_salon_idx").on(table.salonId),
+  index("gift_card_templates_active_idx").on(table.isActive),
+  index("gift_card_templates_category_idx").on(table.category),
+]);
+
+export type GiftCardTemplate = typeof giftCardTemplates.$inferSelect;
+export type InsertGiftCardTemplate = typeof giftCardTemplates.$inferInsert;
+
+// Gift Cards - Main gift card table
+export const giftCards = pgTable("gift_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Gift card code - unique identifier for redemption
+  code: varchar("code", { length: 20 }).notNull().unique(), // e.g., "GIFT-ABCD-1234"
+  
+  // Value tracking
+  originalValuePaisa: integer("original_value_paisa").notNull(), // Original purchased amount
+  balancePaisa: integer("balance_paisa").notNull(), // Current remaining balance
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default('active'),
+  // Options: 'pending_payment', 'active', 'partially_used', 'fully_redeemed', 'expired', 'cancelled', 'refunded'
+  
+  // Purchase details
+  purchasedBy: varchar("purchased_by").references(() => users.id, { onDelete: "set null" }), // Customer who bought
+  purchasedAt: timestamp("purchased_at"),
+  
+  // Recipient details
+  recipientName: varchar("recipient_name", { length: 100 }),
+  recipientEmail: varchar("recipient_email", { length: 255 }),
+  recipientPhone: varchar("recipient_phone", { length: 20 }),
+  personalMessage: text("personal_message"), // Gift message from purchaser
+  
+  // Template used
+  templateId: varchar("template_id").references(() => giftCardTemplates.id, { onDelete: "set null" }),
+  
+  // Scheduling for future delivery
+  scheduledDeliveryAt: timestamp("scheduled_delivery_at"), // When to send the gift card
+  deliveredAt: timestamp("delivered_at"), // When actually delivered
+  
+  // Expiry
+  expiresAt: timestamp("expires_at"), // Null = never expires
+  
+  // Payment details
+  razorpayOrderId: varchar("razorpay_order_id", { length: 100 }),
+  razorpayPaymentId: varchar("razorpay_payment_id", { length: 100 }),
+  
+  // For tracking last usage
+  lastUsedAt: timestamp("last_used_at"),
+  lastUsedBookingId: varchar("last_used_booking_id"),
+  
+  // Redemption tracking
+  totalRedemptionsPaisa: integer("total_redemptions_paisa").notNull().default(0),
+  redemptionCount: integer("redemption_count").notNull().default(0),
+  
+  // QR Code for easy scanning
+  qrCodeUrl: text("qr_code_url"),
+  
+  // Internal notes
+  internalNotes: text("internal_notes"),
+  
+  // Audit trail
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledBy: varchar("cancelled_by").references(() => users.id, { onDelete: "set null" }),
+  cancellationReason: text("cancellation_reason"),
+}, (table) => [
+  index("gift_cards_salon_idx").on(table.salonId),
+  index("gift_cards_code_idx").on(table.code),
+  index("gift_cards_status_idx").on(table.status),
+  index("gift_cards_purchased_by_idx").on(table.purchasedBy),
+  index("gift_cards_recipient_email_idx").on(table.recipientEmail),
+  index("gift_cards_expires_at_idx").on(table.expiresAt),
+  index("gift_cards_created_at_idx").on(table.createdAt),
+]);
+
+export type GiftCard = typeof giftCards.$inferSelect;
+export type InsertGiftCard = typeof giftCards.$inferInsert;
+
+// Gift Card Transactions - Track all gift card activities
+export const giftCardTransactions = pgTable("gift_card_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  giftCardId: varchar("gift_card_id").notNull().references(() => giftCards.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Transaction type
+  transactionType: varchar("transaction_type", { length: 30 }).notNull(),
+  // Options: 'purchase', 'redemption', 'partial_redemption', 'refund', 'adjustment', 'expiry', 'cancellation'
+  
+  // Amount details
+  amountPaisa: integer("amount_paisa").notNull(), // Transaction amount (positive for purchase/refund, negative for redemption)
+  balanceBeforePaisa: integer("balance_before_paisa").notNull(), // Balance before this transaction
+  balanceAfterPaisa: integer("balance_after_paisa").notNull(), // Balance after this transaction
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Reference to booking (for redemptions)
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  
+  // Payment details (for purchases/refunds)
+  razorpayPaymentId: varchar("razorpay_payment_id", { length: 100 }),
+  razorpayRefundId: varchar("razorpay_refund_id", { length: 100 }),
+  
+  // User who performed the transaction
+  performedBy: varchar("performed_by").references(() => users.id, { onDelete: "set null" }), // Staff or customer
+  performedByType: varchar("performed_by_type", { length: 20 }), // 'customer', 'staff', 'system'
+  
+  // Notes
+  notes: text("notes"),
+  
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default('completed'),
+  // Options: 'pending', 'completed', 'failed', 'reversed'
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("gift_card_transactions_gift_card_idx").on(table.giftCardId),
+  index("gift_card_transactions_salon_idx").on(table.salonId),
+  index("gift_card_transactions_booking_idx").on(table.bookingId),
+  index("gift_card_transactions_type_idx").on(table.transactionType),
+  index("gift_card_transactions_created_at_idx").on(table.createdAt),
+]);
+
+export type GiftCardTransaction = typeof giftCardTransactions.$inferSelect;
+export type InsertGiftCardTransaction = typeof giftCardTransactions.$inferInsert;
+
+// Gift Card Deliveries - Track delivery of gift cards
+export const giftCardDeliveries = pgTable("gift_card_deliveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  giftCardId: varchar("gift_card_id").notNull().references(() => giftCards.id, { onDelete: "cascade" }),
+  
+  // Delivery method
+  deliveryMethod: varchar("delivery_method", { length: 20 }).notNull(),
+  // Options: 'email', 'sms', 'whatsapp', 'print', 'in_app'
+  
+  // Recipient details
+  recipientEmail: varchar("recipient_email", { length: 255 }),
+  recipientPhone: varchar("recipient_phone", { length: 20 }),
+  
+  // Delivery status
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  // Options: 'pending', 'scheduled', 'sent', 'delivered', 'failed', 'bounced'
+  
+  // Scheduling
+  scheduledAt: timestamp("scheduled_at"), // When to send
+  sentAt: timestamp("sent_at"), // When actually sent
+  deliveredAt: timestamp("delivered_at"), // When confirmed delivered (email open, etc.)
+  
+  // Error tracking
+  failedAt: timestamp("failed_at"),
+  failureReason: text("failure_reason"),
+  retryCount: integer("retry_count").notNull().default(0),
+  maxRetries: integer("max_retries").notNull().default(3),
+  
+  // External service references
+  externalMessageId: varchar("external_message_id", { length: 100 }), // SendGrid message ID, Twilio SID, etc.
+  
+  // Content tracking
+  emailSubject: varchar("email_subject", { length: 255 }),
+  emailTemplateId: varchar("email_template_id", { length: 100 }),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("gift_card_deliveries_gift_card_idx").on(table.giftCardId),
+  index("gift_card_deliveries_status_idx").on(table.status),
+  index("gift_card_deliveries_method_idx").on(table.deliveryMethod),
+  index("gift_card_deliveries_scheduled_idx").on(table.scheduledAt),
+]);
+
+export type GiftCardDelivery = typeof giftCardDeliveries.$inferSelect;
+export type InsertGiftCardDelivery = typeof giftCardDeliveries.$inferInsert;
+
+// Gift Cards Relations
+export const giftCardTemplatesRelations = relations(giftCardTemplates, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [giftCardTemplates.salonId],
+    references: [salons.id],
+  }),
+  giftCards: many(giftCards),
+}));
+
+export const giftCardsRelations = relations(giftCards, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [giftCards.salonId],
+    references: [salons.id],
+  }),
+  purchaser: one(users, {
+    fields: [giftCards.purchasedBy],
+    references: [users.id],
+  }),
+  template: one(giftCardTemplates, {
+    fields: [giftCards.templateId],
+    references: [giftCardTemplates.id],
+  }),
+  transactions: many(giftCardTransactions),
+  deliveries: many(giftCardDeliveries),
+}));
+
+export const giftCardTransactionsRelations = relations(giftCardTransactions, ({ one }) => ({
+  giftCard: one(giftCards, {
+    fields: [giftCardTransactions.giftCardId],
+    references: [giftCards.id],
+  }),
+  salon: one(salons, {
+    fields: [giftCardTransactions.salonId],
+    references: [salons.id],
+  }),
+  booking: one(bookings, {
+    fields: [giftCardTransactions.bookingId],
+    references: [bookings.id],
+  }),
+  performer: one(users, {
+    fields: [giftCardTransactions.performedBy],
+    references: [users.id],
+  }),
+}));
+
+export const giftCardDeliveriesRelations = relations(giftCardDeliveries, ({ one }) => ({
+  giftCard: one(giftCards, {
+    fields: [giftCardDeliveries.giftCardId],
+    references: [giftCards.id],
+  }),
+}));
+
+// Gift Cards Zod Schemas
+export const insertGiftCardTemplateSchema = createInsertSchema(giftCardTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateGiftCardTemplateSchema = createInsertSchema(giftCardTemplates).omit({
+  id: true,
+  salonId: true,
+  createdAt: true,
+  createdBy: true,
+}).partial();
+
+export const insertGiftCardSchema = createInsertSchema(giftCards).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateGiftCardSchema = createInsertSchema(giftCards).omit({
+  id: true,
+  salonId: true,
+  code: true,
+  originalValuePaisa: true,
+  createdAt: true,
+}).partial();
+
+export const insertGiftCardTransactionSchema = createInsertSchema(giftCardTransactions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertGiftCardDeliverySchema = createInsertSchema(giftCardDeliveries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Gift Card purchase request schema (for API validation)
+export const purchaseGiftCardSchema = z.object({
+  salonId: z.string(),
+  templateId: z.string().optional(),
+  valuePaisa: z.number().int().positive(),
+  recipientName: z.string().max(100).optional(),
+  recipientEmail: z.string().email().optional(),
+  recipientPhone: z.string().max(20).optional(),
+  personalMessage: z.string().max(500).optional(),
+  deliveryMethod: z.enum(['email', 'sms', 'whatsapp', 'print', 'in_app']).default('email'),
+  scheduledDeliveryAt: z.string().datetime().optional(), // ISO date string for scheduling
+});
+
+export type PurchaseGiftCardRequest = z.infer<typeof purchaseGiftCardSchema>;
+
+// Gift Card redemption request schema (for API validation)
+export const redeemGiftCardSchema = z.object({
+  code: z.string().max(20),
+  bookingId: z.string(),
+  amountPaisa: z.number().int().positive().optional(), // Optional for partial redemption
+});
+
+export type RedeemGiftCardRequest = z.infer<typeof redeemGiftCardSchema>;
+
+// Gift Card validation request schema
+export const validateGiftCardSchema = z.object({
+  code: z.string().max(20),
+  salonId: z.string().optional(), // Optional - to check if card is valid for specific salon
+});
+
+export type ValidateGiftCardRequest = z.infer<typeof validateGiftCardSchema>;
+
+// =============================================================================
+// FEATURE 4: SMART REBOOKING
+// =============================================================================
+
+// Service Rebooking Cycles - Define ideal rebooking intervals for each service
+export const serviceRebookingCycles = pgTable("service_rebooking_cycles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  
+  // Rebooking cycle configuration
+  recommendedDays: integer("recommended_days").notNull().default(30), // Days until next rebooking recommended
+  minDays: integer("min_days").notNull().default(14), // Minimum days before suggesting rebooking
+  maxDays: integer("max_days").notNull().default(60), // Maximum days before urgent rebooking needed
+  
+  // Reminder settings
+  reminderEnabled: integer("reminder_enabled").notNull().default(1), // 1 = send reminders
+  firstReminderDays: integer("first_reminder_days").notNull().default(3), // Days before due date to send first reminder
+  secondReminderDays: integer("second_reminder_days"), // Days after due date to send second reminder (optional)
+  
+  // Reminder channels
+  reminderChannels: text("reminder_channels").array().default(sql`ARRAY['email']::text[]`), // 'email', 'sms', 'push', 'whatsapp'
+  
+  // Customization
+  customMessage: text("custom_message"), // Custom reminder message template
+  
+  // Analytics
+  avgCompletionRate: decimal("avg_completion_rate", { precision: 5, scale: 2 }).default('0.00'), // Percentage of customers who rebook
+  avgDaysBetweenBookings: decimal("avg_days_between_bookings", { precision: 6, scale: 2 }), // Actual average days between bookings
+  
+  // Status
+  isActive: integer("is_active").notNull().default(1),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  index("service_rebooking_cycles_salon_idx").on(table.salonId),
+  index("service_rebooking_cycles_service_idx").on(table.serviceId),
+  index("service_rebooking_cycles_active_idx").on(table.isActive),
+  unique("service_rebooking_cycles_salon_service_unique").on(table.salonId, table.serviceId),
+]);
+
+export type ServiceRebookingCycle = typeof serviceRebookingCycles.$inferSelect;
+export type InsertServiceRebookingCycle = typeof serviceRebookingCycles.$inferInsert;
+
+// Customer Rebooking Stats - Track individual customer rebooking patterns
+export const customerRebookingStats = pgTable("customer_rebooking_stats", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  
+  // Booking history
+  totalBookings: integer("total_bookings").notNull().default(0), // Total times booked this service
+  lastBookingId: varchar("last_booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  lastBookingDate: timestamp("last_booking_date"),
+  
+  // Next rebooking
+  nextRebookingDue: timestamp("next_rebooking_due"), // Calculated date when rebooking is recommended
+  rebookingStatus: varchar("rebooking_status", { length: 20 }).notNull().default('not_due'),
+  // Options: 'not_due', 'approaching', 'due', 'overdue', 'booked', 'dismissed'
+  
+  // Customer behavior tracking
+  avgDaysBetweenBookings: decimal("avg_days_between_bookings", { precision: 6, scale: 2 }), // Customer's actual average
+  preferredDayOfWeek: integer("preferred_day_of_week"), // 0-6 (Sunday-Saturday)
+  preferredTimeSlot: varchar("preferred_time_slot", { length: 20 }), // 'morning', 'afternoon', 'evening'
+  preferredStaffId: varchar("preferred_staff_id").references(() => staff.id, { onDelete: "set null" }),
+  
+  // Engagement
+  remindersReceived: integer("reminders_received").notNull().default(0),
+  remindersDismissed: integer("reminders_dismissed").notNull().default(0),
+  rebookingsFromReminders: integer("rebookings_from_reminders").notNull().default(0), // Conversions
+  
+  // Last interaction
+  lastReminderSentAt: timestamp("last_reminder_sent_at"),
+  lastDismissedAt: timestamp("last_dismissed_at"),
+  dismissUntil: timestamp("dismiss_until"), // Customer can snooze reminders
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("customer_rebooking_stats_salon_idx").on(table.salonId),
+  index("customer_rebooking_stats_customer_idx").on(table.customerId),
+  index("customer_rebooking_stats_service_idx").on(table.serviceId),
+  index("customer_rebooking_stats_next_due_idx").on(table.nextRebookingDue),
+  index("customer_rebooking_stats_status_idx").on(table.rebookingStatus),
+  unique("customer_rebooking_stats_unique").on(table.salonId, table.customerId, table.serviceId),
+]);
+
+export type CustomerRebookingStat = typeof customerRebookingStats.$inferSelect;
+export type InsertCustomerRebookingStat = typeof customerRebookingStats.$inferInsert;
+
+// Rebooking Reminders - Track individual reminder deliveries
+export const rebookingReminders = pgTable("rebooking_reminders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  customerStatId: varchar("customer_stat_id").references(() => customerRebookingStats.id, { onDelete: "cascade" }),
+  
+  // Reminder details
+  reminderType: varchar("reminder_type", { length: 20 }).notNull().default('first'),
+  // Options: 'first', 'second', 'final', 'custom'
+  
+  channel: varchar("channel", { length: 20 }).notNull(), // 'email', 'sms', 'push', 'whatsapp'
+  
+  // Message content
+  subject: varchar("subject", { length: 255 }),
+  messageBody: text("message_body"),
+  
+  // Scheduling
+  scheduledAt: timestamp("scheduled_at"),
+  sentAt: timestamp("sent_at"),
+  
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  // Options: 'pending', 'scheduled', 'sent', 'delivered', 'failed', 'opened', 'clicked', 'dismissed', 'converted'
+  
+  // Delivery tracking
+  externalMessageId: varchar("external_message_id", { length: 100 }), // SendGrid/Twilio ID
+  deliveredAt: timestamp("delivered_at"),
+  openedAt: timestamp("opened_at"),
+  clickedAt: timestamp("clicked_at"),
+  
+  // Conversion tracking
+  convertedBookingId: varchar("converted_booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  convertedAt: timestamp("converted_at"),
+  
+  // Error handling
+  failedAt: timestamp("failed_at"),
+  failureReason: text("failure_reason"),
+  retryCount: integer("retry_count").notNull().default(0),
+  maxRetries: integer("max_retries").notNull().default(3),
+  
+  // Customer action
+  dismissedAt: timestamp("dismissed_at"),
+  dismissReason: varchar("dismiss_reason", { length: 50 }), // 'not_interested', 'already_booked', 'snooze', 'unsubscribe'
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("rebooking_reminders_salon_idx").on(table.salonId),
+  index("rebooking_reminders_customer_idx").on(table.customerId),
+  index("rebooking_reminders_service_idx").on(table.serviceId),
+  index("rebooking_reminders_scheduled_idx").on(table.scheduledAt),
+  index("rebooking_reminders_status_idx").on(table.status),
+  index("rebooking_reminders_sent_at_idx").on(table.sentAt),
+]);
+
+export type RebookingReminder = typeof rebookingReminders.$inferSelect;
+export type InsertRebookingReminder = typeof rebookingReminders.$inferInsert;
+
+// Rebooking Settings - Salon-level configuration
+export const rebookingSettings = pgTable("rebooking_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }).unique(),
+  
+  // Global enable/disable
+  isEnabled: integer("is_enabled").notNull().default(1),
+  
+  // Default cycle settings (used when service doesn't have specific settings)
+  defaultRecommendedDays: integer("default_recommended_days").notNull().default(30),
+  defaultMinDays: integer("default_min_days").notNull().default(14),
+  defaultMaxDays: integer("default_max_days").notNull().default(60),
+  
+  // Default reminder settings
+  defaultReminderEnabled: integer("default_reminder_enabled").notNull().default(1),
+  defaultFirstReminderDays: integer("default_first_reminder_days").notNull().default(3),
+  defaultSecondReminderDays: integer("default_second_reminder_days"),
+  defaultReminderChannels: text("default_reminder_channels").array().default(sql`ARRAY['email']::text[]`),
+  
+  // Incentive settings
+  enableRebookingDiscount: integer("enable_rebooking_discount").notNull().default(0),
+  rebookingDiscountPercent: decimal("rebooking_discount_percent", { precision: 5, scale: 2 }).default('0.00'),
+  discountValidDays: integer("discount_valid_days").notNull().default(7), // Days after due date discount is valid
+  
+  // Communication preferences
+  maxRemindersPerService: integer("max_reminders_per_service").notNull().default(2),
+  quietHoursStart: varchar("quiet_hours_start", { length: 5 }), // e.g., "21:00"
+  quietHoursEnd: varchar("quiet_hours_end", { length: 5 }), // e.g., "09:00"
+  
+  // Opt-out management
+  respectCustomerOptOut: integer("respect_customer_opt_out").notNull().default(1),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("rebooking_settings_salon_idx").on(table.salonId),
+]);
+
+export type RebookingSettings = typeof rebookingSettings.$inferSelect;
+export type InsertRebookingSettings = typeof rebookingSettings.$inferInsert;
+
+// Smart Rebooking Relations
+export const serviceRebookingCyclesRelations = relations(serviceRebookingCycles, ({ one }) => ({
+  salon: one(salons, {
+    fields: [serviceRebookingCycles.salonId],
+    references: [salons.id],
+  }),
+  service: one(services, {
+    fields: [serviceRebookingCycles.serviceId],
+    references: [services.id],
+  }),
+}));
+
+export const customerRebookingStatsRelations = relations(customerRebookingStats, ({ one }) => ({
+  salon: one(salons, {
+    fields: [customerRebookingStats.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [customerRebookingStats.customerId],
+    references: [users.id],
+  }),
+  service: one(services, {
+    fields: [customerRebookingStats.serviceId],
+    references: [services.id],
+  }),
+  lastBooking: one(bookings, {
+    fields: [customerRebookingStats.lastBookingId],
+    references: [bookings.id],
+  }),
+  preferredStaff: one(staff, {
+    fields: [customerRebookingStats.preferredStaffId],
+    references: [staff.id],
+  }),
+}));
+
+export const rebookingRemindersRelations = relations(rebookingReminders, ({ one }) => ({
+  salon: one(salons, {
+    fields: [rebookingReminders.salonId],
+    references: [salons.id],
+  }),
+  customer: one(users, {
+    fields: [rebookingReminders.customerId],
+    references: [users.id],
+  }),
+  service: one(services, {
+    fields: [rebookingReminders.serviceId],
+    references: [services.id],
+  }),
+  customerStat: one(customerRebookingStats, {
+    fields: [rebookingReminders.customerStatId],
+    references: [customerRebookingStats.id],
+  }),
+  convertedBooking: one(bookings, {
+    fields: [rebookingReminders.convertedBookingId],
+    references: [bookings.id],
+  }),
+}));
+
+export const rebookingSettingsRelations = relations(rebookingSettings, ({ one }) => ({
+  salon: one(salons, {
+    fields: [rebookingSettings.salonId],
+    references: [salons.id],
+  }),
+}));
+
+// Smart Rebooking Zod Schemas
+export const insertServiceRebookingCycleSchema = createInsertSchema(serviceRebookingCycles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  avgCompletionRate: true,
+  avgDaysBetweenBookings: true,
+});
+
+export const updateServiceRebookingCycleSchema = createInsertSchema(serviceRebookingCycles).omit({
+  id: true,
+  salonId: true,
+  serviceId: true,
+  createdAt: true,
+  createdBy: true,
+}).partial();
+
+export const insertCustomerRebookingStatSchema = createInsertSchema(customerRebookingStats).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateCustomerRebookingStatSchema = createInsertSchema(customerRebookingStats).omit({
+  id: true,
+  salonId: true,
+  customerId: true,
+  serviceId: true,
+  createdAt: true,
+}).partial();
+
+export const insertRebookingReminderSchema = createInsertSchema(rebookingReminders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertRebookingSettingsSchema = createInsertSchema(rebookingSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updateRebookingSettingsSchema = createInsertSchema(rebookingSettings).omit({
+  id: true,
+  salonId: true,
+  createdAt: true,
+}).partial();
+
+// API request schemas for Smart Rebooking
+export const createRebookingCycleSchema = z.object({
+  serviceId: z.string(),
+  recommendedDays: z.number().int().positive().default(30),
+  minDays: z.number().int().positive().default(14),
+  maxDays: z.number().int().positive().default(60),
+  reminderEnabled: z.boolean().default(true),
+  firstReminderDays: z.number().int().positive().default(3),
+  secondReminderDays: z.number().int().positive().optional(),
+  reminderChannels: z.array(z.enum(['email', 'sms', 'push', 'whatsapp'])).default(['email']),
+  customMessage: z.string().max(500).optional(),
+});
+
+export type CreateRebookingCycleRequest = z.infer<typeof createRebookingCycleSchema>;
+
+export const updateRebookingCycleSchema = createRebookingCycleSchema.partial();
+
+export type UpdateRebookingCycleRequest = z.infer<typeof updateRebookingCycleSchema>;
+
+export const updateRebookingSettingsRequestSchema = z.object({
+  isEnabled: z.boolean().optional(),
+  defaultRecommendedDays: z.number().int().positive().optional(),
+  defaultMinDays: z.number().int().positive().optional(),
+  defaultMaxDays: z.number().int().positive().optional(),
+  defaultReminderEnabled: z.boolean().optional(),
+  defaultFirstReminderDays: z.number().int().positive().optional(),
+  defaultSecondReminderDays: z.number().int().positive().optional(),
+  defaultReminderChannels: z.array(z.enum(['email', 'sms', 'push', 'whatsapp'])).optional(),
+  enableRebookingDiscount: z.boolean().optional(),
+  rebookingDiscountPercent: z.number().min(0).max(100).optional(),
+  discountValidDays: z.number().int().positive().optional(),
+  maxRemindersPerService: z.number().int().positive().max(5).optional(),
+  quietHoursStart: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  quietHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  respectCustomerOptOut: z.boolean().optional(),
+});
+
+export type UpdateRebookingSettingsRequest = z.infer<typeof updateRebookingSettingsRequestSchema>;
+
+// Customer rebooking suggestion response type
+export const rebookingSuggestionSchema = z.object({
+  serviceId: z.string(),
+  serviceName: z.string(),
+  lastBookingDate: z.string(),
+  dueDate: z.string(),
+  daysOverdue: z.number(),
+  status: z.enum(['approaching', 'due', 'overdue']),
+  preferredStaffId: z.string().optional(),
+  preferredStaffName: z.string().optional(),
+  preferredDayOfWeek: z.number().optional(),
+  preferredTimeSlot: z.string().optional(),
+  discountAvailable: z.boolean().default(false),
+  discountPercent: z.number().optional(),
+});
+
+export type RebookingSuggestion = z.infer<typeof rebookingSuggestionSchema>;
+
+// Dismiss rebooking reminder schema
+export const dismissRebookingSchema = z.object({
+  serviceId: z.string(),
+  reason: z.enum(['not_interested', 'already_booked', 'snooze', 'unsubscribe']),
+  snoozeDays: z.number().int().positive().max(90).optional(), // Only for snooze reason
+});
+
+export type DismissRebookingRequest = z.infer<typeof dismissRebookingSchema>;

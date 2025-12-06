@@ -76,9 +76,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await queryClientInstance.invalidateQueries({ queryKey: ['/api/auth/user'] });
   };
 
-  // Redirect to Replit Auth login
+  // Redirect to login page
   const login = () => {
-    window.location.href = '/api/login';
+    window.location.href = '/login';
   };
 
   // Session-based logout

@@ -3,7 +3,7 @@ import { extractBearerToken, verifyAccessToken } from "../utils/jwt";
 
 export async function authenticateMobileUser(req: any, res: Response, next: NextFunction): Promise<void> {
   try {
-    const token = extractBearerToken(req);
+    const token = extractBearerToken(req.headers.authorization);
     
     if (!token) {
       res.status(401).json({ error: "Authentication required" });

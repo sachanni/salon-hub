@@ -33,7 +33,24 @@ import {
   AlertCircle,
   Phone,
   Link as LinkIcon,
-  ArrowLeft
+  ArrowLeft,
+  Wallet,
+  UserCheck,
+  Ban,
+  TrendingUp,
+  IndianRupee,
+  Info,
+  BarChart3,
+  Search,
+  Plus,
+  Edit2,
+  X,
+  Gift,
+  QrCode,
+  Layout,
+  Eye,
+  Copy,
+  Palette
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -109,6 +126,8 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
     { id: "hours", label: "Operating Hours", icon: Clock, badge: null },
     { id: "notifications", label: "Notifications", icon: Bell, badge: null },
     { id: "booking", label: "Booking Preferences", icon: Calendar, badge: null },
+    { id: "deposits", label: "Deposits & Protection", icon: Wallet, badge: null },
+    { id: "giftcards", label: "Gift Cards", icon: Gift, badge: "NEW" },
     { id: "salons", label: "Salon Management", icon: Building, badge: null },
     { id: "security", label: "Account & Security", icon: Shield, badge: null },
   ];
@@ -201,6 +220,16 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
                   {/* Booking Preferences */}
                   {activeTab === "booking" && (
                     <BookingPreferencesSettings salonData={salonData} salonId={salonId} />
+                  )}
+
+                  {/* Deposits & Protection */}
+                  {activeTab === "deposits" && (
+                    <DepositsSettings salonId={salonId} />
+                  )}
+
+                  {/* Gift Cards */}
+                  {activeTab === "giftcards" && (
+                    <GiftCardsSettings salonId={salonId} />
                   )}
 
                   {/* Salon Management */}
@@ -1231,6 +1260,2413 @@ function AccountSecuritySettings({ salonData, salonId }: { salonData: any; salon
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DepositsSettings({ salonId }: { salonId: string }) {
+  const { toast } = useToast();
+  const [activeDepositTab, setActiveDepositTab] = useState<'settings' | 'policy' | 'services' | 'trusted' | 'analytics'>('settings');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [addCustomerDialogOpen, setAddCustomerDialogOpen] = useState(false);
+
+  const { data: depositSettings, isLoading: settingsLoading } = useQuery({
+    queryKey: ['/api/business', salonId, 'deposit-settings'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/${salonId}/deposit-settings`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: cancellationPolicy, isLoading: policyLoading } = useQuery({
+    queryKey: ['/api/business', salonId, 'cancellation-policy'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/${salonId}/cancellation-policy`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: serviceRules, isLoading: rulesLoading } = useQuery({
+    queryKey: ['/api/business', salonId, 'service-deposit-rules'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/${salonId}/service-deposit-rules`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: trustedCustomersData, isLoading: customersLoading } = useQuery({
+    queryKey: ['/api/business', salonId, 'trusted-customers'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/${salonId}/trusted-customers`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: ['/api/business', salonId, 'deposit-analytics'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/${salonId}/deposit-analytics`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: servicesData } = useQuery({
+    queryKey: ['/api/salons', salonId, 'services'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/salons/${salonId}/services`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('PUT', `/api/business/${salonId}/deposit-settings`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'deposit-settings'] });
+      toast({ title: "Success", description: "Deposit settings updated" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update settings", variant: "destructive" });
+    },
+  });
+
+  const updatePolicyMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('PUT', `/api/business/${salonId}/cancellation-policy`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'cancellation-policy'] });
+      toast({ title: "Success", description: "Cancellation policy updated" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update policy", variant: "destructive" });
+    },
+  });
+
+  const updateServiceRuleMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('POST', `/api/business/${salonId}/service-deposit-rules`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'service-deposit-rules'] });
+      toast({ title: "Success", description: "Service rule updated" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update service rule", variant: "destructive" });
+    },
+  });
+
+  const addTrustedCustomerMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('POST', `/api/business/${salonId}/trusted-customers`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'trusted-customers'] });
+      toast({ title: "Success", description: "Customer added to trusted list" });
+      setAddCustomerDialogOpen(false);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to add trusted customer", variant: "destructive" });
+    },
+  });
+
+  const updateTrustedCustomerMutation = useMutation({
+    mutationFn: async ({ customerId, data }: { customerId: string; data: any }) => {
+      return apiRequest('PUT', `/api/business/${salonId}/trusted-customers/${customerId}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'trusted-customers'] });
+      toast({ title: "Success", description: "Customer updated" });
+      setEditingCustomer(null);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update customer", variant: "destructive" });
+    },
+  });
+
+  const removeTrustedCustomerMutation = useMutation({
+    mutationFn: async (customerId: string) => {
+      return apiRequest('DELETE', `/api/business/${salonId}/trusted-customers/${customerId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'trusted-customers'] });
+      toast({ title: "Success", description: "Customer removed from list" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to remove customer", variant: "destructive" });
+    },
+  });
+
+  const formatCurrency = (paisa: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+    }).format(paisa / 100);
+  };
+
+  const depositTabs = [
+    { id: 'settings', label: 'Deposit Settings', icon: Wallet },
+    { id: 'policy', label: 'Cancellation Policy', icon: Shield },
+    { id: 'services', label: 'Service Rules', icon: Calendar },
+    { id: 'trusted', label: 'Trusted Customers', icon: UserCheck },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold mb-2">Deposits & No-Show Protection</h2>
+        <p className="text-muted-foreground">Protect your business from no-shows with upfront deposits</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-6">
+        {depositTabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeDepositTab === tab.id;
+          return (
+            <Button
+              key={tab.id}
+              variant={isActive ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveDepositTab(tab.id as any)}
+              className={isActive ? "bg-violet-600 hover:bg-violet-700" : ""}
+            >
+              <Icon className="h-4 w-4 mr-2" />
+              {tab.label}
+            </Button>
+          );
+        })}
+      </div>
+
+      {activeDepositTab === 'settings' && (
+        <DepositSettingsTab
+          settings={depositSettings}
+          isLoading={settingsLoading}
+          onUpdate={(data) => updateSettingsMutation.mutate(data)}
+          isPending={updateSettingsMutation.isPending}
+        />
+      )}
+
+      {activeDepositTab === 'policy' && (
+        <CancellationPolicyTab
+          policy={cancellationPolicy}
+          isLoading={policyLoading}
+          onUpdate={(data) => updatePolicyMutation.mutate(data)}
+          isPending={updatePolicyMutation.isPending}
+        />
+      )}
+
+      {activeDepositTab === 'services' && (
+        <ServiceRulesTab
+          rules={serviceRules || []}
+          services={servicesData || []}
+          isLoading={rulesLoading}
+          defaultPercentage={depositSettings?.depositPercentage || 25}
+          onUpdate={(data) => updateServiceRuleMutation.mutate(data)}
+          isPending={updateServiceRuleMutation.isPending}
+        />
+      )}
+
+      {activeDepositTab === 'trusted' && (
+        <TrustedCustomersTab
+          customers={trustedCustomersData?.customers || []}
+          isLoading={customersLoading}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          onAddCustomer={() => setAddCustomerDialogOpen(true)}
+          onEditCustomer={setEditingCustomer}
+          onRemoveCustomer={(id) => removeTrustedCustomerMutation.mutate(id)}
+          editingCustomer={editingCustomer}
+          onUpdateCustomer={(customerId, data) => updateTrustedCustomerMutation.mutate({ customerId, data })}
+          onCancelEdit={() => setEditingCustomer(null)}
+          isUpdating={updateTrustedCustomerMutation.isPending}
+          isRemoving={removeTrustedCustomerMutation.isPending}
+          formatCurrency={formatCurrency}
+        />
+      )}
+
+      {activeDepositTab === 'analytics' && (
+        <DepositAnalyticsTab
+          analytics={analytics}
+          isLoading={analyticsLoading}
+          formatCurrency={formatCurrency}
+        />
+      )}
+
+      <Dialog open={addCustomerDialogOpen} onOpenChange={setAddCustomerDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Trusted Customer</DialogTitle>
+            <DialogDescription>
+              Search for a customer to add to your trusted list
+            </DialogDescription>
+          </DialogHeader>
+          <AddTrustedCustomerForm
+            salonId={salonId}
+            onSubmit={(data) => addTrustedCustomerMutation.mutate(data)}
+            isPending={addTrustedCustomerMutation.isPending}
+            onCancel={() => setAddCustomerDialogOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function DepositSettingsTab({
+  settings,
+  isLoading,
+  onUpdate,
+  isPending,
+}: {
+  settings: any;
+  isLoading: boolean;
+  onUpdate: (data: any) => void;
+  isPending: boolean;
+}) {
+  const [isEnabled, setIsEnabled] = useState(settings?.isEnabled === 1);
+  const [depositPercentage, setDepositPercentage] = useState(settings?.depositPercentage || 25);
+  const [usePriceThreshold, setUsePriceThreshold] = useState(settings?.usePriceThreshold === 1);
+  const [priceThreshold, setPriceThreshold] = useState((settings?.priceThresholdPaisa || 100000) / 100);
+  const [useCategoryBased, setUseCategoryBased] = useState(settings?.useCategoryBased === 1);
+  const [useManualToggle, setUseManualToggle] = useState(settings?.useManualToggle === 1);
+  const [allowTrustedBypass, setAllowTrustedBypass] = useState(settings?.allowTrustedCustomerBypass === 1);
+  const [requireCardOnFile, setRequireCardOnFile] = useState(settings?.requireCardOnFile === 1);
+
+  useEffect(() => {
+    if (settings) {
+      setIsEnabled(settings.isEnabled === 1);
+      setDepositPercentage(settings.depositPercentage || 25);
+      setUsePriceThreshold(settings.usePriceThreshold === 1);
+      setPriceThreshold((settings.priceThresholdPaisa || 100000) / 100);
+      setUseCategoryBased(settings.useCategoryBased === 1);
+      setUseManualToggle(settings.useManualToggle === 1);
+      setAllowTrustedBypass(settings.allowTrustedCustomerBypass === 1);
+      setRequireCardOnFile(settings.requireCardOnFile === 1);
+    }
+  }, [settings]);
+
+  const handleSave = () => {
+    onUpdate({
+      isEnabled: isEnabled ? 1 : 0,
+      depositPercentage,
+      usePriceThreshold: usePriceThreshold ? 1 : 0,
+      priceThresholdPaisa: priceThreshold * 100,
+      useCategoryBased: useCategoryBased ? 1 : 0,
+      useManualToggle: useManualToggle ? 1 : 0,
+      allowTrustedCustomerBypass: allowTrustedBypass ? 1 : 0,
+      requireCardOnFile: requireCardOnFile ? 1 : 0,
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-violet-100">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-violet-600" />
+                Enable Deposits
+              </CardTitle>
+              <CardDescription>
+                Require deposits for bookings to reduce no-shows
+              </CardDescription>
+            </div>
+            <Switch
+              checked={isEnabled}
+              onCheckedChange={setIsEnabled}
+            />
+          </div>
+        </CardHeader>
+      </Card>
+
+      {isEnabled && (
+        <>
+          <Card className="border-violet-100">
+            <CardHeader>
+              <CardTitle className="text-lg">Deposit Amount</CardTitle>
+              <CardDescription>Set the percentage of service price to collect as deposit</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-4 gap-2">
+                {[20, 25, 50, 100].map((pct) => (
+                  <Button
+                    key={pct}
+                    variant={depositPercentage === pct ? "default" : "outline"}
+                    onClick={() => setDepositPercentage(pct)}
+                    className={depositPercentage === pct ? "bg-violet-600 hover:bg-violet-700" : ""}
+                  >
+                    {pct}%
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-4">
+                <Label>Custom percentage:</Label>
+                <Input
+                  type="number"
+                  min={5}
+                  max={100}
+                  value={depositPercentage}
+                  onChange={(e) => setDepositPercentage(parseInt(e.target.value) || 25)}
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">%</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-violet-100">
+            <CardHeader>
+              <CardTitle className="text-lg">Trigger Methods</CardTitle>
+              <CardDescription>Choose when deposits are required</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div>
+                  <Label className="font-medium">Price Threshold</Label>
+                  <p className="text-sm text-muted-foreground">Require deposit for services above a certain price</p>
+                </div>
+                <Switch
+                  checked={usePriceThreshold}
+                  onCheckedChange={setUsePriceThreshold}
+                />
+              </div>
+              {usePriceThreshold && (
+                <div className="ml-4 flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
+                  <Label>Minimum price:</Label>
+                  <div className="flex items-center">
+                    <IndianRupee className="h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={priceThreshold}
+                      onChange={(e) => setPriceThreshold(parseInt(e.target.value) || 0)}
+                      className="w-32 ml-1"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div>
+                  <Label className="font-medium">Category-Based</Label>
+                  <p className="text-sm text-muted-foreground">Require deposit for specific service categories</p>
+                </div>
+                <Switch
+                  checked={useCategoryBased}
+                  onCheckedChange={setUseCategoryBased}
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div>
+                  <Label className="font-medium">Manual Toggle Per Service</Label>
+                  <p className="text-sm text-muted-foreground">Manually enable deposits for individual services</p>
+                </div>
+                <Switch
+                  checked={useManualToggle}
+                  onCheckedChange={setUseManualToggle}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-violet-100">
+            <CardHeader>
+              <CardTitle className="text-lg">Trusted Customer Settings</CardTitle>
+              <CardDescription>Configure how trusted customers are handled</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-4 border rounded-lg">
+                <div>
+                  <Label className="font-medium">Allow Trusted Customer Bypass</Label>
+                  <p className="text-sm text-muted-foreground">Trusted customers can book without deposits</p>
+                </div>
+                <Switch
+                  checked={allowTrustedBypass}
+                  onCheckedChange={setAllowTrustedBypass}
+                />
+              </div>
+
+              {allowTrustedBypass && (
+                <div className="flex items-center justify-between p-4 border rounded-lg ml-4 bg-slate-50">
+                  <div>
+                    <Label className="font-medium">Require Card on File</Label>
+                    <p className="text-sm text-muted-foreground">Trusted customers must have a saved card to bypass</p>
+                  </div>
+                  <Switch
+                    checked={requireCardOnFile}
+                    onCheckedChange={setRequireCardOnFile}
+                  />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      <div className="flex justify-end">
+        <Button
+          onClick={handleSave}
+          disabled={isPending}
+          className="bg-violet-600 hover:bg-violet-700"
+        >
+          {isPending ? "Saving..." : "Save Settings"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CancellationPolicyTab({
+  policy,
+  isLoading,
+  onUpdate,
+  isPending,
+}: {
+  policy: any;
+  isLoading: boolean;
+  onUpdate: (data: any) => void;
+  isPending: boolean;
+}) {
+  const [windowHours, setWindowHours] = useState(policy?.cancellationWindowHours || 24);
+  const [withinWindowAction, setWithinWindowAction] = useState(policy?.withinWindowAction || 'forfeit_full');
+  const [partialPercentage, setPartialPercentage] = useState(policy?.partialForfeitPercentage || 50);
+  const [noShowAction, setNoShowAction] = useState(policy?.noShowAction || 'forfeit_full');
+  const [graceMinutes, setGraceMinutes] = useState(policy?.noShowGraceMinutes || 15);
+  const [policyText, setPolicyText] = useState(policy?.policyText || '');
+
+  useEffect(() => {
+    if (policy) {
+      setWindowHours(policy.cancellationWindowHours || 24);
+      setWithinWindowAction(policy.withinWindowAction || 'forfeit_full');
+      setPartialPercentage(policy.partialForfeitPercentage || 50);
+      setNoShowAction(policy.noShowAction || 'forfeit_full');
+      setGraceMinutes(policy.noShowGraceMinutes || 15);
+      setPolicyText(policy.policyText || '');
+    }
+  }, [policy]);
+
+  const handleSave = () => {
+    onUpdate({
+      cancellationWindowHours: windowHours,
+      withinWindowAction,
+      partialForfeitPercentage: partialPercentage,
+      noShowAction,
+      noShowGraceMinutes: graceMinutes,
+      policyText,
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="h-5 w-5 text-violet-600" />
+            Cancellation Window
+          </CardTitle>
+          <CardDescription>
+            Set the time limit for free cancellations
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-4 gap-2">
+            {[12, 24, 48, 72].map((hours) => (
+              <Button
+                key={hours}
+                variant={windowHours === hours ? "default" : "outline"}
+                onClick={() => setWindowHours(hours)}
+                className={windowHours === hours ? "bg-violet-600 hover:bg-violet-700" : ""}
+              >
+                {hours} hours
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="text-lg">Within-Window Cancellation</CardTitle>
+          <CardDescription>What happens when a customer cancels within the window</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Select value={withinWindowAction} onValueChange={setWithinWindowAction}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="forfeit_full">Forfeit Full Deposit</SelectItem>
+              <SelectItem value="forfeit_partial">Forfeit Partial Deposit</SelectItem>
+              <SelectItem value="no_penalty">No Penalty</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {withinWindowAction === 'forfeit_partial' && (
+            <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
+              <Label>Forfeit percentage:</Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={partialPercentage}
+                onChange={(e) => setPartialPercentage(parseInt(e.target.value) || 50)}
+                className="w-24"
+              />
+              <span className="text-sm text-muted-foreground">% of deposit</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Ban className="h-5 w-5 text-red-600" />
+            No-Show Handling
+          </CardTitle>
+          <CardDescription>What happens when a customer doesn't show up</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Select value={noShowAction} onValueChange={setNoShowAction}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="forfeit_full">Forfeit Full Deposit</SelectItem>
+              <SelectItem value="forfeit_partial">Forfeit Partial Deposit</SelectItem>
+              <SelectItem value="charge_full_service">Charge Full Service Amount</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
+            <Label>Grace period:</Label>
+            <Input
+              type="number"
+              min={0}
+              max={60}
+              value={graceMinutes}
+              onChange={(e) => setGraceMinutes(parseInt(e.target.value) || 15)}
+              className="w-24"
+            />
+            <span className="text-sm text-muted-foreground">minutes after appointment start</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="text-lg">Policy Text</CardTitle>
+          <CardDescription>Custom text shown to customers during booking</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            value={policyText}
+            onChange={(e) => setPolicyText(e.target.value)}
+            placeholder="Enter your cancellation policy text here..."
+            rows={4}
+          />
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button
+          onClick={handleSave}
+          disabled={isPending}
+          className="bg-violet-600 hover:bg-violet-700"
+        >
+          {isPending ? "Saving..." : "Save Policy"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ServiceRulesTab({
+  rules,
+  services,
+  isLoading,
+  defaultPercentage,
+  onUpdate,
+  isPending,
+}: {
+  rules: any[];
+  services: any[];
+  isLoading: boolean;
+  defaultPercentage: number;
+  onUpdate: (data: any) => void;
+  isPending: boolean;
+}) {
+  const [editingService, setEditingService] = useState<string | null>(null);
+  const [customPercentage, setCustomPercentage] = useState<number | null>(null);
+
+  const formatCurrency = (paisa: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+    }).format(paisa / 100);
+  };
+
+  const getServiceRule = (serviceId: string) => {
+    return rules.find((r: any) => r.serviceId === serviceId);
+  };
+
+  const handleToggle = (serviceId: string, currentlyEnabled: boolean) => {
+    onUpdate({
+      serviceId,
+      requiresDeposit: currentlyEnabled ? 0 : 1,
+    });
+  };
+
+  const handleCustomPercentage = (serviceId: string) => {
+    if (customPercentage !== null) {
+      onUpdate({
+        serviceId,
+        requiresDeposit: 1,
+        customPercentage,
+      });
+      setEditingService(null);
+      setCustomPercentage(null);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+        <div className="flex items-start gap-3">
+          <Info className="h-5 w-5 text-blue-600 mt-0.5" />
+          <div>
+            <p className="font-medium text-sm">Service-Level Deposit Rules</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Enable deposits for specific services. Default deposit is {defaultPercentage}% of service price.
+              You can set custom percentages for individual services.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {services.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="py-8 text-center text-muted-foreground">
+              No services found. Add services to configure deposit rules.
+            </CardContent>
+          </Card>
+        ) : (
+          services.map((service: any) => {
+            const rule = getServiceRule(service.id);
+            const isEnabled = rule?.requiresDeposit === 1;
+            const percentage = rule?.customPercentage || defaultPercentage;
+            const depositAmount = Math.round((service.priceInPaisa * percentage) / 100);
+
+            return (
+              <Card key={service.id} className="border-violet-100">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">{service.name}</h4>
+                        {service.category && (
+                          <Badge variant="secondary" className="text-xs">
+                            {service.category}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Price: {formatCurrency(service.priceInPaisa)}
+                        {isEnabled && (
+                          <span className="ml-2 text-violet-600">
+                            | Deposit: {formatCurrency(depositAmount)} ({percentage}%)
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {isEnabled && editingService === service.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min={5}
+                            max={100}
+                            value={customPercentage ?? percentage}
+                            onChange={(e) => setCustomPercentage(parseInt(e.target.value) || defaultPercentage)}
+                            className="w-20"
+                          />
+                          <span className="text-sm text-muted-foreground">%</span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleCustomPercentage(service.id)}
+                            disabled={isPending}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditingService(null);
+                              setCustomPercentage(null);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          {isEnabled && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setEditingService(service.id);
+                                setCustomPercentage(percentage);
+                              }}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Switch
+                            checked={isEnabled}
+                            onCheckedChange={() => handleToggle(service.id, isEnabled)}
+                            disabled={isPending}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TrustedCustomersTab({
+  customers,
+  isLoading,
+  searchTerm,
+  onSearchChange,
+  onAddCustomer,
+  onEditCustomer,
+  onRemoveCustomer,
+  editingCustomer,
+  onUpdateCustomer,
+  onCancelEdit,
+  isUpdating,
+  isRemoving,
+  formatCurrency,
+}: {
+  customers: any[];
+  isLoading: boolean;
+  searchTerm: string;
+  onSearchChange: (term: string) => void;
+  onAddCustomer: () => void;
+  onEditCustomer: (customer: any) => void;
+  onRemoveCustomer: (id: string) => void;
+  editingCustomer: any;
+  onUpdateCustomer: (customerId: string, data: any) => void;
+  onCancelEdit: () => void;
+  isUpdating: boolean;
+  isRemoving: boolean;
+  formatCurrency: (paisa: number) => string;
+}) {
+  const [editTrustLevel, setEditTrustLevel] = useState(editingCustomer?.trustLevel || 'trusted');
+  const [editReason, setEditReason] = useState(editingCustomer?.reason || '');
+  const [editCanBypass, setEditCanBypass] = useState(editingCustomer?.canBypassDeposit === 1);
+
+  useEffect(() => {
+    if (editingCustomer) {
+      setEditTrustLevel(editingCustomer.trustLevel || 'trusted');
+      setEditReason(editingCustomer.reason || '');
+      setEditCanBypass(editingCustomer.canBypassDeposit === 1);
+    }
+  }, [editingCustomer]);
+
+  const filteredCustomers = customers.filter((c: any) => {
+    const name = `${c.customerFirstName || ''} ${c.customerLastName || ''}`.toLowerCase();
+    const email = (c.customerEmail || '').toLowerCase();
+    const term = searchTerm.toLowerCase();
+    return name.includes(term) || email.includes(term);
+  });
+
+  const getTrustLevelBadge = (level: string) => {
+    switch (level) {
+      case 'vip':
+        return <Badge className="bg-amber-500">VIP</Badge>;
+      case 'blacklisted':
+        return <Badge variant="destructive">Blacklisted</Badge>;
+      default:
+        return <Badge className="bg-green-500">Trusted</Badge>;
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search customers..."
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Button onClick={onAddCustomer} className="bg-violet-600 hover:bg-violet-700">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Customer
+        </Button>
+      </div>
+
+      {filteredCustomers.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="py-8 text-center text-muted-foreground">
+            {searchTerm ? 'No customers match your search' : 'No trusted customers added yet'}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {filteredCustomers.map((customer: any) => (
+            <Card key={customer.id} className="border-violet-100">
+              <CardContent className="py-4">
+                {editingCustomer?.id === customer.id ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-medium">
+                        {customer.customerFirstName} {customer.customerLastName}
+                      </h4>
+                      <span className="text-sm text-muted-foreground">{customer.customerEmail}</span>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <Label className="mb-2 block">Trust Level</Label>
+                        <Select value={editTrustLevel} onValueChange={setEditTrustLevel}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="trusted">Trusted</SelectItem>
+                            <SelectItem value="vip">VIP</SelectItem>
+                            <SelectItem value="blacklisted">Blacklisted</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Switch
+                          checked={editCanBypass}
+                          onCheckedChange={setEditCanBypass}
+                        />
+                        <Label>Can bypass deposit</Label>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="mb-2 block">Reason/Notes</Label>
+                      <Input
+                        value={editReason}
+                        onChange={(e) => setEditReason(e.target.value)}
+                        placeholder="Optional reason..."
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={onCancelEdit}>
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={() => onUpdateCustomer(customer.id, {
+                          trustLevel: editTrustLevel,
+                          reason: editReason,
+                          canBypassDeposit: editCanBypass ? 1 : 0,
+                        })}
+                        disabled={isUpdating}
+                        className="bg-violet-600 hover:bg-violet-700"
+                      >
+                        {isUpdating ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">
+                          {customer.customerFirstName} {customer.customerLastName}
+                        </h4>
+                        {getTrustLevelBadge(customer.trustLevel)}
+                        {customer.canBypassDeposit === 1 && (
+                          <Badge variant="outline" className="text-xs">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Bypass
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">{customer.customerEmail}</p>
+                      <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                        <span>Bookings: {customer.totalBookings || 0}</span>
+                        <span>Completed: {customer.completedBookings || 0}</span>
+                        {customer.noShowCount > 0 && (
+                          <span className="text-red-500">No-shows: {customer.noShowCount}</span>
+                        )}
+                      </div>
+                      {customer.reason && (
+                        <p className="text-sm text-muted-foreground mt-1 italic">
+                          "{customer.reason}"
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onEditCustomer(customer)}
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-500 hover:text-red-700"
+                        onClick={() => onRemoveCustomer(customer.id)}
+                        disabled={isRemoving}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddTrustedCustomerForm({
+  salonId,
+  onSubmit,
+  isPending,
+  onCancel,
+}: {
+  salonId: string;
+  onSubmit: (data: any) => void;
+  isPending: boolean;
+  onCancel: () => void;
+}) {
+  const [customerId, setCustomerId] = useState('');
+  const [trustLevel, setTrustLevel] = useState('trusted');
+  const [reason, setReason] = useState('');
+  const [canBypass, setCanBypass] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { data: customers } = useQuery({
+    queryKey: ['/api/business', salonId, 'customers', searchTerm],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/${salonId}/customers?search=${searchTerm}`);
+      return res.json();
+    },
+    enabled: searchTerm.length >= 2,
+  });
+
+  const handleSubmit = () => {
+    if (!customerId) return;
+    onSubmit({
+      customerId,
+      trustLevel,
+      reason: reason || null,
+      canBypassDeposit: canBypass ? 1 : 0,
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <Label className="mb-2 block">Search Customer</Label>
+        <Input
+          placeholder="Search by name or email..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        {customers?.customers && customers.customers.length > 0 && (
+          <div className="mt-2 border rounded-lg max-h-40 overflow-y-auto">
+            {customers.customers.map((c: any) => (
+              <button
+                key={c.id}
+                className={`w-full text-left px-3 py-2 hover:bg-slate-50 ${customerId === c.id ? 'bg-violet-50' : ''}`}
+                onClick={() => setCustomerId(c.id)}
+              >
+                <div className="font-medium">{c.firstName} {c.lastName}</div>
+                <div className="text-sm text-muted-foreground">{c.email}</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <Label className="mb-2 block">Trust Level</Label>
+        <Select value={trustLevel} onValueChange={setTrustLevel}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="trusted">Trusted</SelectItem>
+            <SelectItem value="vip">VIP</SelectItem>
+            <SelectItem value="blacklisted">Blacklisted</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label className="mb-2 block">Reason (Optional)</Label>
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Why is this customer trusted?"
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Switch checked={canBypass} onCheckedChange={setCanBypass} />
+        <Label>Can bypass deposit requirement</Label>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={!customerId || isPending}
+          className="bg-violet-600 hover:bg-violet-700"
+        >
+          {isPending ? "Adding..." : "Add Customer"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DepositAnalyticsTab({
+  analytics,
+  isLoading,
+  formatCurrency,
+}: {
+  analytics: any;
+  isLoading: boolean;
+  formatCurrency: (paisa: number) => string;
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  const deposits = analytics?.deposits || {
+    totalCollectedPaisa: 0,
+    totalRefundedPaisa: 0,
+    totalForfeitedPaisa: 0,
+    netRevenuePaisa: 0,
+    noShowsCount: 0,
+    count: { collected: 0, refunded: 0, forfeited: 0 }
+  };
+  const customers = analytics?.customers || {
+    trusted: 0,
+    vip: 0,
+    blacklisted: 0,
+    withSavedCards: 0
+  };
+  
+  const stats = {
+    totalCollected: deposits.totalCollectedPaisa,
+    totalRefunded: deposits.totalRefundedPaisa,
+    totalForfeited: deposits.totalForfeitedPaisa,
+    noShowCount: deposits.noShowsCount,
+    lateCancellationCount: deposits.count?.forfeited || 0,
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-green-500 flex items-center justify-center">
+                <IndianRupee className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-green-700">Total Collected</p>
+                <p className="text-2xl font-bold text-green-900">
+                  {formatCurrency(stats.totalCollected || 0)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center">
+                <TrendingUp className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-blue-700">Total Refunded</p>
+                <p className="text-2xl font-bold text-blue-900">
+                  {formatCurrency(stats.totalRefunded || 0)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-amber-500 flex items-center justify-center">
+                <Wallet className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-amber-700">Total Forfeited</p>
+                <p className="text-2xl font-bold text-amber-900">
+                  {formatCurrency(stats.totalForfeited || 0)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-red-500 flex items-center justify-center">
+                <Ban className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-red-700">No-Shows</p>
+                <p className="text-2xl font-bold text-red-900">
+                  {stats.noShowCount || 0}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-orange-200 bg-orange-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-orange-500 flex items-center justify-center">
+                <AlertCircle className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-orange-700">Late Cancellations</p>
+                <p className="text-2xl font-bold text-orange-900">
+                  {stats.lateCancellationCount || 0}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-violet-200 bg-violet-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-violet-500 flex items-center justify-center">
+                <Shield className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-violet-700">Protection Rate</p>
+                <p className="text-2xl font-bold text-violet-900">
+                  {stats.totalCollected > 0 
+                    ? Math.round((stats.totalForfeited / stats.totalCollected) * 100) 
+                    : 0}%
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5 text-violet-600" />
+            Deposit Impact Summary
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-slate-50 p-4 rounded-lg">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-sm text-muted-foreground">Net Revenue Protected</p>
+                <p className="text-xl font-bold text-green-600">
+                  {formatCurrency((stats.totalForfeited || 0) - (stats.totalRefunded || 0))}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Deposits Currently Held</p>
+                <p className="text-xl font-bold text-violet-600">
+                  {formatCurrency((stats.totalCollected || 0) - (stats.totalRefunded || 0) - (stats.totalForfeited || 0))}
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+interface GiftCardTemplate {
+  id: string;
+  salonId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  designUrl?: string;
+  designData?: Record<string, any>;
+  presetValuesPaisa?: string[];
+  allowCustomValue: number;
+  minValuePaisa: number;
+  maxValuePaisa: number;
+  isActive: number;
+  isDefault: number;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
+interface GiftCard {
+  id: string;
+  code: string;
+  balancePaisa: number;
+  originalValuePaisa: number;
+  status: string;
+  expiresAt?: string;
+  recipientName?: string;
+  recipientEmail?: string;
+  purchasedAt?: string;
+  lastUsedAt?: string;
+  redemptionCount: number;
+  totalRedemptionsPaisa: number;
+  purchaserEmail?: string;
+  purchaserName?: string;
+}
+
+function GiftCardsSettings({ salonId }: { salonId: string }) {
+  const { toast } = useToast();
+  const [activeGiftCardTab, setActiveGiftCardTab] = useState<'templates' | 'cards' | 'redeem' | 'analytics'>('templates');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [editingTemplate, setEditingTemplate] = useState<GiftCardTemplate | null>(null);
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+  const [redeemCode, setRedeemCode] = useState('');
+  const [redeemAmount, setRedeemAmount] = useState('');
+  const [selectedBookingId, setSelectedBookingId] = useState('');
+  const [validatedCard, setValidatedCard] = useState<any>(null);
+
+  const { data: templates, isLoading: templatesLoading } = useQuery({
+    queryKey: ['/api/business/gift-cards', salonId, 'templates'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/gift-cards/${salonId}/templates`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: cards, isLoading: cardsLoading } = useQuery({
+    queryKey: ['/api/business/gift-cards', salonId, 'cards'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/gift-cards/${salonId}/cards`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: ['/api/business/gift-cards', salonId, 'analytics'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/business/gift-cards/${salonId}/analytics`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  const { data: bookings } = useQuery({
+    queryKey: ['/api/salons', salonId, 'bookings', 'today'],
+    queryFn: async () => {
+      const today = new Date().toISOString().split('T')[0];
+      const res = await apiRequest('GET', `/api/salons/${salonId}/bookings?date=${today}`);
+      return res.json();
+    },
+    enabled: !!salonId && activeGiftCardTab === 'redeem',
+  });
+
+  const createTemplateMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('POST', `/api/business/gift-cards/${salonId}/templates`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business/gift-cards', salonId, 'templates'] });
+      toast({ title: "Success", description: "Template created successfully" });
+      setCreateTemplateOpen(false);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to create template", variant: "destructive" });
+    },
+  });
+
+  const updateTemplateMutation = useMutation({
+    mutationFn: async ({ templateId, data }: { templateId: string; data: any }) => {
+      return apiRequest('PUT', `/api/business/gift-cards/${salonId}/templates/${templateId}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business/gift-cards', salonId, 'templates'] });
+      toast({ title: "Success", description: "Template updated successfully" });
+      setEditingTemplate(null);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update template", variant: "destructive" });
+    },
+  });
+
+  const deleteTemplateMutation = useMutation({
+    mutationFn: async (templateId: string) => {
+      return apiRequest('DELETE', `/api/business/gift-cards/${salonId}/templates/${templateId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business/gift-cards', salonId, 'templates'] });
+      toast({ title: "Success", description: "Template deleted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete template", variant: "destructive" });
+    },
+  });
+
+  const validateCardMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const res = await apiRequest('POST', '/api/gift-cards/validate', { code, salonId });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.valid) {
+        setValidatedCard(data.card);
+        toast({ title: "Gift Card Valid", description: `Balance: ${formatCurrency(data.card.balancePaisa)}` });
+      } else {
+        setValidatedCard(null);
+        toast({ title: "Invalid Gift Card", description: data.error, variant: "destructive" });
+      }
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to validate gift card", variant: "destructive" });
+    },
+  });
+
+  const redeemCardMutation = useMutation({
+    mutationFn: async (data: { code: string; bookingId: string; amountPaisa?: number }) => {
+      return apiRequest('POST', `/api/business/gift-cards/${salonId}/redeem`, data);
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business/gift-cards', salonId, 'cards'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/business/gift-cards', salonId, 'analytics'] });
+      toast({ 
+        title: "Gift Card Redeemed", 
+        description: `Redeemed ${formatCurrency(data.redeemedAmount)}. Remaining: ${formatCurrency(data.remainingBalance)}` 
+      });
+      setRedeemCode('');
+      setRedeemAmount('');
+      setSelectedBookingId('');
+      setValidatedCard(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to redeem gift card", variant: "destructive" });
+    },
+  });
+
+  const formatCurrency = (paisa: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+    }).format(paisa / 100);
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusStyles: Record<string, string> = {
+      'active': 'bg-green-100 text-green-800',
+      'partially_used': 'bg-blue-100 text-blue-800',
+      'fully_redeemed': 'bg-slate-100 text-slate-800',
+      'expired': 'bg-red-100 text-red-800',
+      'pending_payment': 'bg-yellow-100 text-yellow-800',
+      'cancelled': 'bg-red-100 text-red-800',
+    };
+    return statusStyles[status] || 'bg-slate-100 text-slate-800';
+  };
+
+  const filteredCards = (cards?.cards || []).filter((card: GiftCard) => {
+    const matchesSearch = 
+      card.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      card.recipientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      card.recipientEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      card.purchaserName?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || card.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const giftCardTabs = [
+    { id: 'templates', label: 'Templates', icon: Layout },
+    { id: 'cards', label: 'Gift Cards', icon: CreditCard },
+    { id: 'redeem', label: 'Redeem', icon: QrCode },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold mb-2">Gift Cards Management</h2>
+        <p className="text-muted-foreground">Create and manage gift cards for your salon</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-6">
+        {giftCardTabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeGiftCardTab === tab.id;
+          return (
+            <Button
+              key={tab.id}
+              variant={isActive ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveGiftCardTab(tab.id as any)}
+              className={isActive ? "bg-violet-600 hover:bg-violet-700" : ""}
+            >
+              <Icon className="h-4 w-4 mr-2" />
+              {tab.label}
+            </Button>
+          );
+        })}
+      </div>
+
+      {activeGiftCardTab === 'templates' && (
+        <GiftCardTemplatesTab
+          templates={templates?.templates || []}
+          isLoading={templatesLoading}
+          onCreateTemplate={() => setCreateTemplateOpen(true)}
+          onEditTemplate={setEditingTemplate}
+          onDeleteTemplate={(id) => deleteTemplateMutation.mutate(id)}
+          isDeleting={deleteTemplateMutation.isPending}
+          formatCurrency={formatCurrency}
+        />
+      )}
+
+      {activeGiftCardTab === 'cards' && (
+        <GiftCardListTab
+          cards={filteredCards}
+          isLoading={cardsLoading}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          formatCurrency={formatCurrency}
+          getStatusBadge={getStatusBadge}
+        />
+      )}
+
+      {activeGiftCardTab === 'redeem' && (
+        <GiftCardRedeemTab
+          redeemCode={redeemCode}
+          onCodeChange={setRedeemCode}
+          redeemAmount={redeemAmount}
+          onAmountChange={setRedeemAmount}
+          selectedBookingId={selectedBookingId}
+          onBookingChange={setSelectedBookingId}
+          validatedCard={validatedCard}
+          bookings={bookings || []}
+          onValidate={() => validateCardMutation.mutate(redeemCode)}
+          onRedeem={() => {
+            if (!selectedBookingId) {
+              toast({ title: "Error", description: "Please select a booking", variant: "destructive" });
+              return;
+            }
+            redeemCardMutation.mutate({
+              code: redeemCode,
+              bookingId: selectedBookingId,
+              amountPaisa: redeemAmount ? parseFloat(redeemAmount) * 100 : undefined,
+            });
+          }}
+          isValidating={validateCardMutation.isPending}
+          isRedeeming={redeemCardMutation.isPending}
+          formatCurrency={formatCurrency}
+        />
+      )}
+
+      {activeGiftCardTab === 'analytics' && (
+        <GiftCardAnalyticsTab
+          analytics={analytics}
+          isLoading={analyticsLoading}
+          formatCurrency={formatCurrency}
+        />
+      )}
+
+      <Dialog open={createTemplateOpen} onOpenChange={setCreateTemplateOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create Gift Card Template</DialogTitle>
+            <DialogDescription>
+              Design a gift card template for your customers
+            </DialogDescription>
+          </DialogHeader>
+          <GiftCardTemplateForm
+            onSubmit={(data) => createTemplateMutation.mutate(data)}
+            isPending={createTemplateMutation.isPending}
+            onCancel={() => setCreateTemplateOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingTemplate} onOpenChange={() => setEditingTemplate(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Gift Card Template</DialogTitle>
+            <DialogDescription>
+              Update the gift card template
+            </DialogDescription>
+          </DialogHeader>
+          {editingTemplate && (
+            <GiftCardTemplateForm
+              template={editingTemplate}
+              onSubmit={(data) => updateTemplateMutation.mutate({ templateId: editingTemplate.id, data })}
+              isPending={updateTemplateMutation.isPending}
+              onCancel={() => setEditingTemplate(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function GiftCardTemplatesTab({
+  templates,
+  isLoading,
+  onCreateTemplate,
+  onEditTemplate,
+  onDeleteTemplate,
+  isDeleting,
+  formatCurrency,
+}: {
+  templates: GiftCardTemplate[];
+  isLoading: boolean;
+  onCreateTemplate: () => void;
+  onEditTemplate: (template: GiftCardTemplate) => void;
+  onDeleteTemplate: (id: string) => void;
+  isDeleting: boolean;
+  formatCurrency: (paisa: number) => string;
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Design templates that customers can choose from when purchasing gift cards
+        </p>
+        <Button onClick={onCreateTemplate} className="bg-violet-600 hover:bg-violet-700">
+          <Plus className="h-4 w-4 mr-2" />
+          Create Template
+        </Button>
+      </div>
+
+      {templates.length === 0 ? (
+        <Card className="border-dashed border-2 border-violet-200">
+          <CardContent className="py-12 text-center">
+            <Gift className="h-12 w-12 mx-auto text-violet-300 mb-4" />
+            <h3 className="font-semibold mb-2">No Templates Yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Create your first gift card template to start selling gift cards
+            </p>
+            <Button onClick={onCreateTemplate} className="bg-violet-600 hover:bg-violet-700">
+              <Plus className="h-4 w-4 mr-2" />
+              Create First Template
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {templates.map((template) => (
+            <Card key={template.id} className="border-violet-100 overflow-hidden">
+              <div 
+                className="h-24 flex items-center justify-center bg-gradient-to-r from-violet-500 to-purple-500 text-white"
+              >
+                <Gift className="h-10 w-10" />
+              </div>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h3 className="font-semibold">{template.name}</h3>
+                    <p className="text-xs text-muted-foreground capitalize">{template.category || 'general'}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    {template.isDefault === 1 && (
+                      <Badge variant="outline" className="text-xs">Default</Badge>
+                    )}
+                    <Badge variant={template.isActive ? "default" : "secondary"}>
+                      {template.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+                </div>
+                {template.description && (
+                  <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                    {template.description}
+                  </p>
+                )}
+                <div className="text-sm mb-3">
+                  <span className="text-muted-foreground">Value Range: </span>
+                  <span className="font-medium">
+                    {formatCurrency(template.minValuePaisa)} - {formatCurrency(template.maxValuePaisa)}
+                  </span>
+                </div>
+                <div className="text-sm mb-4">
+                  <span className="text-muted-foreground">Custom amounts: </span>
+                  <span className="font-medium">{template.allowCustomValue ? 'Allowed' : 'Not allowed'}</span>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onEditTemplate(template)}
+                    className="flex-1"
+                  >
+                    <Edit2 className="h-3 w-3 mr-1" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onDeleteTemplate(template.id)}
+                    disabled={isDeleting}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GiftCardTemplateForm({
+  template,
+  onSubmit,
+  isPending,
+  onCancel,
+}: {
+  template?: GiftCardTemplate;
+  onSubmit: (data: any) => void;
+  isPending: boolean;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(template?.name || '');
+  const [description, setDescription] = useState(template?.description || '');
+  const [category, setCategory] = useState(template?.category || 'general');
+  const [minValue, setMinValue] = useState((template?.minValuePaisa || 50000) / 100);
+  const [maxValue, setMaxValue] = useState((template?.maxValuePaisa || 2500000) / 100);
+  const [allowCustomValue, setAllowCustomValue] = useState(template?.allowCustomValue !== 0);
+  const [isActive, setIsActive] = useState(template?.isActive !== 0);
+  const [presetValues, setPresetValues] = useState<string>(
+    template?.presetValuesPaisa?.map(v => parseInt(v) / 100).join(', ') || '500, 1000, 2000, 5000'
+  );
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const presetValuesPaisa = presetValues.split(',')
+      .map(v => String(parseFloat(v.trim()) * 100))
+      .filter(v => !isNaN(parseFloat(v)));
+    
+    onSubmit({
+      name,
+      description: description || null,
+      category,
+      minValuePaisa: minValue * 100,
+      maxValuePaisa: maxValue * 100,
+      allowCustomValue: allowCustomValue ? 1 : 0,
+      presetValuesPaisa,
+      isActive: isActive ? 1 : 0,
+      sortOrder: template?.sortOrder || 0,
+    });
+  };
+
+  const categories = [
+    { value: 'general', label: 'General' },
+    { value: 'birthday', label: 'Birthday' },
+    { value: 'anniversary', label: 'Anniversary' },
+    { value: 'holiday', label: 'Holiday' },
+    { value: 'occasion', label: 'Special Occasion' },
+  ];
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <Label htmlFor="name">Template Name</Label>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g., Birthday Gift Card"
+          required
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="description">Description</Label>
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Optional description for the template"
+          rows={2}
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="category">Category</Label>
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {categories.map((cat) => (
+              <SelectItem key={cat.value} value={cat.value}>
+                {cat.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="minValue">Minimum Value (₹)</Label>
+          <Input
+            id="minValue"
+            type="number"
+            value={minValue}
+            onChange={(e) => setMinValue(parseFloat(e.target.value) || 500)}
+            min={100}
+          />
+        </div>
+        <div>
+          <Label htmlFor="maxValue">Maximum Value (₹)</Label>
+          <Input
+            id="maxValue"
+            type="number"
+            value={maxValue}
+            onChange={(e) => setMaxValue(parseFloat(e.target.value) || 25000)}
+            min={minValue}
+          />
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor="presetValues">Preset Values (₹, comma-separated)</Label>
+        <Input
+          id="presetValues"
+          value={presetValues}
+          onChange={(e) => setPresetValues(e.target.value)}
+          placeholder="500, 1000, 2000, 5000"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Suggested amounts customers can quickly select
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label htmlFor="allowCustomValue" className="cursor-pointer">Allow Custom Amounts</Label>
+        <Switch
+          id="allowCustomValue"
+          checked={allowCustomValue}
+          onCheckedChange={setAllowCustomValue}
+        />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label htmlFor="isActive" className="cursor-pointer">Active</Label>
+        <Switch
+          id="isActive"
+          checked={isActive}
+          onCheckedChange={setIsActive}
+        />
+      </div>
+
+      <div className="h-20 rounded-lg flex items-center justify-center bg-gradient-to-r from-violet-500 to-purple-500 text-white">
+        <Gift className="h-8 w-8 mr-2" />
+        <span className="font-semibold">{name || 'Preview'}</span>
+      </div>
+
+      <div className="flex gap-3 pt-4">
+        <Button type="button" variant="outline" onClick={onCancel} className="flex-1">
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isPending} className="flex-1 bg-violet-600 hover:bg-violet-700">
+          {isPending ? "Saving..." : template ? "Update Template" : "Create Template"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function GiftCardListTab({
+  cards,
+  isLoading,
+  searchTerm,
+  onSearchChange,
+  statusFilter,
+  onStatusFilterChange,
+  formatCurrency,
+  getStatusBadge,
+}: {
+  cards: GiftCard[];
+  isLoading: boolean;
+  searchTerm: string;
+  onSearchChange: (value: string) => void;
+  statusFilter: string;
+  onStatusFilterChange: (value: string) => void;
+  formatCurrency: (paisa: number) => string;
+  getStatusBadge: (status: string) => string;
+}) {
+  const { toast } = useToast();
+
+  const copyToClipboard = (code: string) => {
+    navigator.clipboard.writeText(code);
+    toast({ title: "Copied", description: "Gift card code copied to clipboard" });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  const statusOptions = [
+    { value: 'all', label: 'All Statuses' },
+    { value: 'active', label: 'Active' },
+    { value: 'partially_used', label: 'Partially Used' },
+    { value: 'fully_redeemed', label: 'Fully Redeemed' },
+    { value: 'expired', label: 'Expired' },
+    { value: 'pending_payment', label: 'Pending Payment' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by code, recipient, or purchaser..."
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={onStatusFilterChange}>
+          <SelectTrigger className="w-full sm:w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {statusOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {cards.length === 0 ? (
+        <Card className="border-dashed border-2 border-violet-200">
+          <CardContent className="py-12 text-center">
+            <CreditCard className="h-12 w-12 mx-auto text-violet-300 mb-4" />
+            <h3 className="font-semibold mb-2">No Gift Cards Found</h3>
+            <p className="text-sm text-muted-foreground">
+              {searchTerm || statusFilter !== 'all' 
+                ? "Try adjusting your filters"
+                : "Gift cards will appear here when customers purchase them"}
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-violet-100">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-violet-50">
+                  <tr>
+                    <th className="text-left p-3 font-medium text-sm">Code</th>
+                    <th className="text-left p-3 font-medium text-sm">Recipient</th>
+                    <th className="text-left p-3 font-medium text-sm">Value</th>
+                    <th className="text-left p-3 font-medium text-sm">Balance</th>
+                    <th className="text-left p-3 font-medium text-sm">Status</th>
+                    <th className="text-left p-3 font-medium text-sm">Purchased</th>
+                    <th className="text-left p-3 font-medium text-sm">Uses</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {cards.map((card) => (
+                    <tr key={card.id} className="hover:bg-slate-50">
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
+                            {card.code}
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyToClipboard(card.code)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div>
+                          <p className="text-sm font-medium">{card.recipientName || '-'}</p>
+                          <p className="text-xs text-muted-foreground">{card.recipientEmail || '-'}</p>
+                        </div>
+                      </td>
+                      <td className="p-3 font-medium">
+                        {formatCurrency(card.originalValuePaisa)}
+                      </td>
+                      <td className="p-3">
+                        <span className={card.balancePaisa > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                          {formatCurrency(card.balancePaisa)}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <Badge className={getStatusBadge(card.status)}>
+                          {card.status.replace('_', ' ')}
+                        </Badge>
+                      </td>
+                      <td className="p-3 text-sm text-muted-foreground">
+                        {card.purchasedAt 
+                          ? new Date(card.purchasedAt).toLocaleDateString()
+                          : '-'}
+                      </td>
+                      <td className="p-3 text-sm">
+                        {card.redemptionCount}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function GiftCardRedeemTab({
+  redeemCode,
+  onCodeChange,
+  redeemAmount,
+  onAmountChange,
+  selectedBookingId,
+  onBookingChange,
+  validatedCard,
+  bookings,
+  onValidate,
+  onRedeem,
+  isValidating,
+  isRedeeming,
+  formatCurrency,
+}: {
+  redeemCode: string;
+  onCodeChange: (value: string) => void;
+  redeemAmount: string;
+  onAmountChange: (value: string) => void;
+  selectedBookingId: string;
+  onBookingChange: (value: string) => void;
+  validatedCard: any;
+  bookings: any[];
+  onValidate: () => void;
+  onRedeem: () => void;
+  isValidating: boolean;
+  isRedeeming: boolean;
+  formatCurrency: (paisa: number) => string;
+}) {
+  return (
+    <div className="space-y-6">
+      <Card className="border-violet-100">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <QrCode className="h-5 w-5 text-violet-600" />
+            Redeem Gift Card
+          </CardTitle>
+          <CardDescription>
+            Enter a gift card code to validate and apply to a booking
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-3">
+            <Input
+              placeholder="Enter gift card code (e.g., GIFT-XXXX-XXXX)"
+              value={redeemCode}
+              onChange={(e) => onCodeChange(e.target.value.toUpperCase())}
+              className="flex-1 font-mono"
+            />
+            <Button 
+              onClick={onValidate} 
+              disabled={!redeemCode || isValidating}
+              variant="outline"
+            >
+              {isValidating ? "Checking..." : "Validate"}
+            </Button>
+          </div>
+
+          {validatedCard && (
+            <Card className="bg-green-50 border-green-200">
+              <CardContent className="py-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-green-500 flex items-center justify-center">
+                    <CheckCircle className="h-6 w-6 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-green-800">Valid Gift Card</p>
+                    <p className="text-sm text-green-700">
+                      Code: {validatedCard.code} | Balance: {formatCurrency(validatedCard.balancePaisa)}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {validatedCard && (
+            <>
+              <Separator />
+              
+              <div>
+                <Label htmlFor="booking">Select Booking to Apply</Label>
+                <Select value={selectedBookingId} onValueChange={onBookingChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a booking..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(bookings || []).map((booking: any) => (
+                      <SelectItem key={booking.id} value={booking.id}>
+                        {booking.customerName || 'Guest'} - {booking.serviceName} - {formatCurrency(booking.totalPaisa || 0)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="amount">Amount to Redeem (₹)</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  placeholder={`Max: ₹${validatedCard.balancePaisa / 100}`}
+                  value={redeemAmount}
+                  onChange={(e) => onAmountChange(e.target.value)}
+                  max={validatedCard.balancePaisa / 100}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave empty to redeem full balance
+                </p>
+              </div>
+
+              <Button 
+                onClick={onRedeem} 
+                disabled={!selectedBookingId || isRedeeming}
+                className="w-full bg-violet-600 hover:bg-violet-700"
+              >
+                {isRedeeming ? "Processing..." : "Redeem Gift Card"}
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-violet-100 bg-violet-50">
+        <CardContent className="py-4">
+          <div className="flex items-start gap-3">
+            <Info className="h-5 w-5 text-violet-600 mt-0.5" />
+            <div className="text-sm text-violet-800">
+              <p className="font-medium mb-1">How to Redeem</p>
+              <ol className="list-decimal list-inside space-y-1 text-violet-700">
+                <li>Enter the gift card code and click Validate</li>
+                <li>Select the booking to apply the gift card to</li>
+                <li>Optionally enter a partial amount, or leave empty for full balance</li>
+                <li>Click Redeem to complete the transaction</li>
+              </ol>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function GiftCardAnalyticsTab({
+  analytics,
+  isLoading,
+  formatCurrency,
+}: {
+  analytics: any;
+  isLoading: boolean;
+  formatCurrency: (paisa: number) => string;
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  const stats = {
+    totalSold: {
+      count: analytics?.totalSold?.count || 0,
+      valuePaisa: analytics?.totalSold?.valuePaisa || 0,
+    },
+    totalRedeemed: {
+      count: analytics?.totalRedeemed?.count || 0,
+      valuePaisa: analytics?.totalRedeemed?.valuePaisa || 0,
+    },
+    fullyRedeemedCount: analytics?.fullyRedeemedCount || 0,
+    outstandingBalancePaisa: analytics?.outstandingBalancePaisa || 0,
+    expired: {
+      count: analytics?.expired?.count || 0,
+      lostValuePaisa: analytics?.expired?.lostValuePaisa || 0,
+    },
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="border-violet-100">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                <Gift className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Cards Sold</p>
+                <p className="text-2xl font-bold">{stats.totalSold.count}</p>
+                <p className="text-xs text-green-600">
+                  {formatCurrency(stats.totalSold.valuePaisa)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-violet-100">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <CreditCard className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Redeemed</p>
+                <p className="text-2xl font-bold">{stats.totalRedeemed.count}</p>
+                <p className="text-xs text-blue-600">
+                  {formatCurrency(stats.totalRedeemed.valuePaisa)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-violet-100">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-violet-100 flex items-center justify-center">
+                <Wallet className="h-5 w-5 text-violet-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Outstanding</p>
+                <p className="text-2xl font-bold text-violet-600">
+                  {formatCurrency(stats.outstandingBalancePaisa)}
+                </p>
+                <p className="text-xs text-muted-foreground">Unredeemed balance</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-violet-100">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+                <AlertCircle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Expired</p>
+                <p className="text-2xl font-bold">{stats.expired.count}</p>
+                <p className="text-xs text-amber-600">
+                  {formatCurrency(stats.expired.lostValuePaisa)} unused
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card className="border-violet-100">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-violet-600" />
+              Revenue Impact
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Total Gift Card Sales</span>
+                <span className="font-semibold text-green-600">
+                  {formatCurrency(stats.totalSold.valuePaisa)}
+                </span>
+              </div>
+              <Separator />
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Amount Applied to Bookings</span>
+                <span className="font-semibold text-blue-600">
+                  {formatCurrency(stats.totalRedeemed.valuePaisa)}
+                </span>
+              </div>
+              <Separator />
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Breakage (Expired Unused)</span>
+                <span className="font-semibold text-amber-600">
+                  {formatCurrency(stats.expired.lostValuePaisa)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-violet-100">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-violet-600" />
+              Redemption Stats
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Fully Redeemed Cards</span>
+                <span className="font-semibold">{stats.fullyRedeemedCount}</span>
+              </div>
+              <Separator />
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Redemption Rate</span>
+                <span className="font-semibold">
+                  {stats.totalSold.valuePaisa > 0
+                    ? Math.round((stats.totalRedeemed.valuePaisa / stats.totalSold.valuePaisa) * 100)
+                    : 0}%
+                </span>
+              </div>
+              <Separator />
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Avg Gift Card Value</span>
+                <span className="font-semibold">
+                  {stats.totalSold.count > 0
+                    ? formatCurrency(stats.totalSold.valuePaisa / stats.totalSold.count)
+                    : '₹0'}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-violet-100 bg-gradient-to-r from-violet-50 to-pink-50">
+        <CardContent className="py-6">
+          <div className="flex items-center gap-4">
+            <div className="h-16 w-16 rounded-full bg-white shadow-lg flex items-center justify-center">
+              <Gift className="h-8 w-8 text-violet-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-lg">Gift Card Performance</h3>
+              <p className="text-muted-foreground">
+                Gift cards help bring new customers and increase repeat visits. 
+                {stats.outstandingBalancePaisa > 0 && (
+                  <span className="text-violet-600 font-medium">
+                    {" "}You have {formatCurrency(stats.outstandingBalancePaisa)} in outstanding gift card balance waiting to be redeemed!
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

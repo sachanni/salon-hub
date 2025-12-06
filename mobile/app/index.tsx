@@ -10,7 +10,7 @@ export default function Index() {
   useEffect(() => {
     if (!isLoading) {
       if (isAuthenticated && hasCompletedOnboarding) {
-        router.replace('/home');
+        router.replace('/(tabs)/at-salon');
       } else {
         router.replace('/onboarding/splash');
       }

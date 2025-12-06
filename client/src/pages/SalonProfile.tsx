@@ -22,7 +22,8 @@ import {
   Sparkles,
   Grid3x3,
   Tag,
-  Timer
+  Timer,
+  Gift
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -34,6 +35,7 @@ import { ReviewSection } from '@/components/reviews/ReviewSection';
 import { cn } from '@/lib/utils';
 import { Map } from '@/components/ui/map';
 import SalonCard from '@/components/SalonCard';
+import { WebChatWidget } from '@/components/chat';
 
 interface NearbySalon {
   id: string;
@@ -1229,6 +1231,18 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                     Book now
                   </Button>
 
+                  {/* Gift Cards Button */}
+                  <Button 
+                    onClick={() => setLocation(`/salon/${salonId}/gift-cards`)}
+                    variant="outline"
+                    size="lg"
+                    className="w-full border-purple-300 text-purple-700 hover:bg-purple-50 text-base font-medium h-12"
+                    data-testid="button-gift-cards"
+                  >
+                    <Gift className="w-5 h-5 mr-2" />
+                    Buy Gift Card
+                  </Button>
+
                   <Separator />
 
                   {/* Contact */}
@@ -1362,6 +1376,15 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
         staffId={selectedStaffId}
         preSelectedServiceIds={selectedServiceIds.length > 0 ? selectedServiceIds : undefined}
       />
+
+      {/* Chat Widget - allows customers to message the salon */}
+      {salon && (
+        <WebChatWidget
+          salonId={salonId}
+          salonName={salon.name}
+          salonImage={salon.imageUrl || salon.image}
+        />
+      )}
     </div>
   );
 };

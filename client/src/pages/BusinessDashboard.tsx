@@ -63,7 +63,8 @@ import {
   Trash2,
   CalendarDays,
   FileEdit,
-  History
+  History,
+  UserCog
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link, useLocation } from "wouter";
@@ -75,6 +76,7 @@ import InventoryManagementDashboard from "@/components/InventoryManagementDashbo
 import BeautyProductCatalog from "@/pages/BeautyProductCatalog";
 import CalendarManagement from "@/pages/CalendarManagement";
 import PackageManagement from "@/components/business-dashboard/PackageManagement";
+import ClientProfilesManagement from "@/components/business-dashboard/ClientProfilesManagement";
 import BusinessOffers from "@/pages/BusinessOffers";
 import { Map } from "@/components/ui/map";
 import EventDashboard from "@/pages/EventDashboard";
@@ -471,6 +473,7 @@ export default function BusinessDashboard() {
       icon: Calendar,
       items: [
         { id: "calendar", label: "Bookings & Calendar", icon: Calendar },
+        { id: "client-profiles", label: "Client Profiles & Notes", icon: UserCog },
         { id: "inventory", label: "Inventory Management", icon: Package },
         { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles },
         { id: "offers", label: "Offers & Promotions", icon: Gift }
@@ -1570,6 +1573,15 @@ export default function BusinessDashboard() {
       return (
         <div className="p-6">
           <PackageManagement salonId={salonId || ''} />
+        </div>
+      );
+    }
+
+    // Handle client profiles tab
+    if (activeTab === "client-profiles") {
+      return (
+        <div className="p-6">
+          <ClientProfilesManagement salonId={salonId || ''} />
         </div>
       );
     }

@@ -44,6 +44,32 @@ export interface SpecialOffer {
   iconColor: string;
 }
 
+export interface DetailedOffer {
+  id: string;
+  title: string;
+  description: string;
+  originalPrice: number;
+  discountedPrice: number;
+  discountPercent: number;
+  category: 'hair' | 'spa' | 'nails' | 'makeup' | 'skin' | 'combo';
+  imageUrl: string;
+  salon: {
+    id: string;
+    name: string;
+    rating: number;
+    distance?: number;
+  };
+  validTill: string;
+  termsAndConditions?: string[];
+  isTrending: boolean;
+  isNew: boolean;
+  isSaved: boolean;
+  usageLimit?: number;
+  usedCount?: number;
+}
+
+export type OfferCategory = 'all' | 'hair' | 'spa' | 'nails' | 'makeup' | 'skin' | 'combo';
+
 export interface SalonsApiResponse {
   salons: Salon[];
   total: number;

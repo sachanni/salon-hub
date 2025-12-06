@@ -52,6 +52,7 @@ import OrderDetails from "@/pages/OrderDetails";
 import OrderHistory from "@/pages/OrderHistory";
 import Wishlist from "@/pages/Wishlist";
 import Shop from "@/pages/Shop";
+import GiftCardsPage from "@/pages/GiftCardsPage";
 import EventDashboard from "@/pages/EventDashboard";
 import EventsListing from "@/pages/EventsListing";
 import EventReviewPage from "@/pages/EventReviewPage";
@@ -71,6 +72,7 @@ import DraftEvents from "@/pages/DraftEvents";
 import NotificationCenter from "@/pages/NotificationCenter";
 import PastEvents from "@/pages/PastEvents";
 import NotFound from "@/pages/not-found";
+import { AIBeautyConsultant } from "@/components/chat/AIBeautyConsultant";
 
 function Router() {
   return (
@@ -145,6 +147,7 @@ function Router() {
         <Route path="/wishlist" component={Wishlist} />
         
         <Route path="/salon/:salonId/book" component={SalonBookingPage} />
+        <Route path="/salon/:salonId/gift-cards" component={GiftCardsPage} />
         <Route path="/salon/:salonId">
           {(params) => <SalonProfile salonId={params.salonId!} />}
         </Route>
@@ -213,6 +216,7 @@ function App() {
           <Toaster />
           <Router />
           <SessionExpiryWarning />
+          <AIBeautyConsultant />
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

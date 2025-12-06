@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { secureStorage } from '../utils/secureStorage';
 import { AuthState, User, OnboardingPermissions } from '../types/auth';
 
@@ -26,12 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     notifications: 'pending',
   });
 
-  // Load persisted auth state on mount
-  useEffect(() => {
-    loadAuthState();
-  }, []);
-
-  const loadAuthState = async () => {
+  const loadAuthState = useCallback(async () => {
     try {
       const [user, hasCompletedOnboarding, storedPermissions] = await Promise.all([
         secureStorage.getUser(),
@@ -52,9 +47,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       setAuthState(prev => ({ ...prev, isLoading: false }));
     }
-  };
+  }, []);
 
-  const login = async (user: User, accessToken?: string, refreshToken?: string) => {
+  useEffect(() => {
+    loadAuthState();
+  }, [loadAuthState]);
+
+  const login = useCallback(async (user: User, accessToken?: string, refreshToken?: string) => {
     try {
       await secureStorage.setUser(user);
       
@@ -65,18 +64,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await secureStorage.setRefreshToken(refreshToken);
       }
 
-      setAuthState({
+      setAuthState(prev => ({
         user,
         isAuthenticated: true,
         isLoading: false,
-        hasCompletedOnboarding: authState.hasCompletedOnboarding,
-      });
+        hasCompletedOnboarding: prev.hasCompletedOnboarding,
+      }));
     } catch (error) {
       throw error;
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await secureStorage.clearAll();
       setAuthState({
@@ -93,38 +92,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       throw error;
     }
-  };
+  }, []);
 
-  const completeOnboarding = async () => {
+  const completeOnboarding = useCallback(async () => {
     try {
       await secureStorage.setOnboardingComplete(true);
       setAuthState(prev => ({ ...prev, hasCompletedOnboarding: true }));
     } catch (error) {
       throw error;
     }
-  };
+  }, []);
 
-  const updatePermissions = async (newPermissions: Partial<OnboardingPermissions>) => {
+  const updatePermissions = useCallback(async (newPermissions: Partial<OnboardingPermissions>) => {
     try {
-      const updated = { ...permissions, ...newPermissions };
-      await secureStorage.setPermissions(updated);
-      setPermissions(updated);
+      setPermissions(prev => {
+        const updated = { ...prev, ...newPermissions };
+        secureStorage.setPermissions(updated);
+        return updated;
+      });
     } catch (error) {
       throw error;
     }
-  };
+  }, []);
+
+  const contextValue = useMemo<AuthContextType>(() => ({
+    ...authState,
+    permissions,
+    login,
+    logout,
+    completeOnboarding,
+    updatePermissions,
+  }), [authState, permissions, login, logout, completeOnboarding, updatePermissions]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        ...authState,
-        permissions,
-        login,
-        logout,
-        completeOnboarding,
-        updatePermissions,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

@@ -9,7 +9,6 @@ import UserTestimonials from "@/components/UserTestimonials";
 import LoyaltyProgramCard from "@/components/LoyaltyProgramCard";
 import USPStrip from "@/components/USPStrip";
 import TrendingServicesCarousel from "@/components/TrendingServicesCarousel";
-import TestimonialChips from "@/components/TestimonialChips";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
@@ -127,9 +126,6 @@ export default function Home() {
               <p className="text-lg sm:text-xl text-gray-700 max-w-2xl mx-auto leading-relaxed px-4 mb-6">
                 Top-rated salons, instant booking, verified professionals
               </p>
-
-              {/* Testimonial Chips - Social Proof */}
-              <TestimonialChips />
             </div>
             
             {/* Search Bar */}
