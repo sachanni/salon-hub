@@ -9,6 +9,7 @@ import UserTestimonials from "@/components/UserTestimonials";
 import LoyaltyProgramCard from "@/components/LoyaltyProgramCard";
 import USPStrip from "@/components/USPStrip";
 import TrendingServicesCarousel from "@/components/TrendingServicesCarousel";
+import RebookingSuggestions from "@/components/RebookingSuggestions";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
@@ -174,6 +175,9 @@ export default function Home() {
 
         {/* USP Strip - Immediate Value Props */}
         <USPStrip />
+        
+        {/* Personalized Rebooking Suggestions - For returning customers */}
+        <RebookingSuggestions />
         
         {/* Trending Services Carousel - Discovery & Engagement */}
         <TrendingServicesCarousel userLocation={currentLocationCoords} />

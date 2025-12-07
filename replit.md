@@ -38,6 +38,29 @@ The application utilizes a full-stack architecture with separate web and mobile 
     - **Features**: Typing indicators, read receipts, online/offline presence, message history with pagination
     - **Web Components**: `ChatWidget` (inline, resizable customer widget), `ChatInbox` (staff message management)
     - **Real-time Events**: message:send, message:new, typing:start/stop, presence:update, conversation:join/leave
+- **Smart Rebooking System**: AI-powered rebooking recommendations to increase customer retention.
+    - **Database Tables**: `rebooking_settings`, `service_rebooking_cycles`, `customer_rebooking_stats`, `rebooking_reminders`
+    - **Business Dashboard**: Salon owners can configure rebooking cycles per service, enable/disable reminders, set discount incentives
+    - **Customer Experience**: "Recommended for You" carousel on homepage with personalized suggestions based on booking history
+    - **Automation**: Scheduled jobs for daily reminder generation and status updates (approaching/due/overdue)
+    - **Features**: Snooze/dismiss options, preferred staff tracking, preferred time slot detection, discount incentives for overdue rebookings
+    - **API Endpoints**: `/api/rebooking/suggestions`, `/api/rebooking/dismiss`, `/api/rebooking/settings/:salonId`, `/api/rebooking/analytics/:salonId`
+- **Shop Admin RBAC System**: Role-based access control for multi-user salon management.
+    - **Database Tables**: `shop_admin_assignments` (user-salon-role mapping), `permissions` (permission definitions), `role_permissions` (role-permission mapping), `permission_audit_log` (change tracking)
+    - **User Roles**: Business Owner (full access), Shop Admin (configurable permissions), Staff (limited view access)
+    - **Permission Categories**: bookings, services, staff, reports, settings, customers, inventory, financials, marketing, admin
+    - **Permission Actions**: view, create, edit, cancel (where applicable)
+    - **Backend Services**: `server/services/rbacService.ts` handles permission checking, role management, and comprehensive audit logging
+    - **Middleware**: `requireSalonAccess(['owner'])`, `requireBusinessOwner`, `checkSalonPermission` for layered route protection
+    - **API Endpoints**: All routes include salonId in URL path for proper middleware protection:
+      - `GET /api/shop-admins/:salonId/admins` - List shop admins (owner/shop_admin only)
+      - `POST /api/shop-admins/:salonId/assign` - Assign role (owner only)
+      - `POST /api/shop-admins/:salonId/revoke` - Revoke role (owner only)
+      - `POST /api/shop-admins/:salonId/update-role` - Update role (owner only)
+      - `GET /api/shop-admins/:salonId/audit-logs` - View audit logs (owner only)
+      - `GET /api/shop-admins/:salonId/my-permissions` - Get current user's permissions
+    - **Frontend Components**: `ShopAdminManagement.tsx` (owner UI for managing admins), `useSalonPermissions` hook for permission checks
+    - **Security Features**: Layered middleware chains, explicit business owner verification, comprehensive audit logging for role changes and privileged actions (bookings, services, staff, settings)
 
 ## External Dependencies
 - **Database**: PostgreSQL (Neon Serverless)

@@ -23,6 +23,7 @@ export type RootStackParamList = {
   BookingConfirmation: {
     bookingId: string;
   };
+  BeautyProfile: undefined;
 };
 
 export interface SelectedService {

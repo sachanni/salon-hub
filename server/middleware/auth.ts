@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { storage } from "../storage";
 import { verifyAccessToken, extractBearerToken } from "../utils/jwt";
+import { rbacService } from "../services/rbacService";
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -181,7 +182,7 @@ export function requireSuperAdmin() {
   };
 }
 
-export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manager']) {
+export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manager'], requiredPermission?: string | string[]) {
   return async (req: any, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
@@ -193,44 +194,74 @@ export function requireSalonAccess(allowedOrgRoles: string[] = ['owner', 'manage
     }
 
     try {
-      // Get salon and verify user has access
+      const userId = req.user.id;
+      
+      const permissions = await rbacService.getUserPermissions(userId, salonId);
+      
+      if (permissions) {
+        req.salonPermissions = permissions;
+        
+        if (requiredPermission) {
+          const codes = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
+          const hasPermission = codes.some(code => permissions.permissions.includes(code));
+          
+          if (!hasPermission) {
+            return res.status(403).json({ error: 'You do not have permission to perform this action' });
+          }
+        }
+        
+        next();
+        return;
+      }
+
       const salon = await storage.getSalonById(salonId);
       if (!salon) {
         return res.status(404).json({ error: 'Salon not found' });
       }
 
-      // Check if user is the actual owner of this specific salon
-      const userId = req.user.id;
-      const userRoles = req.user.roles || [];
-      
-      console.log('Authorization debug:', {
-        userId: userId,
-        userRoles: userRoles,
-        salonId: salonId,
-        salonOwnerId: salon.ownerId,
-        salonOrgId: salon.orgId,
-        orgMemberships: req.user.orgMemberships
-      });
-      
-      // Check if user is the direct owner of this specific salon
       if (salon.ownerId === userId) {
-        console.log('Access granted - user is the salon owner for salon:', salonId);
+        const ownerPermissions = await rbacService.getRolePermissions('business_owner');
+        req.salonPermissions = {
+          userId,
+          salonId,
+          role: 'business_owner' as const,
+          permissions: ownerPermissions,
+          isBusinessOwner: true,
+        };
         next();
         return;
       }
 
-      // For non-owners, check organization membership
       const hasAccess = req.user.orgMemberships?.some((membership: any) => 
         membership.orgId === salon.orgId && 
         allowedOrgRoles.includes(membership.orgRole)
       );
 
       if (!hasAccess) {
-        console.log('Access denied - no business owner role or org membership found');
         return res.status(403).json({ error: 'Access denied to this salon' });
       }
 
-      console.log('Access granted via org membership for salon:', salonId);
+      const orgRole = req.user.orgMemberships?.find((m: any) => m.orgId === salon.orgId)?.orgRole;
+      const role = orgRole === 'owner' ? 'business_owner' : 'shop_admin';
+      const rolePermissions = await rbacService.getRolePermissions(role);
+      
+      req.salonPermissions = {
+        userId,
+        salonId,
+        role: role as 'business_owner' | 'shop_admin' | 'staff',
+        permissions: rolePermissions,
+        isBusinessOwner: role === 'business_owner',
+      };
+
+      if (requiredPermission) {
+        const codes = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
+        const hasPermission = codes.some(code => rolePermissions.includes(code));
+        
+        if (!hasPermission) {
+          return res.status(403).json({ error: 'You do not have permission to perform this action' });
+        }
+      }
+
       next();
     } catch (error) {
       console.error('Salon access check failed:', error);
@@ -251,8 +282,16 @@ export function requireStaffAccess() {
     }
 
     try {
-      // Check if user is staff member of this salon OR has manager/owner access
-      const isStaff = await storage.isUserStaffOfSalon(req.user.id, salonId);
+      const userId = req.user.id;
+      
+      const permissions = await rbacService.getUserPermissions(userId, salonId);
+      if (permissions) {
+        req.salonPermissions = permissions;
+        next();
+        return;
+      }
+
+      const isStaff = await storage.isUserStaffOfSalon(userId, salonId);
       
       const salon = await storage.getSalonById(salonId);
       const hasManagerAccess = salon && req.user.orgMemberships?.some((membership: any) => 
@@ -264,11 +303,64 @@ export function requireStaffAccess() {
         return res.status(403).json({ error: 'Access denied - must be staff member or have management access' });
       }
 
+      if (hasManagerAccess) {
+        const orgRole = req.user.orgMemberships?.find((m: any) => m.orgId === salon?.orgId)?.orgRole;
+        const role = orgRole === 'owner' ? 'business_owner' : 'shop_admin';
+        const rolePermissions = await rbacService.getRolePermissions(role);
+        req.salonPermissions = {
+          userId,
+          salonId,
+          role: role as 'business_owner' | 'shop_admin' | 'staff',
+          permissions: rolePermissions,
+          isBusinessOwner: role === 'business_owner',
+        };
+      } else if (isStaff) {
+        const staffPermissions = await rbacService.getRolePermissions('staff');
+        req.salonPermissions = {
+          userId,
+          salonId,
+          role: 'staff' as const,
+          permissions: staffPermissions,
+          isBusinessOwner: false,
+        };
+      }
+
       next();
     } catch (error) {
       console.error('Staff access check failed:', error);
       return res.status(500).json({ error: 'Authorization check failed' });
     }
+  };
+}
+
+export function requirePermission(permissionCode: string | string[]) {
+  return async (req: any, res: Response, next: NextFunction) => {
+    if (!req.salonPermissions) {
+      return res.status(403).json({ error: 'Salon access not established' });
+    }
+
+    const codes = Array.isArray(permissionCode) ? permissionCode : [permissionCode];
+    const hasPermission = codes.some(code => req.salonPermissions.permissions.includes(code));
+
+    if (!hasPermission) {
+      return res.status(403).json({ error: 'You do not have permission to perform this action' });
+    }
+
+    next();
+  };
+}
+
+export function requireBusinessOwner() {
+  return async (req: any, res: Response, next: NextFunction) => {
+    if (!req.salonPermissions) {
+      return res.status(403).json({ error: 'Salon access not established' });
+    }
+
+    if (!req.salonPermissions.isBusinessOwner) {
+      return res.status(403).json({ error: 'Only business owners can perform this action' });
+    }
+
+    next();
   };
 }
 

@@ -1,14 +1,371 @@
 # SalonHub Value-Added Features Plan
 
-**Document Version:** 1.1  
+**Document Version:** 1.2  
 **Created:** December 2024  
-**Status:** Pre-Production Planning
+**Last Updated:** December 2024  
+**Status:** Partially Implemented
 
 ---
 
 ## Executive Summary
 
 This document outlines the implementation plan for 4 high-impact value-added features to enhance SalonHub's competitive advantage before production launch. Each feature specification is based on detailed requirements analysis.
+
+---
+
+## Implementation Checklist
+
+### Feature 1: Smart Rebooking Reminders
+**Status: WEB COMPLETE, MOBILE PENDING**
+
+#### Database
+- [x] `service_rebooking_cycles` table
+- [x] `customer_rebooking_stats` table (tracks rebooking patterns)
+- [x] `rebooking_settings` table (salon-level configuration)
+- [x] `rebooking_reminders` table
+
+#### Backend API
+- [x] `GET/PUT /api/rebooking/settings/:salonId` - Configure settings
+- [x] `GET/POST/PUT/DELETE /api/rebooking/cycles/:salonId` - Manage cycles
+- [x] `GET /api/rebooking/suggestions` - Get customer suggestions
+- [x] `POST /api/rebooking/dismiss` - Dismiss suggestion
+- [x] `GET /api/rebooking/analytics/:salonId` - Analytics data
+- [x] `GET /api/rebooking/due-customers/:salonId` - Due customers list
+
+#### Scheduled Jobs
+- [x] Daily job - Generate rebooking reminders and update statuses
+- [ ] Weekly job - Recalculate optimal channels/timing
+
+#### Web - Business Dashboard
+- [x] Settings page for rebooking cycles
+- [x] Per-service cycle configuration
+- [x] Reminder analytics (pie chart, bar chart, gauge)
+- [x] Due customers list with contact actions
+- [x] Quiet hours configuration
+- [x] Max reminders per service setting
+- [x] Customer opt-out respect toggle
+- [x] Default min/max days settings
+- [x] WhatsApp and Push notification channels
+- [x] Reminder preview functionality
+- [x] Export due customers (Excel/PDF)
+
+#### Web - Customer
+- [x] "Recommended for you" section on dashboard (RebookingSuggestions component)
+- [x] Email/SMS templates with "Book Now" button
+
+#### Mobile App
+- [ ] Push notification with quick action
+- [ ] "Time to rebook" card on home screen
+- [ ] Pre-filled booking flow
+
+---
+
+### Feature 2: No-Show Protection (Deposits)
+**Status: WEB COMPLETE, MOBILE PARTIAL**
+
+#### Database
+- [x] `deposit_settings` table
+- [x] `service_deposit_rules` table
+- [x] `cancellation_policies` table
+- [x] `trusted_customers` table
+- [x] `deposit_transactions` table
+
+#### Backend API
+- [x] `GET/PUT /:salonId/deposit-settings` - Settings CRUD
+- [x] `GET/POST/DELETE /:salonId/service-rules` - Service rules
+- [x] `GET/PUT /:salonId/cancellation-policy` - Cancellation policy
+- [x] `GET/POST/DELETE /:salonId/trusted-customers` - Trusted list
+- [x] `POST /deposits/collect` - Collect deposit
+- [x] `POST /deposits/refund` - Process refund
+- [x] `GET /:salonId/analytics` - Deposit analytics
+
+#### Web - Business Dashboard
+- [x] Deposit percentage settings (20%, 25%, 50%, custom)
+- [x] Price threshold configuration
+- [x] Per-service deposit toggles
+- [x] Category-based rules
+- [x] Cancellation window settings (12hr/24hr/48hr/72hr)
+- [x] Trusted customers management
+- [x] Deposit analytics dashboard
+
+#### Web - Customer
+- [x] Deposit requirement notice in booking flow
+- [x] Deposit amount display
+- [x] Cancellation policy display
+- [x] Saved cards management
+- [x] Deposit history page
+
+#### Mobile App
+- [ ] Deposit badge on service cards
+- [x] Deposit payment during booking
+- [x] Cancellation policy display
+- [ ] Saved payment methods
+- [ ] Deposit transaction history
+- [ ] Refund/policy notifications
+
+---
+
+### Feature 3: Client Notes & Preferences
+**Status: WEB COMPLETE, MOBILE COMPLETE**
+
+#### Database
+- [x] `client_profiles` table
+- [x] `client_notes` table
+- [x] `client_formulas` table
+- [x] `client_photos` table
+- [x] `profile_visibility_settings` table
+
+#### Backend API
+- [x] `GET /:salonId/clients` - List clients with search
+- [x] `GET /:salonId/clients/:customerId` - Get profile
+- [x] `POST /:salonId/clients` - Create profile
+- [x] `PUT /:salonId/clients/:profileId` - Update profile
+- [x] `POST /:salonId/clients/:profileId/notes` - Add note
+- [x] `PUT/DELETE notes/:noteId` - Edit/delete note
+- [x] `POST /:salonId/clients/:profileId/formulas` - Add formula
+- [x] `POST /:salonId/clients/:profileId/photos` - Upload photo
+- [x] `GET/PUT /:salonId/visibility-settings` - Visibility config
+
+#### Web - Business Dashboard
+- [x] Client search and listing
+- [x] Full profile view with tabs (Notes, Formulas, Photos, Preferences)
+- [x] Hair profile fields (type, condition, length, density)
+- [x] Skin profile fields (type, concerns)
+- [x] Allergies and sensitivities tracking
+- [x] VIP customer flagging
+- [x] Note management (add, edit, pin, delete)
+- [x] Formula tracking (color, developer, timing)
+- [x] Photo gallery with upload
+- [x] Visit history tracking
+- [x] Visibility settings configuration
+- [ ] Auto-popup on new booking (partial)
+
+#### Web - Customer
+- [x] View own profile/preferences (MyBeautyProfile page)
+- [x] Update personal preferences (inline editing in MyBeautyProfile)
+- [x] View before/after photos (PhotoGallery component with lightbox)
+- [x] Preferences displayed on booking confirmation (BookingPreferenceSummary component)
+
+#### Mobile App
+- [x] "My Beauty Profile" section (BeautyProfileScreen.tsx)
+- [x] View/update preferences (inline editing in modal)
+- [x] Photo gallery of past transformations (PhotoGallery with lightbox viewer)
+- [x] Notes feed timeline (NotesFeed component integrated in screen)
+- [x] BeautyPreferencesCard component for booking checkout
+- [ ] "Add special notes" in booking flow
+- [ ] "Stylist knows your preferences" badge
+
+---
+
+### Feature 4: Gift Cards
+**Status: WEB COMPLETE, MOBILE PENDING**
+
+#### Database
+- [x] `gift_cards` table
+- [x] `gift_card_transactions` table
+- [x] `gift_card_deliveries` table
+- [x] `gift_card_templates` table
+
+#### Backend API
+- [x] `GET /templates/:salonId` - Get templates
+- [x] `POST /purchase` - Purchase gift card
+- [x] `POST /validate` - Validate code
+- [x] `POST /redeem` - Redeem gift card
+- [x] `GET /my-cards` - Customer's cards
+- [x] `GET /received` - Received cards
+- [x] QR code generation
+
+#### Web - Business Dashboard
+- [x] Gift card templates management
+- [x] Redemption interface
+- [x] Gift card analytics
+
+#### Web - Customer
+- [x] Gift card purchase page
+- [x] Template selection
+- [x] Amount selection (fixed + custom)
+- [x] Recipient details form
+- [x] Personal message input
+- [x] Razorpay payment integration
+- [x] Gift card balance in wallet
+- [x] Scheduled delivery date picker
+- [x] "Apply gift card" in booking checkout
+
+#### Mobile App
+- [x] Gift card purchase flow
+- [x] Card carousel for amount selection
+- [x] Recipient entry form
+- [x] Occasion selector
+- [x] Schedule delivery
+- [x] WhatsApp/SMS sharing
+- [x] Wallet section with QR display
+- [x] Balance and expiry countdown
+- [x] "Apply Gift Card" at checkout
+- [ ] QR scanner for redemption
+- [ ] Push notifications (received, expiry reminders)
+
+---
+
+## Summary
+
+| Feature | Implemented | Pending |
+|---------|-------------|---------|
+| **Smart Rebooking Reminders** | 23 items | 4 items |
+| **No-Show Protection** | 21 items | 4 items |
+| **Client Notes & Preferences** | 31 items | 2 items |
+| **Gift Cards** | 29 items | 2 items |
+| **TOTAL** | **104 items** | **12 items** |
+
+---
+
+## Implementation Status Summary
+
+| Feature | Backend | Database | Web (Business) | Web (Customer) | Mobile | Overall Status |
+|---------|---------|----------|----------------|----------------|--------|----------------|
+| **Smart Rebooking Reminders** | Complete | Complete | Complete | Complete | Not Started | **WEB COMPLETE** |
+| **No-Show Protection (Deposits)** | Complete | Complete | Complete | Complete | Partial | **WEB COMPLETE, MOBILE PARTIAL** |
+| **Client Notes & Preferences** | Complete | Complete | Complete | Complete | Complete | **COMPLETE** |
+| **Gift Cards** | Complete | Complete | Complete | Complete | Complete | **COMPLETE** |
+
+### Detailed Implementation Status
+
+#### Feature 1: Smart Rebooking Reminders - WEB COMPLETE
+- **Backend Routes:** `server/routes/rebooking.routes.ts` - COMPLETE
+  - Settings CRUD
+  - Service cycle management
+  - Customer suggestions
+  - Due customers list
+  - Analytics endpoints
+- **Database Tables:** COMPLETE
+  - `rebooking_settings` - Salon-level configuration
+  - `service_rebooking_cycles` - Per-service cycle rules
+  - `customer_rebooking_stats` - Customer rebooking patterns
+  - `rebooking_reminders` - Reminder history
+- **Scheduled Jobs:** `server/services/rebooking.service.ts` - COMPLETE
+  - Daily job for reminder generation and status updates
+- **Web Business UI:** `client/src/pages/BusinessSettings.tsx` - COMPLETE
+  - Full settings management with quiet hours, channels, analytics charts
+  - Due customers list with contact actions (Call, WhatsApp, Email)
+  - Reminder preview, export functionality (Excel/PDF)
+- **Web Customer UI:** COMPLETE
+  - `RebookingSuggestions` component on dashboard
+  - Email/SMS templates with "Book Now" button (rebooking.service.ts)
+- **Mobile UI:** NOT STARTED
+- **Priority for Next Sprint:** Mobile app integration
+
+#### Feature 2: No-Show Protection (Deposits) - WEB COMPLETE, MOBILE PARTIAL
+- **Backend Routes:** `server/routes/deposits.routes.ts` (1511 lines) - COMPLETE
+  - Deposit settings CRUD
+  - Service deposit rules management
+  - Trusted customers management
+  - Deposit collection via Razorpay
+  - Refund and forfeiture processing
+  - Cancellation policy management
+  - Analytics endpoints
+- **Database Tables:** COMPLETE
+  - `deposit_settings` - Salon-level configuration
+  - `service_deposit_rules` - Per-service rules
+  - `cancellation_policies` - Salon policies
+  - `trusted_customers` - Bypass list
+  - `deposit_transactions` - Transaction history
+- **Web Business UI:** `client/src/pages/BusinessSettings.tsx` - COMPLETE
+  - DepositsSettings component with full settings management
+  - Service-level deposit toggles
+  - Trusted customers management
+  - Analytics dashboard (deposits collected, refunded, forfeited)
+- **Web Customer UI:** COMPLETE
+  - Deposit display in booking flow
+  - Customer deposit history page (DepositHistory.tsx)
+  - Saved cards management page (SavedCards.tsx)
+- **Mobile UI:** PARTIAL
+  - DepositInfoCard component (mobile/src/components/DepositInfoCard.tsx)
+  - CancellationPolicyModal component (mobile/src/components/CancellationPolicyModal.tsx)
+  - Deposit payment during booking (PaymentScreen.tsx)
+  - Deposit check API integration (mobile/src/services/api.ts)
+  - BookingConfirmationScreen deposit status display
+  - **Remaining:** Deposit badge on service cards, saved payment methods, transaction history, refund notifications
+
+#### Feature 3: Client Notes & Preferences - WEB BUSINESS COMPLETE
+- **Backend Routes:** `server/routes/client-profiles.routes.ts` (1057 lines) - COMPLETE
+  - Client profile CRUD with search and pagination
+  - Client notes management (add, edit, delete, pin)
+  - Formula tracking (hair color, treatments, etc.)
+  - Photo uploads with before/after functionality
+  - Visibility settings per salon
+  - Staff permission enforcement
+- **Database Tables:** COMPLETE
+  - `client_profiles` - Extended customer profiles
+  - `client_notes` - Free-text notes with timestamps
+  - `client_formulas` - Structured formula data
+  - `client_photos` - Before/after photos
+  - `profile_visibility_settings` - Customer visibility control
+- **Web Business UI:** `client/src/components/business-dashboard/ClientProfilesManagement.tsx` (1867 lines) - COMPLETE
+  - Full client profile management
+  - Tabbed interface (Notes, Formulas, Photos, Preferences)
+  - VIP customer flagging
+  - Allergy/sensitivity alerts
+  - Photo gallery with upload
+  - Visit history tracking
+- **Web Customer UI:** COMPLETE
+  - MyBeautyProfile page with full profile viewing
+  - PhotoGallery component with lightbox and before/after comparison
+  - NotesFeed component for customer-visible notes timeline
+  - BookingPreferenceSummary component in booking checkout sidebar
+- **Mobile UI:** COMPLETE
+  - BeautyProfileScreen.tsx with salon list, photo gallery, notes feed
+  - Inline profile editing with option chips
+  - Photo viewer with lightbox modal
+  - BeautyPreferencesCard component for booking checkout
+  - Route and navigation integration
+
+#### Feature 4: Gift Cards - WEB COMPLETE
+- **Backend Routes:** `server/routes/gift-cards.routes.ts` (755 lines) - COMPLETE
+  - Gift card templates management
+  - Purchase flow with Razorpay
+  - QR code generation
+  - Validation and redemption
+  - Transaction history
+  - Scheduled delivery support
+- **Database Tables:** COMPLETE
+  - `gift_cards` - Main gift card records
+  - `gift_card_transactions` - Purchase/redemption history
+  - `gift_card_deliveries` - Scheduled delivery queue
+  - `gift_card_templates` - Design templates
+- **Web Business UI:** BusinessSettings.tsx - Gift card settings
+- **Web Customer UI:** `client/src/pages/GiftCardsPage.tsx` (629 lines) - COMPLETE
+  - Template selection
+  - Amount customization
+  - Recipient details form
+  - Payment flow integration
+  - Scheduled delivery date picker
+- **Web Customer Wallet:** CustomerWallet.tsx has gift card balance display
+- **Web Booking Checkout:** BookingPage.tsx has "Apply Gift Card" feature
+- **Mobile UI:** NOT STARTED
+
+---
+
+## Remaining Work (Priority Order)
+
+### Priority 1: Mobile App Integration (All Features)
+Estimated effort: 2-3 weeks
+- **Smart Rebooking:** Push notifications, "Time to rebook" card, pre-filled booking
+- **Gift Cards:** Purchase flow, wallet section with QR display, balance/expiry, checkout integration
+- **Deposits:** Payment during booking, cancellation policy display, saved payment methods
+- **Client Notes:** Customer profile view, beauty profile section
+
+### Priority 2: Web Customer Views (Remaining)
+Estimated effort: 3-5 days
+- [x] Customer deposit history page - DONE
+- [x] Customer saved cards management - DONE
+- [x] Customer profile self-view (preferences, photos) - MyBeautyProfile page COMPLETE
+- [x] "Apply gift card" in booking checkout - DONE
+- [x] Scheduled delivery date picker for gift cards - DONE
+- [x] Email/SMS templates with "Book Now" button for rebooking - DONE
+
+### Priority 3: Additional Enhancements
+Estimated effort: 3-5 days
+- Weekly job to recalculate optimal rebooking channels/timing
+- Gift card push notifications (received, expiry reminders)
 
 ---
 

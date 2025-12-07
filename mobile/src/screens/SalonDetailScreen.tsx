@@ -28,6 +28,9 @@ export default function SalonDetailScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const salonId = params.id as string;
+  const preselectedServiceId = params.preselectedServiceId as string | undefined;
+  const preferredStaffId = params.preferredStaffId as string | undefined;
+  const fromRebooking = params.fromRebooking === 'true';
   const { isAuthenticated } = useAuth();
   const { startConversation, setActiveConversation } = useChat();
 
@@ -44,6 +47,12 @@ export default function SalonDetailScreen() {
   useEffect(() => {
     fetchSalonData();
   }, [salonId]);
+
+  useEffect(() => {
+    if (fromRebooking || preselectedServiceId) {
+      setActiveTab('Services');
+    }
+  }, [fromRebooking, preselectedServiceId]);
 
   const fetchSalonData = async () => {
     try {
@@ -122,6 +131,21 @@ export default function SalonDetailScreen() {
 
   const formatPrice = (priceInPaisa: number) => {
     return `₹${(priceInPaisa / 100).toFixed(0)}`;
+  };
+
+  const buildServicesUrl = (specificServiceId?: string) => {
+    let url = `/salon/services?salonId=${salonId}&salonName=${encodeURIComponent(salon?.name || '')}`;
+    const serviceToPreselect = specificServiceId || preselectedServiceId;
+    if (serviceToPreselect) {
+      url += `&preselectedServiceId=${serviceToPreselect}`;
+    }
+    if (preferredStaffId) {
+      url += `&preferredStaffId=${preferredStaffId}`;
+    }
+    if (fromRebooking) {
+      url += `&fromRebooking=true`;
+    }
+    return url;
   };
 
   const images = salon?.imageUrls || (salon?.imageUrl ? [salon.imageUrl] : [
@@ -264,13 +288,13 @@ export default function SalonDetailScreen() {
           <View style={styles.servicesSection}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Services</Text>
-              <TouchableOpacity onPress={() => router.push(`/salon/services?salonId=${salonId}&salonName=${encodeURIComponent(salon.name)}`)}>
+              <TouchableOpacity onPress={() => router.push(buildServicesUrl())}>
                 <Text style={styles.seeAllText}>See all</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity
               style={styles.bookServicesButton}
-              onPress={() => router.push(`/salon/services?salonId=${salonId}&salonName=${encodeURIComponent(salon.name)}`)}
+              onPress={() => router.push(buildServicesUrl())}
             >
               <Text style={styles.bookServicesButtonText}>Book Services</Text>
               <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
@@ -284,7 +308,7 @@ export default function SalonDetailScreen() {
                 </View>
                 <TouchableOpacity
                   style={styles.bookServiceButton}
-                  onPress={() => router.push(`/salon/services?salonId=${salonId}&salonName=${encodeURIComponent(salon.name)}`)}
+                  onPress={() => router.push(buildServicesUrl(service.id))}
                 >
                   <Text style={styles.bookServiceText}>Book</Text>
                 </TouchableOpacity>
@@ -292,7 +316,7 @@ export default function SalonDetailScreen() {
             ))}
             <TouchableOpacity
               style={styles.seeAllServicesButton}
-              onPress={() => router.push(`/salon/services?salonId=${salonId}&salonName=${encodeURIComponent(salon.name)}`)}
+              onPress={() => router.push(buildServicesUrl())}
             >
               <Text style={styles.seeAllServicesText}>See all services</Text>
             </TouchableOpacity>

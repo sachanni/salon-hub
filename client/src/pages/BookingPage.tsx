@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'wouter';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Calendar, Clock, User, CreditCard, Check, Users, Shield, AlertTriangle, Info, XCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, User, CreditCard, Check, Users, Shield, AlertTriangle, Info, XCircle, Loader2, Gift, X } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { BookingPreferenceSummary } from '@/components/customer/BookingPreferenceSummary';
 import {
   Dialog,
   DialogContent,
@@ -81,6 +82,16 @@ interface DepositInfo {
   } | null;
 }
 
+interface GiftCardInfo {
+  id: string;
+  code: string;
+  balancePaisa: number;
+  originalValuePaisa: number;
+  status: string;
+  expiresAt?: string | null;
+  salonName?: string;
+}
+
 declare global {
   interface Window {
     Razorpay: any;
@@ -107,6 +118,10 @@ const BookingPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicyDialog, setShowPolicyDialog] = useState(false);
   const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [giftCardCode, setGiftCardCode] = useState('');
+  const [appliedGiftCard, setAppliedGiftCard] = useState<GiftCardInfo | null>(null);
+  const [giftCardError, setGiftCardError] = useState('');
+  const [isValidatingGiftCard, setIsValidatingGiftCard] = useState(false);
 
   const { data: salon, isLoading: isLoadingSalon, error: salonError } = useQuery({
     queryKey: ['salon', salonId],
@@ -177,6 +192,14 @@ const BookingPage: React.FC = () => {
     }
   }, [depositInfo]);
 
+  useEffect(() => {
+    if (paymentMethod === 'deposit' && appliedGiftCard) {
+      setAppliedGiftCard(null);
+      setGiftCardCode('');
+      setGiftCardError('');
+    }
+  }, [paymentMethod]);
+
   const getPayNowAmount = () => {
     if (!depositInfo?.requiresDeposit || paymentMethod === 'pay_now') {
       return totalPrice * 100;
@@ -203,6 +226,59 @@ const BookingPage: React.FC = () => {
       case 'charge_full_service': return 'Full service amount will be charged';
       default: return action;
     }
+  };
+
+  const canApplyGiftCard = paymentMethod === 'pay_now' || paymentMethod === 'pay_at_salon';
+  const giftCardDiscountPaisa = appliedGiftCard && canApplyGiftCard
+    ? Math.min(appliedGiftCard.balancePaisa, Math.round(totalPrice * 100))
+    : 0;
+  const totalAfterGiftCard = Math.max(0, Math.round(totalPrice * 100) - giftCardDiscountPaisa);
+
+  const handleApplyGiftCard = async () => {
+    if (!giftCardCode.trim()) {
+      setGiftCardError('Please enter a gift card code');
+      return;
+    }
+
+    setIsValidatingGiftCard(true);
+    setGiftCardError('');
+
+    try {
+      const response = await fetch('/api/gift-cards/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          code: giftCardCode.trim().toUpperCase(),
+          salonId 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.valid) {
+        setGiftCardError(data.error || 'Invalid gift card code');
+        setAppliedGiftCard(null);
+        return;
+      }
+
+      setAppliedGiftCard(data.card);
+      setGiftCardCode('');
+      toast({
+        title: "Gift Card Applied!",
+        description: `₹${data.card.balancePaisa / 100} will be applied to your order.`,
+      });
+    } catch (error) {
+      console.error('Gift card validation error:', error);
+      setGiftCardError('Failed to validate gift card. Please try again.');
+    } finally {
+      setIsValidatingGiftCard(false);
+    }
+  };
+
+  const handleRemoveGiftCard = () => {
+    setAppliedGiftCard(null);
+    setGiftCardCode('');
+    setGiftCardError('');
   };
 
   const loadRazorpayScript = useCallback((): Promise<boolean> => {
@@ -235,6 +311,8 @@ const BookingPage: React.FC = () => {
         isGuest: isGuestMode,
         totalPrice: totalPrice * 100,
         totalDuration,
+        giftCardCode: appliedGiftCard?.code || null,
+        giftCardDiscountPaisa: giftCardDiscountPaisa || 0,
       };
 
       const response = await fetch('/api/bookings', {
@@ -255,6 +333,7 @@ const BookingPage: React.FC = () => {
       setLocation(`/salon-profile?id=${salonId}`);
     } catch (error) {
       console.error('Booking error:', error);
+      setAppliedGiftCard(null);
       toast({
         title: "Booking Failed",
         description: "There was an error processing your booking. Please try again.",
@@ -269,6 +348,63 @@ const BookingPage: React.FC = () => {
     setIsProcessing(true);
     
     try {
+      const paymentType = paymentMethod === 'deposit' ? 'deposit' : 'full_payment';
+      const baseAmountPaisa = paymentMethod === 'deposit' 
+        ? (depositInfo?.totalDepositPaisa || 0)
+        : Math.round(totalPrice * 100);
+      
+      const amountAfterGiftCard = paymentMethod === 'deposit' 
+        ? baseAmountPaisa 
+        : Math.max(0, baseAmountPaisa - giftCardDiscountPaisa);
+
+      if (amountAfterGiftCard === 0 && appliedGiftCard && paymentMethod !== 'deposit') {
+        try {
+          const response = await fetch('/api/bookings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              salonId,
+              serviceIds: selectedServiceIds,
+              date: selectedDate,
+              time: selectedTime,
+              staffId: selectedStaff || null,
+              customerName: customerName || '',
+              customerEmail,
+              customerPhone,
+              paymentMethod: 'gift_card',
+              isGuest: isGuestMode,
+              totalPrice: totalPrice * 100,
+              totalDuration,
+              giftCardCode: appliedGiftCard.code,
+              giftCardDiscountPaisa: giftCardDiscountPaisa,
+            })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Booking failed');
+          }
+
+          toast({
+            title: "Booking Confirmed!",
+            description: "Your appointment has been booked using your gift card.",
+          });
+
+          setLocation(`/salon-profile?id=${salonId}`);
+        } catch (error: any) {
+          console.error('Gift card booking error:', error);
+          setAppliedGiftCard(null);
+          toast({
+            title: "Booking Failed",
+            description: error.message || "There was an error processing your booking. Please try again.",
+            variant: "destructive"
+          });
+        } finally {
+          setIsProcessing(false);
+        }
+        return;
+      }
+
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
         toast({
@@ -280,10 +416,7 @@ const BookingPage: React.FC = () => {
         return;
       }
 
-      const paymentType = paymentMethod === 'deposit' ? 'deposit' : 'full_payment';
-      const amountPaisa = paymentMethod === 'deposit' 
-        ? (depositInfo?.totalDepositPaisa || 0)
-        : Math.round(totalPrice * 100);
+      const amountPaisa = amountAfterGiftCard;
 
       const orderResponse = await fetch('/api/deposits/create-deposit-order', {
         method: 'POST',
@@ -298,6 +431,8 @@ const BookingPage: React.FC = () => {
           bookingDate: selectedDate,
           bookingTime: selectedTime,
           staffId: selectedStaff || null,
+          giftCardCode: appliedGiftCard?.code || null,
+          giftCardDiscountPaisa: giftCardDiscountPaisa || 0,
         }),
       });
 
@@ -335,6 +470,8 @@ const BookingPage: React.FC = () => {
                 customerPhone,
                 customerName: customerName || '',
                 paymentType,
+                giftCardCode: appliedGiftCard?.code || null,
+                giftCardDiscountPaisa: giftCardDiscountPaisa || 0,
               }),
             });
 
@@ -389,6 +526,7 @@ const BookingPage: React.FC = () => {
 
     } catch (error: any) {
       console.error('Payment error:', error);
+      setAppliedGiftCard(null);
       toast({
         title: "Payment Error",
         description: error.message || "Failed to initiate payment. Please try again.",
@@ -840,7 +978,10 @@ const BookingPage: React.FC = () => {
           </div>
 
           <div className="lg:col-span-1">
-            <div className="sticky top-24">
+            <div className="sticky top-24 space-y-4">
+              {/* Customer Preferences Summary */}
+              <BookingPreferenceSummary salonId={salonId} />
+              
               <Card>
                 <CardContent className="p-6">
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">Booking Summary</h2>
@@ -858,6 +999,80 @@ const BookingPage: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <span className="text-gray-600">Service Total</span>
                       <span className="font-semibold">₹{totalPrice}</span>
+                    </div>
+
+                    <Separator />
+                    
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Gift className="w-4 h-4 text-purple-600" />
+                        <span className="text-sm font-medium text-gray-700">Have a Gift Card?</span>
+                      </div>
+                      
+                      {paymentMethod === 'deposit' && (
+                        <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
+                          Gift cards cannot be applied to deposit payments. Choose "Pay Full Amount" to use your gift card.
+                        </p>
+                      )}
+                      
+                      {appliedGiftCard && canApplyGiftCard ? (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-green-800">
+                                {appliedGiftCard.code}
+                              </p>
+                              <p className="text-xs text-green-600">
+                                Balance: ₹{appliedGiftCard.balancePaisa / 100}
+                              </p>
+                            </div>
+                            <button
+                              onClick={handleRemoveGiftCard}
+                              className="p-1 hover:bg-green-100 rounded-full transition-colors"
+                            >
+                              <X className="w-4 h-4 text-green-700" />
+                            </button>
+                          </div>
+                          <div className="mt-2 pt-2 border-t border-green-200">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-green-700">Discount Applied</span>
+                              <span className="font-semibold text-green-800">
+                                -₹{giftCardDiscountPaisa / 100}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : canApplyGiftCard ? (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <Input
+                              value={giftCardCode}
+                              onChange={(e) => {
+                                setGiftCardCode(e.target.value.toUpperCase());
+                                setGiftCardError('');
+                              }}
+                              placeholder="Enter code (e.g., GIFT-XXXX-XXXX)"
+                              className="flex-1 text-sm"
+                            />
+                            <Button
+                              onClick={handleApplyGiftCard}
+                              disabled={isValidatingGiftCard || !giftCardCode.trim()}
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0"
+                            >
+                              {isValidatingGiftCard ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                'Apply'
+                              )}
+                            </Button>
+                          </div>
+                          {giftCardError && (
+                            <p className="text-xs text-red-500">{giftCardError}</p>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
 
                     {depositInfo?.requiresDeposit && paymentMethod === 'deposit' && (
@@ -884,6 +1099,19 @@ const BookingPage: React.FC = () => {
                     )}
 
                     <Separator />
+                    
+                    {appliedGiftCard && giftCardDiscountPaisa > 0 && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-green-600 flex items-center gap-1">
+                          <Gift className="w-3 h-3" />
+                          Gift Card Discount
+                        </span>
+                        <span className="font-medium text-green-600">
+                          -₹{giftCardDiscountPaisa / 100}
+                        </span>
+                      </div>
+                    )}
+                    
                     <div className="flex items-center justify-between">
                       <span className="text-lg font-semibold">
                         {paymentMethod === 'deposit' ? 'Pay Now' : 'Total'}
@@ -893,9 +1121,15 @@ const BookingPage: React.FC = () => {
                           ? (depositInfo?.totalDepositPaisa || 0) / 100 
                           : paymentMethod === 'pay_at_salon' 
                             ? 0 
-                            : totalPrice}
+                            : totalAfterGiftCard / 100}
                       </span>
                     </div>
+                    
+                    {appliedGiftCard && totalAfterGiftCard === 0 && paymentMethod !== 'pay_at_salon' && (
+                      <p className="text-xs text-green-600 text-center">
+                        Your gift card covers the full amount!
+                      </p>
+                    )}
                   </div>
 
                   <Button
@@ -906,7 +1140,8 @@ const BookingPage: React.FC = () => {
                     {isProcessing ? 'Processing...' : 
                       paymentMethod === 'pay_at_salon' ? 'Confirm Booking' :
                       paymentMethod === 'deposit' ? `Pay Deposit ₹${(depositInfo?.totalDepositPaisa || 0) / 100}` :
-                      `Pay ₹${totalPrice}`}
+                      totalAfterGiftCard === 0 && appliedGiftCard ? 'Confirm Booking (Gift Card)' :
+                      `Pay ₹${totalAfterGiftCard / 100}`}
                   </Button>
 
                   <p className="text-xs text-gray-500 text-center mt-4">

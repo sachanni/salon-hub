@@ -32,9 +32,10 @@ interface BookingDetails {
 }
 
 export default function BookingConfirmationScreen() {
-  const params = useLocalSearchParams<{ bookingId: string }>();
+  const params = useLocalSearchParams<{ bookingId: string; depositPaid?: string }>();
   const router = useRouter();
   const bookingId = params.bookingId;
+  const depositPaid = params.depositPaid === 'true';
 
   const [booking, setBooking] = useState<BookingDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -268,9 +269,21 @@ export default function BookingConfirmationScreen() {
           <View style={styles.paymentRow}>
             <Text style={styles.paymentLabel}>Payment Method</Text>
             <Text style={styles.paymentMethod}>
-              {booking.paymentMethod === 'pay_now' ? 'Paid Online' : 'Pay at Salon'}
+              {booking.paymentMethod === 'pay_now' 
+                ? 'Paid Online' 
+                : booking.paymentMethod === 'pay_deposit' || depositPaid
+                  ? 'Deposit Paid'
+                  : 'Pay at Salon'}
             </Text>
           </View>
+          {(booking.paymentMethod === 'pay_deposit' || depositPaid) && (
+            <View style={styles.depositInfoRow}>
+              <Ionicons name="shield-checkmark" size={16} color="#D97706" />
+              <Text style={styles.depositInfoText}>
+                Deposit paid - balance due at salon
+              </Text>
+            </View>
+          )}
           <View style={styles.paymentRow}>
             <Text style={styles.paymentLabel}>Status</Text>
             <View style={styles.statusBadge}>
@@ -624,6 +637,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#111827',
+  },
+  depositInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 8,
+  },
+  depositInfoText: {
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '500',
+    flex: 1,
   },
   statusBadge: {
     paddingHorizontal: 12,

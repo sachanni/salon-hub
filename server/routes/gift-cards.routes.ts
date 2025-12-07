@@ -29,10 +29,45 @@ interface MobileAuthRequest extends Request {
 
 const router = Router();
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || "",
-  key_secret: process.env.RAZORPAY_KEY_SECRET || "",
-});
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GIFT_CARD_CODE_REGEX = /^GIFT-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+
+function sanitizeString(str: string | undefined | null): string {
+  if (!str) return "";
+  return str.replace(/<[^>]*>/g, "").trim();
+}
+
+function isValidUUID(id: string | undefined | null): boolean {
+  if (!id) return false;
+  return UUID_REGEX.test(id);
+}
+
+function timingSafeCompare(a: string, b: string): boolean {
+  try {
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
+function getRazorpayConfig() {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) {
+    throw new Error("Razorpay credentials not configured");
+  }
+  return { keyId, keySecret };
+}
+
+function getRazorpayInstance(): Razorpay {
+  const { keyId, keySecret } = getRazorpayConfig();
+  return new Razorpay({ key_id: keyId, key_secret: keySecret });
+}
 
 function generateGiftCardCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -61,6 +96,10 @@ export const publicGiftCardsRouter = Router();
 publicGiftCardsRouter.get("/templates/:salonId", async (req: Request, res: Response) => {
   try {
     const { salonId } = req.params;
+    
+    if (!isValidUUID(salonId)) {
+      return res.status(400).json({ error: "Invalid salon ID format" });
+    }
 
     const templates = await db
       .select()
@@ -149,6 +188,17 @@ publicGiftCardsRouter.post("/create-order", async (req: Request, res: Response) 
 
     const { salonId, valuePaisa, templateId, recipientName, recipientEmail, recipientPhone, personalMessage, deliveryMethod, scheduledDeliveryAt } = validation.data;
 
+    if (!isValidUUID(salonId)) {
+      return res.status(400).json({ error: "Invalid salon ID format" });
+    }
+    
+    if (templateId && !isValidUUID(templateId)) {
+      return res.status(400).json({ error: "Invalid template ID format" });
+    }
+
+    const sanitizedRecipientName = sanitizeString(recipientName);
+    const sanitizedPersonalMessage = sanitizeString(personalMessage);
+
     const salon = await db.select().from(salons).where(eq(salons.id, salonId)).limit(1);
     if (salon.length === 0) {
       return res.status(404).json({ error: "Salon not found" });
@@ -165,6 +215,17 @@ publicGiftCardsRouter.post("/create-order", async (req: Request, res: Response) 
       }
     }
 
+    let razorpay: Razorpay;
+    let razorpayKeyId: string;
+    try {
+      const config = getRazorpayConfig();
+      razorpayKeyId = config.keyId;
+      razorpay = getRazorpayInstance();
+    } catch (configError) {
+      console.error("Razorpay configuration error:", configError);
+      return res.status(503).json({ error: "Payment service temporarily unavailable" });
+    }
+
     const order = await razorpay.orders.create({
       amount: valuePaisa,
       currency: "INR",
@@ -179,33 +240,46 @@ publicGiftCardsRouter.post("/create-order", async (req: Request, res: Response) 
       },
     });
 
-    let code = generateGiftCardCode();
-    let existingCard = await db.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
-    while (existingCard.length > 0) {
+    const MAX_CODE_ATTEMPTS = 10;
+    let code = "";
+    let newGiftCard;
+    
+    for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
       code = generateGiftCardCode();
-      existingCard = await db.select().from(giftCards).where(eq(giftCards.code, code)).limit(1);
+      const qrCodeUrl = await generateQRCodeDataUrl(code);
+      
+      try {
+        [newGiftCard] = await db
+          .insert(giftCards)
+          .values({
+            salonId,
+            code,
+            originalValuePaisa: valuePaisa,
+            balancePaisa: valuePaisa,
+            status: "pending_payment",
+            recipientName: sanitizedRecipientName || null,
+            recipientEmail,
+            recipientPhone,
+            personalMessage: sanitizedPersonalMessage || null,
+            templateId,
+            scheduledDeliveryAt: scheduledDeliveryAt ? new Date(scheduledDeliveryAt) : null,
+            razorpayOrderId: order.id,
+            qrCodeUrl,
+          })
+          .returning();
+        break;
+      } catch (insertError: any) {
+        if (insertError.code === '23505' && insertError.constraint?.includes('code')) {
+          continue;
+        }
+        throw insertError;
+      }
     }
 
-    const qrCodeUrl = await generateQRCodeDataUrl(code);
-
-    const [newGiftCard] = await db
-      .insert(giftCards)
-      .values({
-        salonId,
-        code,
-        originalValuePaisa: valuePaisa,
-        balancePaisa: valuePaisa,
-        status: "pending_payment",
-        recipientName,
-        recipientEmail,
-        recipientPhone,
-        personalMessage,
-        templateId,
-        scheduledDeliveryAt: scheduledDeliveryAt ? new Date(scheduledDeliveryAt) : null,
-        razorpayOrderId: order.id,
-        qrCodeUrl,
-      })
-      .returning();
+    if (!newGiftCard) {
+      console.error("Failed to generate unique gift card code after max attempts");
+      return res.status(500).json({ error: "Failed to create gift card. Please try again." });
+    }
 
     if (deliveryMethod && (recipientEmail || recipientPhone)) {
       await db.insert(giftCardDeliveries).values({
@@ -223,7 +297,7 @@ publicGiftCardsRouter.post("/create-order", async (req: Request, res: Response) 
       giftCardId: newGiftCard.id,
       code: newGiftCard.code,
       amount: valuePaisa,
-      keyId: process.env.RAZORPAY_KEY_ID,
+      keyId: razorpayKeyId,
     });
   } catch (error) {
     console.error("Error creating gift card order:", error);
@@ -231,20 +305,39 @@ publicGiftCardsRouter.post("/create-order", async (req: Request, res: Response) 
   }
 });
 
+const verifyPaymentSchema = z.object({
+  razorpay_order_id: z.string().min(1).max(100),
+  razorpay_payment_id: z.string().min(1).max(100),
+  razorpay_signature: z.string().min(1).max(200),
+  giftCardId: z.string().uuid(),
+  purchasedBy: z.string().uuid().optional(),
+});
+
 publicGiftCardsRouter.post("/verify-payment", async (req: Request, res: Response) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, giftCardId, purchasedBy } = req.body;
+    const validation = verifyPaymentSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid input", details: validation.error.errors });
+    }
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !giftCardId) {
-      return res.status(400).json({ error: "Missing required payment verification fields" });
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, giftCardId, purchasedBy } = validation.data;
+
+    let razorpaySecret: string;
+    try {
+      const config = getRazorpayConfig();
+      razorpaySecret = config.keySecret;
+    } catch (configError) {
+      console.error("Razorpay configuration error during verification:", configError);
+      return res.status(503).json({ error: "Payment service temporarily unavailable" });
     }
 
     const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "")
+      .createHmac("sha256", razorpaySecret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (expectedSignature !== razorpay_signature) {
+    if (!timingSafeCompare(expectedSignature, razorpay_signature)) {
+      console.warn("Payment signature verification failed for order:", razorpay_order_id);
       return res.status(400).json({ error: "Payment verification failed" });
     }
 
@@ -255,7 +348,16 @@ publicGiftCardsRouter.post("/verify-payment", async (req: Request, res: Response
 
     const card = giftCard[0];
 
+    if (card.razorpayOrderId !== razorpay_order_id) {
+      console.warn("Order ID mismatch for gift card:", giftCardId);
+      return res.status(400).json({ error: "Order ID mismatch" });
+    }
+
     if (card.status !== "pending_payment") {
+      if (card.status === "active" && card.razorpayPaymentId === razorpay_payment_id) {
+        const updatedCard = await db.select().from(giftCards).where(eq(giftCards.id, giftCardId)).limit(1);
+        return res.json({ success: true, giftCard: updatedCard[0] });
+      }
       return res.status(400).json({ error: "Gift card is not awaiting payment" });
     }
 
@@ -263,7 +365,7 @@ publicGiftCardsRouter.post("/verify-payment", async (req: Request, res: Response
       .update(giftCards)
       .set({
         status: "active",
-        purchasedBy,
+        purchasedBy: purchasedBy || null,
         purchasedAt: new Date(),
         razorpayPaymentId: razorpay_payment_id,
         updatedAt: new Date(),
@@ -400,7 +502,7 @@ router.get("/:id/transactions", authenticateMobileUser, async (req: MobileAuthRe
   }
 });
 
-router.post("/:salonId/redeem", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post("/:salonId/redeem", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const userId = req.user?.id;
@@ -483,7 +585,7 @@ router.post("/:salonId/redeem", requireSalonAccess, async (req: AuthenticatedReq
   }
 });
 
-router.get("/:salonId/templates", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get("/:salonId/templates", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
 
@@ -500,7 +602,7 @@ router.get("/:salonId/templates", requireSalonAccess, async (req: AuthenticatedR
   }
 });
 
-router.post("/:salonId/templates", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post("/:salonId/templates", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const userId = req.user?.id;
@@ -519,7 +621,7 @@ router.post("/:salonId/templates", requireSalonAccess, async (req: Authenticated
   }
 });
 
-router.put("/:salonId/templates/:templateId", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.put("/:salonId/templates/:templateId", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, templateId } = req.params;
 
@@ -546,7 +648,7 @@ router.put("/:salonId/templates/:templateId", requireSalonAccess, async (req: Au
   }
 });
 
-router.delete("/:salonId/templates/:templateId", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.delete("/:salonId/templates/:templateId", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, templateId } = req.params;
 
@@ -564,12 +666,49 @@ router.delete("/:salonId/templates/:templateId", requireSalonAccess, async (req:
   }
 });
 
-router.get("/:salonId/cards", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get("/:salonId/cards", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { status, startDate, endDate, search } = req.query;
 
-    let query = db
+    // Build conditions array with salonId as base filter
+    const conditions: any[] = [eq(giftCards.salonId, salonId!)];
+
+    // Filter by status if provided and not 'all'
+    if (status && status !== 'all' && typeof status === 'string') {
+      conditions.push(eq(giftCards.status, status));
+    }
+
+    // Filter by date range if provided
+    if (startDate && typeof startDate === 'string') {
+      const start = new Date(startDate);
+      if (!isNaN(start.getTime())) {
+        conditions.push(gte(giftCards.purchasedAt, start));
+      }
+    }
+
+    if (endDate && typeof endDate === 'string') {
+      const end = new Date(endDate);
+      if (!isNaN(end.getTime())) {
+        // Set to end of day
+        end.setHours(23, 59, 59, 999);
+        conditions.push(lte(giftCards.purchasedAt, end));
+      }
+    }
+
+    // Filter by search term (code, recipient name, or recipient email)
+    if (search && typeof search === 'string' && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      conditions.push(
+        or(
+          sql`${giftCards.code} ILIKE ${searchTerm}`,
+          sql`${giftCards.recipientName} ILIKE ${searchTerm}`,
+          sql`${giftCards.recipientEmail} ILIKE ${searchTerm}`
+        )
+      );
+    }
+
+    const cards = await db
       .select({
         id: giftCards.id,
         code: giftCards.code,
@@ -588,9 +727,8 @@ router.get("/:salonId/cards", requireSalonAccess, async (req: AuthenticatedReque
       })
       .from(giftCards)
       .leftJoin(users, eq(giftCards.purchasedBy, users.id))
-      .where(eq(giftCards.salonId, salonId!));
-
-    const cards = await query.orderBy(desc(giftCards.createdAt));
+      .where(and(...conditions))
+      .orderBy(desc(giftCards.createdAt));
 
     res.json({ cards });
   } catch (error) {
@@ -599,7 +737,7 @@ router.get("/:salonId/cards", requireSalonAccess, async (req: AuthenticatedReque
   }
 });
 
-router.get("/:salonId/analytics", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get("/:salonId/analytics", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
 
@@ -609,7 +747,14 @@ router.get("/:salonId/analytics", requireSalonAccess, async (req: AuthenticatedR
         totalValue: sql<number>`COALESCE(SUM(${giftCards.originalValuePaisa}), 0)`,
       })
       .from(giftCards)
-      .where(and(eq(giftCards.salonId, salonId!), eq(giftCards.status, "active")));
+      .where(and(
+        eq(giftCards.salonId, salonId!),
+        or(
+          eq(giftCards.status, "active"),
+          eq(giftCards.status, "partially_used"),
+          eq(giftCards.status, "fully_redeemed")
+        )
+      ));
 
     const totalRedeemed = await db
       .select({
@@ -668,7 +813,7 @@ router.get("/:salonId/analytics", requireSalonAccess, async (req: AuthenticatedR
   }
 });
 
-router.get("/:salonId/cards/:id", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get("/:salonId/cards/:id", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, id } = req.params;
 
@@ -697,7 +842,7 @@ router.get("/:salonId/cards/:id", requireSalonAccess, async (req: AuthenticatedR
   }
 });
 
-router.post("/:salonId/cards/:id/cancel", requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post("/:salonId/cards/:id/cancel", requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, id } = req.params;
     const userId = req.user?.id;

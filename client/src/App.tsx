@@ -24,6 +24,8 @@ import BusinessDashboard from "@/pages/BusinessDashboard";
 import BusinessSettings from "@/pages/BusinessSettings";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import CustomerWallet from "@/pages/CustomerWallet";
+import DepositHistory from "@/pages/DepositHistory";
+import SavedCards from "@/pages/SavedCards";
 import CustomerOffers from "@/pages/CustomerOffers";
 import AllOffersPage from "@/pages/AllOffersPage";
 import SalonProfile from "@/pages/SalonProfile";
@@ -72,6 +74,7 @@ import DraftEvents from "@/pages/DraftEvents";
 import NotificationCenter from "@/pages/NotificationCenter";
 import PastEvents from "@/pages/PastEvents";
 import NotFound from "@/pages/not-found";
+import MyBeautyProfile from "@/pages/MyBeautyProfile";
 import { AIBeautyConsultant } from "@/components/chat/AIBeautyConsultant";
 
 function Router() {
@@ -98,6 +101,10 @@ function Router() {
         </Route>
         <Route path="/customer/dashboard" component={CustomerDashboard} />
         <Route path="/wallet" component={CustomerWallet} />
+        <Route path="/customer/wallet" component={CustomerWallet} />
+        <Route path="/customer/deposits" component={DepositHistory} />
+        <Route path="/customer/saved-cards" component={SavedCards} />
+        <Route path="/customer/beauty-profile" component={MyBeautyProfile} />
         <Route path="/offers" component={CustomerOffers} />
         <Route path="/all-offers" component={AllOffersPage} />
         <Route path="/calendar">

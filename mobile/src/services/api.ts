@@ -194,6 +194,9 @@ export const bookingAPI = {
     bookingTime: string;
     paymentMethod: string;
     notes?: string;
+    depositAmountPaisa?: number;
+    giftCardId?: string;
+    giftCardAmountPaisa?: number;
   }) => {
     const response = await api.post('/api/bookings', bookingData);
     return response.data;
@@ -799,6 +802,301 @@ export const appointmentsAPI = {
     comment?: string;
   }) => {
     const response = await api.post(`/api/bookings/${appointmentId}/review`, data);
+    return response.data;
+  },
+};
+
+// Rebooking API endpoints
+export const rebookingAPI = {
+  getSuggestions: async (salonId?: string) => {
+    try {
+      const response = await api.get('/api/mobile/rebooking/suggestions', {
+        params: salonId ? { salonId } : {},
+      });
+      return response.data;
+    } catch (error) {
+      console.warn('Rebooking suggestions API not available');
+      return [];
+    }
+  },
+
+  dismissSuggestion: async (data: {
+    serviceId: string;
+    salonId: string;
+    reason?: string;
+    snoozeDays?: number;
+  }) => {
+    const response = await api.post('/api/mobile/rebooking/dismiss', data);
+    return response.data;
+  },
+};
+
+// Deposit API endpoints for No-Show Protection
+export interface DepositCheckResult {
+  requiresDeposit: boolean;
+  reason: string;
+  totalDepositPaisa: number;
+  totalServicePaisa: number;
+  balanceDuePaisa?: number;
+  forceFullPayment?: boolean;
+  serviceDeposits: Array<{
+    serviceId: string;
+    serviceName: string;
+    servicePriceInPaisa: number;
+    depositAmountPaisa: number;
+    depositPercentage: number;
+    requiresDeposit: boolean;
+    reason: string;
+  }>;
+  cancellationPolicy?: {
+    windowHours: number;
+    withinWindowAction: string;
+    partialForfeitPercentage?: number;
+    noShowAction: string;
+    noShowGraceMinutes?: number;
+    policyText?: string;
+  } | null;
+}
+
+export interface DepositOrder {
+  id: string;
+  amount: number;
+  currency: string;
+  receipt: string;
+}
+
+export interface DepositTransaction {
+  id: string;
+  salonId: string;
+  salonName?: string;
+  bookingId: string;
+  transactionType: 'deposit_collected' | 'deposit_refunded' | 'deposit_forfeited' | 'no_show_charged' | 'deposit_applied';
+  amountPaisa: number;
+  currency: string;
+  serviceAmountPaisa: number;
+  depositPercentage: number;
+  status: string;
+  reason?: string;
+  wasNoShow?: number;
+  createdAt: string;
+  bookingDate?: string;
+  bookingTime?: string;
+  serviceName?: string;
+}
+
+export const depositAPI = {
+  checkBookingDeposit: async (data: {
+    salonId: string;
+    serviceIds: string[];
+    customerId?: string;
+  }): Promise<DepositCheckResult> => {
+    try {
+      const response = await api.post('/api/deposits/check-booking-deposit', data);
+      return response.data;
+    } catch (error) {
+      console.warn('Deposit check failed, assuming no deposit required');
+      return {
+        requiresDeposit: false,
+        reason: 'api_error',
+        totalDepositPaisa: 0,
+        totalServicePaisa: 0,
+        serviceDeposits: [],
+      };
+    }
+  },
+
+  getCancellationPolicy: async (salonId: string) => {
+    try {
+      const response = await api.get(`/api/deposits/cancellation-policy/${salonId}`);
+      return response.data;
+    } catch (error) {
+      return null;
+    }
+  },
+
+  createDepositOrder: async (data: {
+    salonId: string;
+    serviceIds: string[];
+    amountPaisa: number;
+    paymentType: 'deposit' | 'full_payment';
+    customerEmail?: string;
+    customerPhone?: string;
+    bookingDate: string;
+    bookingTime: string;
+    staffId?: string | null;
+  }): Promise<{ success: boolean; order: DepositOrder; keyId: string; salonName: string; serviceNames: string[] }> => {
+    const response = await api.post('/api/deposits/create-deposit-order', data);
+    return response.data;
+  },
+
+  verifyDepositPayment: async (data: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+    salonId: string;
+    serviceIds: string[];
+    bookingDate: string;
+    bookingTime: string;
+    staffId?: string | null;
+    customerEmail: string;
+    customerPhone?: string;
+    customerName?: string;
+    paymentType: 'deposit' | 'full_payment';
+  }) => {
+    const response = await api.post('/api/deposits/verify-deposit-payment', data);
+    return response.data;
+  },
+
+  getMyDeposits: async (): Promise<{ transactions: DepositTransaction[]; stats: any }> => {
+    try {
+      const response = await api.get('/api/mobile/deposits/my-deposits');
+      return response.data;
+    } catch (error) {
+      return { transactions: [], stats: {} };
+    }
+  },
+};
+
+// Gift Card API endpoints
+import type {
+  GiftCardTemplate,
+  GiftCard,
+  GiftCardTransaction,
+  PurchaseGiftCardData,
+  CreateOrderResponse,
+  VerifyPaymentData,
+  ValidateGiftCardResponse,
+  MyCardsResponse,
+} from '../types/giftCard';
+
+export const giftCardAPI = {
+  getTemplates: async (salonId: string): Promise<{ templates: GiftCardTemplate[] }> => {
+    const response = await api.get(`/api/gift-cards/public/templates/${salonId}`);
+    return response.data;
+  },
+
+  createOrder: async (data: PurchaseGiftCardData): Promise<CreateOrderResponse> => {
+    const response = await api.post('/api/gift-cards/public/create-order', data);
+    return response.data;
+  },
+
+  verifyPayment: async (data: VerifyPaymentData): Promise<{ success: boolean; giftCard: GiftCard }> => {
+    const response = await api.post('/api/gift-cards/public/verify-payment', data);
+    return response.data;
+  },
+
+  validateCard: async (code: string, salonId?: string): Promise<ValidateGiftCardResponse> => {
+    const response = await api.post('/api/gift-cards/public/validate', { code, salonId });
+    return response.data;
+  },
+
+  getMyCards: async (): Promise<MyCardsResponse> => {
+    const response = await api.get('/api/gift-cards/my-cards');
+    return response.data;
+  },
+
+  getTransactions: async (giftCardId: string): Promise<{ transactions: GiftCardTransaction[] }> => {
+    const response = await api.get(`/api/gift-cards/${giftCardId}/transactions`);
+    return response.data;
+  },
+
+  applyToBooking: async (data: {
+    code: string;
+    salonId: string;
+    amountPaisa: number;
+  }): Promise<{ success: boolean; appliedAmountPaisa: number; remainingBalancePaisa: number }> => {
+    const response = await api.post('/api/gift-cards/apply-to-booking', data);
+    return response.data;
+  },
+};
+
+// Beauty Profile API endpoints
+export interface BeautyProfile {
+  id: string;
+  salonId: string;
+  salonName: string;
+  salonImageUrl?: string;
+  hairType?: string;
+  hairTexture?: string;
+  hairColor?: string;
+  skinType?: string;
+  skinTone?: string;
+  skinConcerns?: string[];
+  allergies?: string[];
+  preferredCommunication?: string;
+  preferredBeverage?: string;
+  musicPreference?: string;
+  additionalNotes?: string;
+  photos?: {
+    id: string;
+    url: string;
+    caption?: string;
+    createdAt: string;
+  }[];
+  notes?: {
+    id: string;
+    content: string;
+    createdBy: string;
+    createdAt: string;
+    isPrivate: boolean;
+  }[];
+  visitCount: number;
+  lastVisit?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BeautyProfileSummary {
+  totalProfiles: number;
+  totalPhotos: number;
+  totalNotes: number;
+  totalVisits: number;
+  lastActiveAt?: string;
+}
+
+export interface BookingSummary {
+  hairProfile?: {
+    type?: string;
+    texture?: string;
+    color?: string;
+  };
+  skinProfile?: {
+    type?: string;
+    tone?: string;
+    concerns?: string[];
+  };
+  allergies?: string[];
+  preferences?: {
+    communication?: string;
+    beverage?: string;
+    music?: string;
+  };
+  additionalNotes?: string;
+}
+
+export const beautyProfileAPI = {
+  getMyBeautyProfile: async (): Promise<{
+    success: boolean;
+    profiles: BeautyProfile[];
+    summary: BeautyProfileSummary;
+  }> => {
+    const response = await api.get('/api/client-profiles/my-beauty-profile');
+    return response.data;
+  },
+
+  updateBeautyProfile: async (
+    profileId: string,
+    data: Partial<BeautyProfile>
+  ): Promise<{ success: boolean; profile: BeautyProfile }> => {
+    const response = await api.put(`/api/client-profiles/my-beauty-profile/${profileId}`, data);
+    return response.data;
+  },
+
+  getBookingSummary: async (salonId: string): Promise<{
+    success: boolean;
+    summary: BookingSummary;
+  }> => {
+    const response = await api.get(`/api/client-profiles/booking-summary/${salonId}`);
     return response.data;
   },
 };

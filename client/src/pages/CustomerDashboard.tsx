@@ -348,6 +348,39 @@ export default function CustomerDashboard() {
     staleTime: 30000
   });
 
+  // Fetch customer beauty profiles for displaying preferences on appointments
+  interface BeautyProfileSalon {
+    id: string;
+    salonId: string;
+    allergies?: string[] | null;
+    sensitivities?: string[] | null;
+    preferences: {
+      preferredStylist?: string;
+      communicationStyle?: string;
+      beveragePreference?: string;
+      musicPreference?: string;
+      specialRequirements?: string;
+    } | null;
+    hairProfile: {
+      hairType?: string;
+      hairCondition?: string;
+    } | null;
+    skinProfile: {
+      skinType?: string;
+    } | null;
+  }
+
+  const { data: beautyProfilesData } = useQuery<{ profiles: BeautyProfileSalon[] }>({
+    queryKey: ['/api/client-profiles/my-beauty-profile'],
+    enabled: isAuthenticated,
+    staleTime: 60000
+  });
+
+  // Helper to get profile for a specific salon
+  const getProfileForSalon = (salonId: string): BeautyProfileSalon | undefined => {
+    return beautyProfilesData?.profiles?.find(p => p.salonId === salonId);
+  };
+
   // Map server data to frontend types
   const dashboardStats = customerProfile ? mapDashboardStats(customerProfile) : undefined;
   const upcomingAppointments = upcomingAppointmentsData?.appointments?.map(mapAppointmentData) || [];
@@ -1081,6 +1114,72 @@ export default function CustomerDashboard() {
                                   </p>
                                 </div>
                               )}
+                              
+                              {/* Customer Preferences Section */}
+                              {(() => {
+                                const salonProfile = getProfileForSalon(appointment.salonId);
+                                if (!salonProfile) return null;
+                                
+                                const hasAllergies = salonProfile.allergies && salonProfile.allergies.length > 0;
+                                const hasSensitivities = salonProfile.sensitivities && salonProfile.sensitivities.length > 0;
+                                const hasPreferences = salonProfile.preferences && (
+                                  salonProfile.preferences.preferredStylist ||
+                                  salonProfile.preferences.beveragePreference ||
+                                  salonProfile.preferences.specialRequirements
+                                );
+                                
+                                if (!hasAllergies && !hasSensitivities && !hasPreferences) return null;
+                                
+                                return (
+                                  <div className="space-y-2 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                                    <div className="flex items-center gap-2">
+                                      <Heart className="h-4 w-4 text-purple-600" />
+                                      <span className="text-sm font-medium text-purple-800 dark:text-purple-200">Your Profile at This Salon</span>
+                                    </div>
+                                    
+                                    {(hasAllergies || hasSensitivities) && (
+                                      <div className="flex flex-wrap gap-2">
+                                        {hasAllergies && (
+                                          <div className="flex items-center gap-1 px-2 py-1 bg-red-100 dark:bg-red-900/30 rounded text-xs">
+                                            <AlertTriangle className="h-3 w-3 text-red-600" />
+                                            <span className="text-red-700 dark:text-red-300">
+                                              Allergies: {salonProfile.allergies!.join(", ")}
+                                            </span>
+                                          </div>
+                                        )}
+                                        {hasSensitivities && (
+                                          <div className="flex items-center gap-1 px-2 py-1 bg-orange-100 dark:bg-orange-900/30 rounded text-xs">
+                                            <span className="text-orange-700 dark:text-orange-300">
+                                              Sensitivities: {salonProfile.sensitivities!.join(", ")}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    
+                                    {hasPreferences && (
+                                      <div className="text-xs text-purple-700 dark:text-purple-300 space-y-1">
+                                        {salonProfile.preferences?.preferredStylist && (
+                                          <p>Preferred stylist: {salonProfile.preferences.preferredStylist}</p>
+                                        )}
+                                        {salonProfile.preferences?.beveragePreference && (
+                                          <p>Beverage: {salonProfile.preferences.beveragePreference}</p>
+                                        )}
+                                        {salonProfile.preferences?.specialRequirements && (
+                                          <p>Special needs: {salonProfile.preferences.specialRequirements}</p>
+                                        )}
+                                      </div>
+                                    )}
+                                    
+                                    <Link href="/customer/beauty-profile">
+                                      <Button variant="ghost" size="sm" className="text-xs h-6 px-2 text-purple-600 hover:text-purple-800">
+                                        View Full Profile
+                                      </Button>
+                                    </Link>
+                                  </div>
+                                );
+                              })()}
+                              
                               <div className="space-y-1">
                                 <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Appointment ID</span>
                                 <p className="text-xs font-mono text-gray-500 dark:text-gray-500">{appointment.id}</p>

@@ -87,6 +87,11 @@ import {
   type ProductReview, type InsertProductReview,
   type DeliverySettings, type InsertDeliverySettings,
   type ProductView, type InsertProductView,
+  // Smart Rebooking types
+  type ServiceRebookingCycle, type InsertServiceRebookingCycle,
+  type CustomerRebookingStat, type InsertCustomerRebookingStat,
+  type RebookingReminder, type InsertRebookingReminder,
+  type RebookingSettings, type InsertRebookingSettings,
   users, userSavedLocations, services, serviceTemplates, servicePackages, packageServices, bookings, bookingServices, payments, salons, roles, organizations, userRoles, orgUsers,
   staff, availabilityPatterns, timeSlots, emailVerificationTokens,
   bookingSettings, staffServices, resources, serviceResources, mediaAssets, taxRates, payoutAccounts, publishState, customerProfiles,
@@ -113,7 +118,9 @@ import {
   // Product E-commerce tables
   productRetailConfig, productVariants, shoppingCarts, cartItems,
   productOrders, productOrderItems, wishlists, productReviews,
-  deliverySettings, productViews
+  deliverySettings, productViews,
+  // Smart Rebooking tables
+  serviceRebookingCycles, customerRebookingStats, rebookingReminders, rebookingSettings
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne, like, isNotNull, lt, gt } from "drizzle-orm";
@@ -129,6 +136,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserByPhone(phone: string): Promise<User | undefined>;
+  searchUsersByEmail(emailQuery: string, limit?: number): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<void>;
   updateUserPreferences(userId: string, preferences: any): Promise<void>;
@@ -206,6 +214,7 @@ export interface IStorage {
   
   // Booking operations
   getBooking(id: string): Promise<Booking | undefined>;
+  getBookingServicesByBookingId(bookingId: string): Promise<BookingService[]>;
   createBooking(booking: InsertBooking): Promise<Booking>;
   updateBookingStatus(id: string, status: string): Promise<number>;
   updateBookingStatusWithCustomerValidation(bookingId: string, customerEmail: string, status: string): Promise<void>;
@@ -1434,6 +1443,15 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
+  async searchUsersByEmail(emailQuery: string, limit: number = 10): Promise<User[]> {
+    const searchResults = await db
+      .select()
+      .from(users)
+      .where(sql`${users.email} ILIKE ${`%${emailQuery}%`}`)
+      .limit(limit);
+    return searchResults;
+  }
+
   async createUser(user: InsertUser): Promise<User> {
     // Generate username if not provided
     if (!user.username && user.email) {
@@ -2002,6 +2020,12 @@ export class DatabaseStorage implements IStorage {
   async getBooking(id: string): Promise<Booking | undefined> {
     const [booking] = await db.select().from(bookings).where(eq(bookings.id, id));
     return booking || undefined;
+  }
+
+  async getBookingServicesByBookingId(bookingId: string): Promise<BookingService[]> {
+    return db.select()
+      .from(bookingServices)
+      .where(eq(bookingServices.bookingId, bookingId));
   }
 
   async createBooking(booking: InsertBooking): Promise<Booking> {
@@ -9950,6 +9974,459 @@ export class DatabaseStorage implements IStorage {
         ...settings
       });
     }
+  }
+
+  // ===============================================
+  // SMART REBOOKING SYSTEM
+  // ===============================================
+
+  // Service Rebooking Cycles Operations
+  async getServiceRebookingCycle(id: string): Promise<ServiceRebookingCycle | undefined> {
+    const [cycle] = await db.select()
+      .from(serviceRebookingCycles)
+      .where(eq(serviceRebookingCycles.id, id))
+      .limit(1);
+    return cycle;
+  }
+
+  async getServiceRebookingCycleBySalonAndService(salonId: string, serviceId: string): Promise<ServiceRebookingCycle | undefined> {
+    const [cycle] = await db.select()
+      .from(serviceRebookingCycles)
+      .where(and(
+        eq(serviceRebookingCycles.salonId, salonId),
+        eq(serviceRebookingCycles.serviceId, serviceId)
+      ))
+      .limit(1);
+    return cycle;
+  }
+
+  async getServiceRebookingCyclesBySalonId(salonId: string, filters?: { isActive?: boolean }): Promise<ServiceRebookingCycle[]> {
+    const conditions = [eq(serviceRebookingCycles.salonId, salonId)];
+    if (filters?.isActive !== undefined) {
+      conditions.push(eq(serviceRebookingCycles.isActive, filters.isActive ? 1 : 0));
+    }
+    return db.select()
+      .from(serviceRebookingCycles)
+      .where(and(...conditions))
+      .orderBy(desc(serviceRebookingCycles.createdAt));
+  }
+
+  async createServiceRebookingCycle(cycle: InsertServiceRebookingCycle): Promise<ServiceRebookingCycle> {
+    const [created] = await db.insert(serviceRebookingCycles)
+      .values(cycle)
+      .returning();
+    return created;
+  }
+
+  async updateServiceRebookingCycle(id: string, salonId: string, updates: Partial<InsertServiceRebookingCycle>): Promise<void> {
+    await db.update(serviceRebookingCycles)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(
+        eq(serviceRebookingCycles.id, id),
+        eq(serviceRebookingCycles.salonId, salonId)
+      ));
+  }
+
+  async deleteServiceRebookingCycle(id: string, salonId: string): Promise<void> {
+    await db.delete(serviceRebookingCycles)
+      .where(and(
+        eq(serviceRebookingCycles.id, id),
+        eq(serviceRebookingCycles.salonId, salonId)
+      ));
+  }
+
+  // Customer Rebooking Stats Operations
+  async getCustomerRebookingStat(id: string): Promise<CustomerRebookingStat | undefined> {
+    const [stat] = await db.select()
+      .from(customerRebookingStats)
+      .where(eq(customerRebookingStats.id, id))
+      .limit(1);
+    return stat;
+  }
+
+  async getCustomerRebookingStatByKeys(salonId: string, customerId: string, serviceId: string): Promise<CustomerRebookingStat | undefined> {
+    const [stat] = await db.select()
+      .from(customerRebookingStats)
+      .where(and(
+        eq(customerRebookingStats.salonId, salonId),
+        eq(customerRebookingStats.customerId, customerId),
+        eq(customerRebookingStats.serviceId, serviceId)
+      ))
+      .limit(1);
+    return stat;
+  }
+
+  async getCustomerRebookingStatsBySalonId(salonId: string, filters?: {
+    status?: string;
+    dueBefore?: Date;
+    dueAfter?: Date;
+  }): Promise<CustomerRebookingStat[]> {
+    const conditions = [eq(customerRebookingStats.salonId, salonId)];
+    if (filters?.status) {
+      conditions.push(eq(customerRebookingStats.rebookingStatus, filters.status));
+    }
+    if (filters?.dueBefore) {
+      conditions.push(lte(customerRebookingStats.nextRebookingDue, filters.dueBefore));
+    }
+    if (filters?.dueAfter) {
+      conditions.push(gte(customerRebookingStats.nextRebookingDue, filters.dueAfter));
+    }
+    return db.select()
+      .from(customerRebookingStats)
+      .where(and(...conditions))
+      .orderBy(asc(customerRebookingStats.nextRebookingDue));
+  }
+
+  async getCustomerRebookingStatsByCustomerId(customerId: string, filters?: {
+    salonId?: string;
+    status?: string;
+  }): Promise<CustomerRebookingStat[]> {
+    const conditions = [eq(customerRebookingStats.customerId, customerId)];
+    if (filters?.salonId) {
+      conditions.push(eq(customerRebookingStats.salonId, filters.salonId));
+    }
+    if (filters?.status) {
+      conditions.push(eq(customerRebookingStats.rebookingStatus, filters.status));
+    }
+    return db.select()
+      .from(customerRebookingStats)
+      .where(and(...conditions))
+      .orderBy(asc(customerRebookingStats.nextRebookingDue));
+  }
+
+  async getDueRebookings(salonId: string, limit?: number): Promise<CustomerRebookingStat[]> {
+    const now = new Date();
+    const query = db.select()
+      .from(customerRebookingStats)
+      .where(and(
+        eq(customerRebookingStats.salonId, salonId),
+        lte(customerRebookingStats.nextRebookingDue, now),
+        inArray(customerRebookingStats.rebookingStatus, ['approaching', 'due', 'overdue'])
+      ))
+      .orderBy(asc(customerRebookingStats.nextRebookingDue));
+    
+    if (limit) {
+      return query.limit(limit);
+    }
+    return query;
+  }
+
+  async createCustomerRebookingStat(stat: InsertCustomerRebookingStat): Promise<CustomerRebookingStat> {
+    const [created] = await db.insert(customerRebookingStats)
+      .values(stat)
+      .returning();
+    return created;
+  }
+
+  async upsertCustomerRebookingStat(stat: InsertCustomerRebookingStat): Promise<CustomerRebookingStat> {
+    const existing = await this.getCustomerRebookingStatByKeys(stat.salonId, stat.customerId, stat.serviceId);
+    if (existing) {
+      await db.update(customerRebookingStats)
+        .set({ ...stat, updatedAt: new Date() })
+        .where(eq(customerRebookingStats.id, existing.id));
+      return { ...existing, ...stat, updatedAt: new Date() } as CustomerRebookingStat;
+    }
+    return this.createCustomerRebookingStat(stat);
+  }
+
+  async updateCustomerRebookingStat(id: string, updates: Partial<InsertCustomerRebookingStat>): Promise<void> {
+    await db.update(customerRebookingStats)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(customerRebookingStats.id, id));
+  }
+
+  async updateCustomerRebookingStatus(id: string, status: string): Promise<void> {
+    await db.update(customerRebookingStats)
+      .set({ rebookingStatus: status, updatedAt: new Date() })
+      .where(eq(customerRebookingStats.id, id));
+  }
+
+  async incrementRebookingRemindersReceived(id: string): Promise<void> {
+    await db.update(customerRebookingStats)
+      .set({ 
+        remindersReceived: sql`${customerRebookingStats.remindersReceived} + 1`,
+        lastReminderSentAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(customerRebookingStats.id, id));
+  }
+
+  async dismissCustomerRebooking(id: string, dismissUntil?: Date): Promise<void> {
+    await db.update(customerRebookingStats)
+      .set({
+        rebookingStatus: 'dismissed',
+        remindersDismissed: sql`${customerRebookingStats.remindersDismissed} + 1`,
+        lastDismissedAt: new Date(),
+        dismissUntil: dismissUntil || null,
+        updatedAt: new Date()
+      })
+      .where(eq(customerRebookingStats.id, id));
+  }
+
+  // Rebooking Reminders Operations
+  async getRebookingReminder(id: string): Promise<RebookingReminder | undefined> {
+    const [reminder] = await db.select()
+      .from(rebookingReminders)
+      .where(eq(rebookingReminders.id, id))
+      .limit(1);
+    return reminder;
+  }
+
+  async getRebookingRemindersBySalonId(salonId: string, filters?: {
+    status?: string;
+    channel?: string;
+    scheduledBefore?: Date;
+    scheduledAfter?: Date;
+  }): Promise<RebookingReminder[]> {
+    const conditions = [eq(rebookingReminders.salonId, salonId)];
+    if (filters?.status) {
+      conditions.push(eq(rebookingReminders.status, filters.status));
+    }
+    if (filters?.channel) {
+      conditions.push(eq(rebookingReminders.channel, filters.channel));
+    }
+    if (filters?.scheduledBefore) {
+      conditions.push(lte(rebookingReminders.scheduledAt, filters.scheduledBefore));
+    }
+    if (filters?.scheduledAfter) {
+      conditions.push(gte(rebookingReminders.scheduledAt, filters.scheduledAfter));
+    }
+    return db.select()
+      .from(rebookingReminders)
+      .where(and(...conditions))
+      .orderBy(desc(rebookingReminders.createdAt));
+  }
+
+  async getPendingRebookingReminders(limit?: number): Promise<RebookingReminder[]> {
+    const now = new Date();
+    const query = db.select()
+      .from(rebookingReminders)
+      .where(and(
+        eq(rebookingReminders.status, 'scheduled'),
+        lte(rebookingReminders.scheduledAt, now)
+      ))
+      .orderBy(asc(rebookingReminders.scheduledAt));
+    
+    if (limit) {
+      return query.limit(limit);
+    }
+    return query;
+  }
+
+  async createRebookingReminder(reminder: InsertRebookingReminder): Promise<RebookingReminder> {
+    const [created] = await db.insert(rebookingReminders)
+      .values(reminder)
+      .returning();
+    return created;
+  }
+
+  async updateRebookingReminder(id: string, updates: Partial<InsertRebookingReminder>): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async markReminderSent(id: string, externalMessageId?: string): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({
+        status: 'sent',
+        sentAt: new Date(),
+        externalMessageId: externalMessageId || null,
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async markReminderDelivered(id: string): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({
+        status: 'delivered',
+        deliveredAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async markReminderOpened(id: string): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({
+        status: 'opened',
+        openedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async markReminderClicked(id: string): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({
+        clickedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async markReminderConverted(id: string, bookingId: string): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({
+        status: 'converted',
+        convertedBookingId: bookingId,
+        convertedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async markReminderFailed(id: string, reason: string): Promise<void> {
+    const reminder = await this.getRebookingReminder(id);
+    const newRetryCount = (reminder?.retryCount || 0) + 1;
+    
+    await db.update(rebookingReminders)
+      .set({
+        status: newRetryCount >= (reminder?.maxRetries || 3) ? 'failed' : 'pending',
+        failedAt: new Date(),
+        failureReason: reason,
+        retryCount: newRetryCount,
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async dismissRebookingReminder(id: string, reason: string): Promise<void> {
+    await db.update(rebookingReminders)
+      .set({
+        status: 'dismissed',
+        dismissedAt: new Date(),
+        dismissReason: reason,
+        updatedAt: new Date()
+      })
+      .where(eq(rebookingReminders.id, id));
+  }
+
+  async getRebookingReminderAnalytics(salonId: string, startDate: Date, endDate: Date): Promise<{
+    totalSent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+    converted: number;
+    failed: number;
+    deliveryRate: number;
+    openRate: number;
+    clickRate: number;
+    conversionRate: number;
+  }> {
+    const reminders = await db.select()
+      .from(rebookingReminders)
+      .where(and(
+        eq(rebookingReminders.salonId, salonId),
+        gte(rebookingReminders.createdAt, startDate),
+        lte(rebookingReminders.createdAt, endDate)
+      ));
+
+    const totalSent = reminders.filter(r => r.sentAt).length;
+    const delivered = reminders.filter(r => r.deliveredAt).length;
+    const opened = reminders.filter(r => r.openedAt).length;
+    const clicked = reminders.filter(r => r.clickedAt).length;
+    const converted = reminders.filter(r => r.convertedAt).length;
+    const failed = reminders.filter(r => r.status === 'failed').length;
+
+    return {
+      totalSent,
+      delivered,
+      opened,
+      clicked,
+      converted,
+      failed,
+      deliveryRate: totalSent > 0 ? (delivered / totalSent) * 100 : 0,
+      openRate: delivered > 0 ? (opened / delivered) * 100 : 0,
+      clickRate: opened > 0 ? (clicked / opened) * 100 : 0,
+      conversionRate: totalSent > 0 ? (converted / totalSent) * 100 : 0
+    };
+  }
+
+  async getRebookingRemindersForChannelAnalysis(salonId: string, startDate: Date, endDate: Date): Promise<RebookingReminder[]> {
+    return db.select()
+      .from(rebookingReminders)
+      .where(and(
+        eq(rebookingReminders.salonId, salonId),
+        gte(rebookingReminders.createdAt, startDate),
+        lte(rebookingReminders.createdAt, endDate),
+        or(
+          eq(rebookingReminders.status, 'sent'),
+          eq(rebookingReminders.status, 'converted')
+        )
+      ));
+  }
+
+  // Rebooking Settings Operations
+  async getRebookingSettings(salonId: string): Promise<RebookingSettings | undefined> {
+    const [settings] = await db.select()
+      .from(rebookingSettings)
+      .where(eq(rebookingSettings.salonId, salonId))
+      .limit(1);
+    return settings;
+  }
+
+  async createRebookingSettings(settings: InsertRebookingSettings): Promise<RebookingSettings> {
+    const [created] = await db.insert(rebookingSettings)
+      .values(settings)
+      .returning();
+    return created;
+  }
+
+  async updateRebookingSettings(salonId: string, updates: Partial<InsertRebookingSettings>): Promise<void> {
+    await db.update(rebookingSettings)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(rebookingSettings.salonId, salonId));
+  }
+
+  async getOrCreateRebookingSettings(salonId: string): Promise<RebookingSettings> {
+    const existing = await this.getRebookingSettings(salonId);
+    if (existing) {
+      return existing;
+    }
+    return this.createRebookingSettings({ salonId });
+  }
+
+  // Rebooking Analytics Operations
+  async getRebookingDashboardAnalytics(salonId: string): Promise<{
+    totalCustomersTracked: number;
+    customersApproaching: number;
+    customersDue: number;
+    customersOverdue: number;
+    totalRemindersSent: number;
+    totalConversions: number;
+    overallConversionRate: number;
+    avgDaysBetweenBookings: number;
+  }> {
+    const stats = await db.select()
+      .from(customerRebookingStats)
+      .where(eq(customerRebookingStats.salonId, salonId));
+
+    const totalCustomersTracked = stats.length;
+    const customersApproaching = stats.filter(s => s.rebookingStatus === 'approaching').length;
+    const customersDue = stats.filter(s => s.rebookingStatus === 'due').length;
+    const customersOverdue = stats.filter(s => s.rebookingStatus === 'overdue').length;
+    const totalRemindersSent = stats.reduce((sum, s) => sum + (s.remindersReceived || 0), 0);
+    const totalConversions = stats.reduce((sum, s) => sum + (s.rebookingsFromReminders || 0), 0);
+
+    const avgDaysValues = stats
+      .filter(s => s.avgDaysBetweenBookings)
+      .map(s => parseFloat(s.avgDaysBetweenBookings || '0'));
+    const avgDaysBetweenBookings = avgDaysValues.length > 0
+      ? avgDaysValues.reduce((a, b) => a + b, 0) / avgDaysValues.length
+      : 0;
+
+    return {
+      totalCustomersTracked,
+      customersApproaching,
+      customersDue,
+      customersOverdue,
+      totalRemindersSent,
+      totalConversions,
+      overallConversionRate: totalRemindersSent > 0 ? (totalConversions / totalRemindersSent) * 100 : 0,
+      avgDaysBetweenBookings
+    };
   }
 }
 

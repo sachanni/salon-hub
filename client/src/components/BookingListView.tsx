@@ -34,7 +34,11 @@ import {
   Scissors,
   DollarSign,
   AlertCircle,
-  Users
+  Users,
+  AlertTriangle,
+  Heart,
+  Coffee,
+  FileText
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
@@ -113,6 +117,7 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [viewingProfileEmail, setViewingProfileEmail] = useState<string | null>(null);
   
   const itemsPerPage = 25;
 
@@ -141,6 +146,20 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
       return response.json() as Promise<Service[]>;
     },
     enabled: !!salonId && !!user
+  });
+
+  // Fetch client profile by email for popup
+  const { data: customerProfileData, isLoading: profileLoading } = useQuery({
+    queryKey: ['/api/client-profiles', salonId, 'by-email', viewingProfileEmail],
+    queryFn: async () => {
+      const response = await fetch(`/api/client-profiles/${salonId}/clients/by-email/${encodeURIComponent(viewingProfileEmail!)}`);
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error('Failed to fetch client profile');
+      }
+      return response.json();
+    },
+    enabled: !!salonId && !!viewingProfileEmail
   });
 
   // Filter and sort bookings
@@ -790,6 +809,13 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => setViewingProfileEmail(booking.customerEmail)}
+                              data-testid={`action-view-profile-${booking.id}`}
+                            >
+                              <User className="w-4 h-4 mr-2" />
+                              View Profile
+                            </DropdownMenuItem>
                             {canProgressStatus(booking.status).map(status => (
                               <DropdownMenuItem
                                 key={status}
@@ -863,6 +889,140 @@ export default function BookingListView({ salonId }: BookingListViewProps) {
           </div>
         </div>
       )}
+
+      {/* Customer Profile Dialog */}
+      <Dialog open={!!viewingProfileEmail} onOpenChange={(open) => !open && setViewingProfileEmail(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <User className="w-5 h-5" />
+              Customer Profile
+            </DialogTitle>
+            <DialogDescription>
+              {customerProfileData?.customer ? 
+                `${customerProfileData.customer.firstName || ''} ${customerProfileData.customer.lastName || ''}`.trim() || viewingProfileEmail :
+                viewingProfileEmail
+              }
+            </DialogDescription>
+          </DialogHeader>
+          
+          {profileLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-muted-foreground">Loading profile...</div>
+            </div>
+          ) : customerProfileData?.profile ? (
+            <div className="space-y-4">
+              {/* Allergies & Sensitivities Alert */}
+              {((customerProfileData.profile.allergies && customerProfileData.profile.allergies.length > 0) ||
+                (customerProfileData.profile.sensitivities && customerProfileData.profile.sensitivities.length > 0)) && (
+                <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-red-700 dark:text-red-300 font-medium mb-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    Important Health Information
+                  </div>
+                  {customerProfileData.profile.allergies?.length > 0 && (
+                    <div className="mb-2">
+                      <span className="text-sm font-medium text-red-600 dark:text-red-400">Allergies: </span>
+                      <span className="text-sm text-red-700 dark:text-red-300">
+                        {customerProfileData.profile.allergies.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {customerProfileData.profile.sensitivities?.length > 0 && (
+                    <div>
+                      <span className="text-sm font-medium text-red-600 dark:text-red-400">Sensitivities: </span>
+                      <span className="text-sm text-red-700 dark:text-red-300">
+                        {customerProfileData.profile.sensitivities.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Preferences */}
+              <div className="space-y-3">
+                {customerProfileData.profile.preferredStylist && (
+                  <div className="flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-pink-500" />
+                    <span className="text-sm font-medium">Preferred Stylist:</span>
+                    <span className="text-sm text-muted-foreground">
+                      {customerProfileData.profile.preferredStylist.name}
+                    </span>
+                  </div>
+                )}
+                
+                {customerProfileData.profile.beveragePreference && (
+                  <div className="flex items-center gap-2">
+                    <Coffee className="w-4 h-4 text-amber-600" />
+                    <span className="text-sm font-medium">Beverage:</span>
+                    <span className="text-sm text-muted-foreground">
+                      {customerProfileData.profile.beveragePreference}
+                    </span>
+                  </div>
+                )}
+
+                {customerProfileData.profile.specialRequirements && (
+                  <div className="flex items-start gap-2">
+                    <FileText className="w-4 h-4 text-blue-500 mt-0.5" />
+                    <div>
+                      <span className="text-sm font-medium">Special Requirements:</span>
+                      <p className="text-sm text-muted-foreground">
+                        {customerProfileData.profile.specialRequirements}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {customerProfileData.profile.hairType && (
+                  <div className="flex items-center gap-2">
+                    <Scissors className="w-4 h-4 text-purple-500" />
+                    <span className="text-sm font-medium">Hair Type:</span>
+                    <span className="text-sm text-muted-foreground">
+                      {customerProfileData.profile.hairType}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Alert Notes */}
+              {customerProfileData.alertNotes?.length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-orange-500" />
+                    Alert Notes
+                  </h4>
+                  <div className="space-y-2">
+                    {customerProfileData.alertNotes.map((note: any) => (
+                      <div key={note.id} className="bg-orange-50 dark:bg-orange-950 rounded p-2 text-sm">
+                        {note.title && <p className="font-medium">{note.title}</p>}
+                        <p className="text-muted-foreground">{note.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* VIP Status */}
+              {customerProfileData.profile.isVip === 1 && (
+                <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                  <Badge className="bg-yellow-500 text-white">VIP Customer</Badge>
+                  {customerProfileData.profile.vipNotes && (
+                    <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-2">
+                      {customerProfileData.profile.vipNotes}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <User className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No profile found for this customer.</p>
+              <p className="text-sm mt-2">They haven't been added to your client database yet.</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

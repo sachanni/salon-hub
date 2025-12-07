@@ -64,11 +64,14 @@ import {
   CalendarDays,
   FileEdit,
   History,
-  UserCog
+  UserCog,
+  Shield
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSalonPermissions } from "@/hooks/useSalonPermissions";
 import { Link, useLocation } from "wouter";
 import type { Salon } from "@/../../shared/schema";
+import ShopAdminManagement from "@/components/business-dashboard/ShopAdminManagement";
 import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
 import FinancialReportingDashboard from "@/components/FinancialReportingDashboard";
 import CustomerCommunicationDashboard from "@/components/CustomerCommunicationDashboard";
@@ -171,6 +174,26 @@ export default function BusinessDashboard() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [salonToDelete, setSalonToDelete] = useState<Salon | null>(null);
   const isMobile = useIsMobile();
+
+  // Fetch user's permissions for the selected salon
+  const {
+    isBusinessOwner,
+    isAdmin,
+    canViewBookings,
+    canEditBookings,
+    canViewServices,
+    canEditServices,
+    canViewStaff,
+    canEditStaff,
+    canViewReports,
+    canViewSettings,
+    canEditSettings,
+    canViewCustomers,
+    canViewInventory,
+    canViewFinancials,
+    canViewMarketing,
+    role: userRole,
+  } = useSalonPermissions(salonId);
 
   // Fetch user's salons
   const { data: salons, isLoading: salonsLoading } = useQuery({
@@ -457,14 +480,14 @@ export default function BusinessDashboard() {
     });
   };
 
-  // Navigation structure with grouped sections - Industry Standard Approach
-  const navigationSections = [
+  // Navigation structure with grouped sections - Industry Standard Approach with RBAC
+  const allNavigationSections = [
     {
       id: "overview",
       label: "Overview",
       icon: Home,
       items: [
-        { id: "overview", label: "Dashboard", icon: BarChart }
+        { id: "overview", label: "Dashboard", icon: BarChart, hasAccess: true }
       ]
     },
     {
@@ -472,22 +495,23 @@ export default function BusinessDashboard() {
       label: "Operations",
       icon: Calendar,
       items: [
-        { id: "calendar", label: "Bookings & Calendar", icon: Calendar },
-        { id: "client-profiles", label: "Client Profiles & Notes", icon: UserCog },
-        { id: "inventory", label: "Inventory Management", icon: Package },
-        { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles },
-        { id: "offers", label: "Offers & Promotions", icon: Gift }
+        { id: "calendar", label: "Bookings & Calendar", icon: Calendar, hasAccess: canViewBookings || isAdmin },
+        { id: "client-profiles", label: "Client Profiles & Notes", icon: UserCog, hasAccess: canViewCustomers || isAdmin },
+        { id: "inventory", label: "Inventory Management", icon: Package, hasAccess: canViewInventory || isAdmin },
+        { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles, hasAccess: canViewInventory || isAdmin },
+        { id: "offers", label: "Offers & Promotions", icon: Gift, hasAccess: canViewMarketing || isAdmin }
       ]
     },
     {
       id: "events",
       label: "Events Management",
       icon: CalendarDays,
+      requiresAdmin: true,
       items: [
-        { id: "events-dashboard", label: "Event Dashboard", icon: BarChart },
-        { id: "create-event", label: "Create Event", icon: Plus },
-        { id: "draft-events", label: "Draft Events", icon: FileEdit },
-        { id: "past-events", label: "Past Events", icon: History }
+        { id: "events-dashboard", label: "Event Dashboard", icon: BarChart, hasAccess: isAdmin },
+        { id: "create-event", label: "Create Event", icon: Plus, hasAccess: isAdmin },
+        { id: "draft-events", label: "Draft Events", icon: FileEdit, hasAccess: isAdmin },
+        { id: "past-events", label: "Past Events", icon: History, hasAccess: isAdmin }
       ]
     },
     {
@@ -495,16 +519,25 @@ export default function BusinessDashboard() {
       label: "Business Setup & Management",
       icon: Building,
       items: [
-        { id: "business-info", label: "Business Info", icon: Building, isComplete: !!isBusinessInfoComplete, isSetup: true },
-        { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: !!isLocationContactComplete, isSetup: true },
-        { id: "services", label: "Services & Pricing", icon: Scissors, isComplete: hasServices, isSetup: true },
-        { id: "packages", label: "Package & Combos", icon: Gift, isComplete: false, isSetup: false },
-        { id: "staff", label: "Staff Management", icon: Users, isComplete: hasStaff, isSetup: true },
-        { id: "resources", label: "Resources & Equipment", icon: Settings, isComplete: false, isSetup: false, isOptional: true },
-        { id: "booking-settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings, isSetup: true },
-        { id: "payment-setup", label: "Payment Setup", icon: CreditCard, isComplete: false, isSetup: false, isOptional: true },
-        { id: "media", label: "Media Gallery", icon: Camera, isComplete: hasMedia, isSetup: true },
-        { id: "publish", label: "Publish Business", icon: CheckCircle, progress: completionPercentage, isSetup: true }
+        { id: "business-info", label: "Business Info", icon: Building, isComplete: !!isBusinessInfoComplete, isSetup: true, hasAccess: canViewSettings || isAdmin },
+        { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: !!isLocationContactComplete, isSetup: true, hasAccess: canViewSettings || isAdmin },
+        { id: "services", label: "Services & Pricing", icon: Scissors, isComplete: hasServices, isSetup: true, hasAccess: canViewServices || isAdmin },
+        { id: "packages", label: "Package & Combos", icon: Gift, isComplete: false, isSetup: false, hasAccess: canViewServices || isAdmin },
+        { id: "staff", label: "Staff Management", icon: Users, isComplete: hasStaff, isSetup: true, hasAccess: canViewStaff || isAdmin },
+        { id: "resources", label: "Resources & Equipment", icon: Settings, isComplete: false, isSetup: false, isOptional: true, hasAccess: canViewSettings || isAdmin },
+        { id: "booking-settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings, isSetup: true, hasAccess: canViewSettings || isAdmin },
+        { id: "payment-setup", label: "Payment Setup", icon: CreditCard, isComplete: false, isSetup: false, isOptional: true, hasAccess: isBusinessOwner },
+        { id: "media", label: "Media Gallery", icon: Camera, isComplete: hasMedia, isSetup: true, hasAccess: canEditSettings || isAdmin },
+        { id: "publish", label: "Publish Business", icon: CheckCircle, progress: completionPercentage, isSetup: true, hasAccess: isBusinessOwner }
+      ]
+    },
+    {
+      id: "admin",
+      label: "Administration",
+      icon: Shield,
+      requiresBusinessOwner: true,
+      items: [
+        { id: "shop-admins", label: "Shop Admin Management", icon: Shield, hasAccess: isBusinessOwner }
       ]
     },
     {
@@ -512,8 +545,8 @@ export default function BusinessDashboard() {
       label: "Analytics & Reports",
       icon: BarChart,
       items: [
-        { id: "analytics", label: "Advanced Analytics", icon: TrendingUp },
-        { id: "financials", label: "Financial Reports", icon: CreditCard }
+        { id: "analytics", label: "Advanced Analytics", icon: TrendingUp, hasAccess: canViewReports || isAdmin },
+        { id: "financials", label: "Financial Reports", icon: CreditCard, hasAccess: canViewFinancials || isAdmin }
       ]
     },
     {
@@ -521,10 +554,22 @@ export default function BusinessDashboard() {
       label: "Communications",
       icon: MessageSquare,
       items: [
-        { id: "communications", label: "Customer Communications", icon: MessageSquare }
+        { id: "communications", label: "Customer Communications", icon: MessageSquare, hasAccess: canViewCustomers || isAdmin }
       ]
     }
   ];
+
+  // Filter navigation sections based on user permissions
+  const navigationSections = allNavigationSections
+    .filter(section => {
+      if (section.requiresBusinessOwner && !isBusinessOwner) return false;
+      if (section.requiresAdmin && !isAdmin) return false;
+      return section.items.some(item => item.hasAccess);
+    })
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => item.hasAccess)
+    }));
 
   // Stunning Sidebar navigation component with WOW factors
   const SidebarNavigation = () => {
@@ -555,7 +600,20 @@ export default function BusinessDashboard() {
               
               <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
                 <p className="text-[10px] font-medium text-white/90">{getGreeting()}</p>
-                <p className="text-sm font-bold text-white truncate">{user?.username || 'Business Owner'}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-bold text-white truncate">{user?.username || 'Business Owner'}</p>
+                  {userRole && (
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-medium ${
+                      isBusinessOwner 
+                        ? 'bg-amber-400/30 text-amber-100 ring-1 ring-amber-300/50' 
+                        : userRole === 'shop_admin'
+                          ? 'bg-blue-400/30 text-blue-100 ring-1 ring-blue-300/50'
+                          : 'bg-white/20 text-white/90'
+                    }`}>
+                      {isBusinessOwner ? 'Owner' : userRole === 'shop_admin' ? 'Admin' : 'Staff'}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px] text-white/80 truncate flex items-center gap-1">
                   <Building className="h-2.5 w-2.5" />
                   {salonData?.name || 'Your Business'}
@@ -1600,6 +1658,26 @@ export default function BusinessDashboard() {
       return (
         <div className="p-6">
           <CalendarManagement salonId={salonId || ''} />
+        </div>
+      );
+    }
+
+    // Handle shop admins tab - Business Owner only
+    if (activeTab === "shop-admins") {
+      if (!isBusinessOwner) {
+        return (
+          <div className="p-6">
+            <Alert>
+              <AlertDescription>
+                You don't have permission to access this section. Only business owners can manage shop administrators.
+              </AlertDescription>
+            </Alert>
+          </div>
+        );
+      }
+      return (
+        <div className="p-6">
+          <ShopAdminManagement salonId={salonId || ''} />
         </div>
       );
     }

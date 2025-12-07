@@ -17,9 +17,15 @@ import { Service, SelectedService } from '../types/navigation';
 const CATEGORIES = ['All Services', 'Nails', 'Hair Services', 'Facials', 'Spa', 'Massage', 'Waxing', 'Makeup'];
 
 export default function ServicesListScreen() {
-  const params = useLocalSearchParams<{ salonId: string; salonName: string }>();
+  const params = useLocalSearchParams<{ 
+    salonId: string; 
+    salonName: string;
+    preselectedServiceId?: string;
+    preferredStaffId?: string;
+    fromRebooking?: string;
+  }>();
   const router = useRouter();
-  const { salonId, salonName } = params;
+  const { salonId, salonName, preselectedServiceId, preferredStaffId, fromRebooking } = params;
 
   const [services, setServices] = useState<Service[]>([]);
   const [filteredServices, setFilteredServices] = useState<Service[]>([]);
@@ -27,10 +33,21 @@ export default function ServicesListScreen() {
   const [selectedCategory, setSelectedCategory] = useState('All Services');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
+  const [hasAutoSelected, setHasAutoSelected] = useState(false);
 
   useEffect(() => {
     fetchServices();
   }, [salonId]);
+
+  useEffect(() => {
+    if (!hasAutoSelected && preselectedServiceId && services.length > 0) {
+      const serviceExists = services.some(s => s.id === preselectedServiceId);
+      if (serviceExists) {
+        setSelectedServices(new Set([preselectedServiceId]));
+        setHasAutoSelected(true);
+      }
+    }
+  }, [services, preselectedServiceId, hasAutoSelected]);
 
   useEffect(() => {
     filterServices();
@@ -112,7 +129,14 @@ export default function ServicesListScreen() {
       }));
 
     const servicesParam = encodeURIComponent(JSON.stringify(selectedServicesList));
-    router.push(`/booking/details?salonId=${salonId}&salonName=${encodeURIComponent(salonName)}&selectedServices=${servicesParam}`);
+    let bookingUrl = `/booking/details?salonId=${salonId}&salonName=${encodeURIComponent(salonName)}&selectedServices=${servicesParam}`;
+    if (preferredStaffId) {
+      bookingUrl += `&preferredStaffId=${preferredStaffId}`;
+    }
+    if (fromRebooking === 'true') {
+      bookingUrl += `&fromRebooking=true`;
+    }
+    router.push(bookingUrl);
   };
 
   if (loading) {

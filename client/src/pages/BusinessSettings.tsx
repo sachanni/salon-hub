@@ -29,6 +29,7 @@ import {
   Save,
   Calendar,
   Settings as SettingsIcon,
+  RefreshCw,
   CheckCircle,
   AlertCircle,
   Phone,
@@ -50,9 +51,30 @@ import {
   Layout,
   Eye,
   Copy,
-  Palette
+  Palette,
+  MessageSquare,
+  ExternalLink,
+  Download,
+  FileSpreadsheet,
+  FileText
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import ShopAdminManagement from "@/components/business-dashboard/ShopAdminManagement";
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell, 
+  Legend,
+  LineChart,
+  Line
+} from 'recharts';
 
 interface BusinessSettingsProps {
   salonId: string;
@@ -128,6 +150,8 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
     { id: "booking", label: "Booking Preferences", icon: Calendar, badge: null },
     { id: "deposits", label: "Deposits & Protection", icon: Wallet, badge: null },
     { id: "giftcards", label: "Gift Cards", icon: Gift, badge: "NEW" },
+    { id: "rebooking", label: "Smart Rebooking", icon: RefreshCw, badge: "NEW" },
+    { id: "team", label: "Team & Permissions", icon: Users, badge: "NEW" },
     { id: "salons", label: "Salon Management", icon: Building, badge: null },
     { id: "security", label: "Account & Security", icon: Shield, badge: null },
   ];
@@ -230,6 +254,16 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
                   {/* Gift Cards */}
                   {activeTab === "giftcards" && (
                     <GiftCardsSettings salonId={salonId} />
+                  )}
+
+                  {/* Smart Rebooking */}
+                  {activeTab === "rebooking" && (
+                    <RebookingSettings salonId={salonId} />
+                  )}
+
+                  {/* Team & Permissions */}
+                  {activeTab === "team" && (
+                    <ShopAdminManagement salonId={salonId} />
                   )}
 
                   {/* Salon Management */}
@@ -1271,49 +1305,59 @@ function DepositsSettings({ salonId }: { salonId: string }) {
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
   const [addCustomerDialogOpen, setAddCustomerDialogOpen] = useState(false);
 
-  const { data: depositSettings, isLoading: settingsLoading } = useQuery({
+  const { data: depositSettings, isLoading: settingsLoading, error: settingsError } = useQuery({
     queryKey: ['/api/business', salonId, 'deposit-settings'],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/business/${salonId}/deposit-settings`);
       return res.json();
     },
     enabled: !!salonId,
+    staleTime: 0,
+    gcTime: 0,
   });
 
-  const { data: cancellationPolicy, isLoading: policyLoading } = useQuery({
+  const { data: cancellationPolicy, isLoading: policyLoading, error: policyError } = useQuery({
     queryKey: ['/api/business', salonId, 'cancellation-policy'],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/business/${salonId}/cancellation-policy`);
       return res.json();
     },
     enabled: !!salonId,
+    staleTime: 0,
+    gcTime: 0,
   });
 
-  const { data: serviceRules, isLoading: rulesLoading } = useQuery({
+  const { data: serviceRules, isLoading: rulesLoading, error: rulesError } = useQuery({
     queryKey: ['/api/business', salonId, 'service-deposit-rules'],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/business/${salonId}/service-deposit-rules`);
       return res.json();
     },
     enabled: !!salonId,
+    staleTime: 0,
+    gcTime: 0,
   });
 
-  const { data: trustedCustomersData, isLoading: customersLoading } = useQuery({
+  const { data: trustedCustomersData, isLoading: customersLoading, error: customersError } = useQuery({
     queryKey: ['/api/business', salonId, 'trusted-customers'],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/business/${salonId}/trusted-customers`);
       return res.json();
     },
     enabled: !!salonId,
+    staleTime: 0,
+    gcTime: 0,
   });
 
-  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+  const { data: analytics, isLoading: analyticsLoading, error: analyticsError } = useQuery({
     queryKey: ['/api/business', salonId, 'deposit-analytics'],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/business/${salonId}/deposit-analytics`);
       return res.json();
     },
     enabled: !!salonId,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   const { data: servicesData } = useQuery({
@@ -1451,6 +1495,7 @@ function DepositsSettings({ salonId }: { salonId: string }) {
         <DepositSettingsTab
           settings={depositSettings}
           isLoading={settingsLoading}
+          error={settingsError}
           onUpdate={(data) => updateSettingsMutation.mutate(data)}
           isPending={updateSettingsMutation.isPending}
         />
@@ -1525,11 +1570,13 @@ function DepositsSettings({ salonId }: { salonId: string }) {
 function DepositSettingsTab({
   settings,
   isLoading,
+  error,
   onUpdate,
   isPending,
 }: {
   settings: any;
   isLoading: boolean;
+  error: Error | null;
   onUpdate: (data: any) => void;
   isPending: boolean;
 }) {
@@ -1572,6 +1619,20 @@ function DepositSettingsTab({
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
+        <h3 className="text-lg font-semibold text-red-600 mb-2">Failed to load deposit settings</h3>
+        <p className="text-muted-foreground mb-4">{error.message || 'An error occurred while loading settings.'}</p>
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Retry
+        </Button>
       </div>
     );
   }
@@ -3667,6 +3728,1602 @@ function GiftCardAnalyticsTab({
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// Rebooking Settings Component
+function RebookingSettings({ salonId }: { salonId: string }) {
+  const { toast } = useToast();
+  const [showCycleDialog, setShowCycleDialog] = useState(false);
+  const [editingCycle, setEditingCycle] = useState<any>(null);
+  const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+  const [previewChannel, setPreviewChannel] = useState<'email' | 'sms' | 'whatsapp'>('email');
+
+  // Fetch rebooking settings
+  const { data: settings, isLoading: settingsLoading } = useQuery({
+    queryKey: ['/api/rebooking/settings', salonId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/rebooking/settings/${salonId}`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  // Fetch service rebooking cycles
+  const { data: cycles, isLoading: cyclesLoading } = useQuery({
+    queryKey: ['/api/rebooking/cycles', salonId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/rebooking/cycles/${salonId}`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  // Fetch services for the salon
+  const { data: services } = useQuery({
+    queryKey: ['/api/services', salonId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/services?salonId=${salonId}`);
+      return res.json();
+    },
+    enabled: !!salonId,
+  });
+
+  // Fetch due rebookings
+  const { data: dueRebookings } = useQuery({
+    queryKey: ['/api/rebooking/due', salonId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/rebooking/due/${salonId}?limit=10`);
+      return res.json();
+    },
+    enabled: !!salonId && settings?.isEnabled === 1,
+  });
+
+  // Fetch rebooking analytics
+  const { data: analytics } = useQuery({
+    queryKey: ['/api/rebooking/analytics', salonId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/rebooking/analytics/${salonId}`);
+      return res.json();
+    },
+    enabled: !!salonId && settings?.isEnabled === 1,
+  });
+
+  // Update settings mutation
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('PUT', `/api/rebooking/settings/${salonId}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rebooking/settings', salonId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/rebooking/due', salonId] });
+      toast({ title: "Success", description: "Rebooking settings updated" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update settings", variant: "destructive" });
+    },
+  });
+
+  const updateSetting = (key: string, value: any) => {
+    updateSettingsMutation.mutate({ [key]: value });
+  };
+
+  // Create/Update cycle mutation
+  const saveCycleMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const url = editingCycle
+        ? `/api/rebooking/cycles/${salonId}/${editingCycle.id}`
+        : `/api/rebooking/cycles/${salonId}`;
+      const method = editingCycle ? 'PUT' : 'POST';
+      return apiRequest(method, url, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rebooking/cycles', salonId] });
+      toast({ title: "Success", description: editingCycle ? "Cycle updated" : "Cycle created" });
+      setShowCycleDialog(false);
+      setEditingCycle(null);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to save cycle", variant: "destructive" });
+    },
+  });
+
+  // Delete cycle mutation
+  const deleteCycleMutation = useMutation({
+    mutationFn: async (cycleId: string) => {
+      return apiRequest('DELETE', `/api/rebooking/cycles/${salonId}/${cycleId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rebooking/cycles', salonId] });
+      toast({ title: "Success", description: "Cycle deleted" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete cycle", variant: "destructive" });
+    },
+  });
+
+  // Schedule reminders mutation
+  const scheduleRemindersMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest('POST', `/api/rebooking/schedule/${salonId}`);
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rebooking/due', salonId] });
+      toast({ title: "Success", description: `${data.scheduledCount} reminders scheduled` });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to schedule reminders", variant: "destructive" });
+    },
+  });
+
+  // Export due customers to Excel
+  const exportToExcel = async () => {
+    if (!dueRebookings || dueRebookings.length === 0) {
+      toast({ title: "No data", description: "No customers to export", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const ExcelJSModule = await import('exceljs');
+      const ExcelJS = ExcelJSModule.default || ExcelJSModule;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Due Rebookings');
+
+      worksheet.columns = [
+        { header: 'Customer Name', key: 'customerName', width: 25 },
+        { header: 'Phone', key: 'customerPhone', width: 18 },
+        { header: 'Email', key: 'customerEmail', width: 30 },
+        { header: 'Service', key: 'serviceName', width: 25 },
+        { header: 'Last Booking', key: 'lastBookingDate', width: 15 },
+        { header: 'Status', key: 'rebookingStatus', width: 12 },
+        { header: 'Days Overdue', key: 'daysOverdue', width: 12 },
+      ];
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF8B5CF6' }
+      };
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+      dueRebookings.forEach((item: any) => {
+        worksheet.addRow({
+          customerName: item.customerName || 'Unknown',
+          customerPhone: item.customerPhone || '-',
+          customerEmail: item.customerEmail || '-',
+          serviceName: item.serviceName || '-',
+          lastBookingDate: item.lastBookingDate 
+            ? new Date(item.lastBookingDate).toLocaleDateString() 
+            : 'N/A',
+          rebookingStatus: item.rebookingStatus || '-',
+          daysOverdue: item.daysOverdue || 0,
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `due-rebookings-${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast({ title: "Success", description: "Excel file downloaded" });
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to export to Excel", variant: "destructive" });
+    }
+  };
+
+  // Export due customers to PDF
+  const exportToPDF = () => {
+    if (!dueRebookings || dueRebookings.length === 0) {
+      toast({ title: "No data", description: "No customers to export", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        toast({ title: "Error", description: "Please allow popups to export PDF", variant: "destructive" });
+        return;
+      }
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Due Rebookings Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+            h1 { color: #8B5CF6; margin-bottom: 5px; }
+            .subtitle { color: #666; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th { background: linear-gradient(to right, #8B5CF6, #A855F7); color: white; padding: 12px 8px; text-align: left; }
+            td { padding: 10px 8px; border-bottom: 1px solid #eee; }
+            tr:hover { background: #f9fafb; }
+            .status { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+            .status-overdue { background: #FEE2E2; color: #B91C1C; }
+            .status-due { background: #FEF3C7; color: #B45309; }
+            .status-approaching { background: #DBEAFE; color: #1D4ED8; }
+            .footer { margin-top: 30px; color: #666; font-size: 12px; }
+            @media print { body { margin: 20px; } }
+          </style>
+        </head>
+        <body>
+          <h1>Customers Due for Rebooking</h1>
+          <p class="subtitle">Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Contact</th>
+                <th>Service</th>
+                <th>Last Visit</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${dueRebookings.map((item: any) => `
+                <tr>
+                  <td><strong>${item.customerName || 'Unknown'}</strong></td>
+                  <td>
+                    ${item.customerPhone ? `<div>${item.customerPhone}</div>` : ''}
+                    ${item.customerEmail ? `<div style="font-size: 12px; color: #666;">${item.customerEmail}</div>` : ''}
+                    ${!item.customerPhone && !item.customerEmail ? '-' : ''}
+                  </td>
+                  <td>${item.serviceName || '-'}</td>
+                  <td>${item.lastBookingDate ? new Date(item.lastBookingDate).toLocaleDateString() : 'N/A'}</td>
+                  <td>
+                    <span class="status status-${item.rebookingStatus || 'due'}">
+                      ${item.rebookingStatus || '-'}
+                    </span>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <p class="footer">Total: ${dueRebookings.length} customer(s)</p>
+        </body>
+        </html>
+      `;
+
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+      toast({ title: "Success", description: "PDF opened for printing" });
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to export to PDF", variant: "destructive" });
+    }
+  };
+
+  if (settingsLoading || !settings) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  const getServiceName = (serviceId: string) => {
+    return services?.find((s: any) => s.id === serviceId)?.name || 'Unknown Service';
+  };
+
+  const getStatusBadge = (status: string) => {
+    const colors: Record<string, string> = {
+      overdue: 'bg-red-100 text-red-700',
+      due: 'bg-amber-100 text-amber-700',
+      approaching: 'bg-blue-100 text-blue-700',
+      not_due: 'bg-green-100 text-green-700',
+    };
+    return colors[status] || 'bg-gray-100 text-gray-700';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
+          <RefreshCw className="h-6 w-6 text-violet-600" />
+          Smart Rebooking
+        </h2>
+        <p className="text-muted-foreground">
+          Automatically remind customers when it's time for their next appointment
+        </p>
+      </div>
+
+      <Separator />
+
+      {/* Main Toggle */}
+      <Card className="border-violet-100">
+        <CardContent className="py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center">
+                <RefreshCw className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg">Enable Smart Rebooking</h3>
+                <p className="text-sm text-muted-foreground">
+                  Send automatic reminders to customers based on service cycles
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={settings?.isEnabled === 1}
+              onCheckedChange={(checked) => updateSettingsMutation.mutate({ isEnabled: checked })}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {settings?.isEnabled === 1 && (
+        <>
+          {/* Analytics Dashboard */}
+          <Card className="border-violet-100">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-violet-600" />
+                    Rebooking Analytics
+                  </CardTitle>
+                  <CardDescription>
+                    Track customer retention and reminder effectiveness
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Overview Stats */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="p-4 rounded-lg bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-100">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-violet-100 flex items-center justify-center">
+                      <Users className="h-5 w-5 text-violet-600" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-violet-700">
+                        {analytics?.dashboard?.totalCustomersTracked || 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Total Tracked</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-4 rounded-lg bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center">
+                      <Clock className="h-5 w-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-amber-700">
+                        {analytics?.dashboard?.customersDue || 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Due Now</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-4 rounded-lg bg-gradient-to-br from-red-50 to-rose-50 border border-red-100">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
+                      <AlertCircle className="h-5 w-5 text-red-600" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-red-700">
+                        {analytics?.dashboard?.customersOverdue || 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Overdue</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-4 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                      <Calendar className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-blue-700">
+                        {analytics?.dashboard?.customersApproaching || 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Approaching</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Conversion Rate */}
+              {analytics?.dashboard?.overallConversionRate !== undefined && (
+                <div className="p-4 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-green-600" />
+                      <span className="font-medium">Conversion Rate</span>
+                    </div>
+                    <span className="text-2xl font-bold text-green-700">
+                      {(analytics.dashboard.overallConversionRate * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-green-100 rounded-full h-2">
+                    <div 
+                      className="bg-gradient-to-r from-green-500 to-emerald-500 h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(analytics.dashboard.overallConversionRate * 100, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Percentage of reminders that converted to bookings ({analytics.dashboard.totalConversions || 0} conversions from {analytics.dashboard.totalRemindersSent || 0} reminders)
+                  </p>
+                </div>
+              )}
+
+              <Separator />
+
+              {/* Reminder Stats */}
+              <div>
+                <h4 className="font-medium mb-4 flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-violet-600" />
+                  Reminder Performance (Last 30 Days)
+                </h4>
+                <div className="grid gap-3 sm:grid-cols-5">
+                  <div className="text-center p-4 rounded-lg border border-violet-100">
+                    <p className="text-2xl font-bold text-violet-700">
+                      {analytics?.reminders?.totalSent || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Sent</p>
+                  </div>
+                  <div className="text-center p-4 rounded-lg border border-blue-100 bg-blue-50/30">
+                    <p className="text-2xl font-bold text-blue-600">
+                      {analytics?.reminders?.delivered || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Delivered</p>
+                    {analytics?.reminders?.deliveryRate > 0 && (
+                      <p className="text-xs text-blue-600 mt-1">
+                        {(analytics.reminders.deliveryRate * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-center p-4 rounded-lg border border-indigo-100 bg-indigo-50/30">
+                    <p className="text-2xl font-bold text-indigo-600">
+                      {analytics?.reminders?.opened || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Opened</p>
+                    {analytics?.reminders?.openRate > 0 && (
+                      <p className="text-xs text-indigo-600 mt-1">
+                        {(analytics.reminders.openRate * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-center p-4 rounded-lg border border-purple-100 bg-purple-50/30">
+                    <p className="text-2xl font-bold text-purple-600">
+                      {analytics?.reminders?.clicked || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Clicked</p>
+                    {analytics?.reminders?.clickRate > 0 && (
+                      <p className="text-xs text-purple-600 mt-1">
+                        {(analytics.reminders.clickRate * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-center p-4 rounded-lg border border-green-100 bg-green-50/30">
+                    <p className="text-2xl font-bold text-green-600">
+                      {analytics?.reminders?.converted || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Booked</p>
+                    {analytics?.reminders?.conversionRate > 0 && (
+                      <p className="text-xs text-green-600 mt-1">
+                        {(analytics.reminders.conversionRate * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
+                </div>
+                
+                {(analytics?.reminders?.failed || 0) > 0 && (
+                  <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-100">
+                    <p className="text-sm text-red-700">
+                      <AlertCircle className="h-4 w-4 inline mr-2" />
+                      {analytics.reminders.failed} reminder(s) failed to send
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Additional Metrics */}
+              {analytics?.dashboard?.avgDaysBetweenBookings > 0 && (
+                <div className="p-4 rounded-lg border border-violet-100 bg-violet-50/30">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-violet-600" />
+                      <span className="text-sm font-medium">Average Days Between Bookings</span>
+                    </div>
+                    <p className="text-xl font-bold text-violet-700">
+                      {analytics.dashboard.avgDaysBetweenBookings.toFixed(0)} days
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Visual Analytics Charts */}
+          {analytics && (
+            <Card className="border-violet-100">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-violet-600" />
+                  Visual Analytics
+                </CardTitle>
+                <CardDescription>
+                  Charts showing customer status and reminder performance
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {/* Customer Status Breakdown Chart */}
+                  <div className="p-4 rounded-lg border border-violet-100">
+                    <h4 className="font-medium mb-4 text-sm">Customer Status Breakdown</h4>
+                    {!analytics?.dashboard ? (
+                      <div className="h-64 flex items-center justify-center">
+                        <p className="text-center text-muted-foreground text-sm">No customers require rebooking yet</p>
+                      </div>
+                    ) : (() => {
+                      const dashboard = analytics.dashboard;
+                      const customerData = [
+                        { name: 'Approaching', value: Number(dashboard.customersApproaching) || 0, color: '#3B82F6' },
+                        { name: 'Due', value: Number(dashboard.customersDue) || 0, color: '#F59E0B' },
+                        { name: 'Overdue', value: Number(dashboard.customersOverdue) || 0, color: '#EF4444' },
+                      ];
+                      const filteredData = customerData.filter(d => d.value > 0);
+                      const totalCustomers = customerData.reduce((sum, d) => sum + d.value, 0);
+                      
+                      if (totalCustomers === 0) {
+                        return (
+                          <div className="h-64 flex items-center justify-center">
+                            <p className="text-center text-muted-foreground text-sm">No customers require rebooking yet</p>
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={filteredData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={90}
+                                paddingAngle={5}
+                                dataKey="value"
+                                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                labelLine={false}
+                              >
+                                {filteredData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                formatter={(value: number) => [value, 'Customers']}
+                                contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                              />
+                              <Legend />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Reminder Funnel Chart */}
+                  <div className="p-4 rounded-lg border border-violet-100">
+                    <h4 className="font-medium mb-4 text-sm">Reminder Performance Funnel</h4>
+                    {!analytics?.reminders ? (
+                      <div className="h-64 flex items-center justify-center">
+                        <p className="text-center text-muted-foreground text-sm">No reminders sent yet</p>
+                      </div>
+                    ) : (() => {
+                      const reminders = analytics.reminders;
+                      const reminderData = [
+                        { stage: 'Sent', count: Number(reminders.totalSent) || 0, fill: '#8B5CF6' },
+                        { stage: 'Delivered', count: Number(reminders.delivered) || 0, fill: '#6366F1' },
+                        { stage: 'Opened', count: Number(reminders.opened) || 0, fill: '#3B82F6' },
+                        { stage: 'Clicked', count: Number(reminders.clicked) || 0, fill: '#06B6D4' },
+                        { stage: 'Booked', count: Number(reminders.converted) || 0, fill: '#10B981' },
+                      ];
+                      const totalSent = reminderData[0].count;
+                      
+                      if (totalSent === 0) {
+                        return (
+                          <div className="h-64 flex items-center justify-center">
+                            <p className="text-center text-muted-foreground text-sm">No reminders sent yet</p>
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={reminderData}
+                              layout="vertical"
+                              margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
+                              <XAxis type="number" />
+                              <YAxis dataKey="stage" type="category" width={70} />
+                              <Tooltip 
+                                formatter={(value: number) => [value, 'Count']}
+                                contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                              />
+                              <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                                {reminderData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Conversion Rate Gauge */}
+                {(() => {
+                  const conversionRate = Number(analytics?.dashboard?.overallConversionRate) || 0;
+                  const totalConversions = Number(analytics?.dashboard?.totalConversions) || 0;
+                  const totalRemindersSent = Number(analytics?.dashboard?.totalRemindersSent) || 0;
+                  const widthPercent = Math.min(Math.max(conversionRate * 100, 0), 100);
+                  
+                  return (
+                    <div className="p-4 rounded-lg border border-violet-100 bg-gradient-to-r from-violet-50/50 to-purple-50/50">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-medium text-sm">Overall Conversion Performance</h4>
+                        <Badge 
+                          variant="secondary" 
+                          className={
+                            conversionRate >= 0.2 
+                              ? 'bg-green-100 text-green-700' 
+                              : conversionRate >= 0.1 
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-red-100 text-red-700'
+                          }
+                        >
+                          {conversionRate >= 0.2 ? 'Excellent' : conversionRate >= 0.1 ? 'Good' : 'Needs Improvement'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-gradient-to-r from-violet-500 to-green-500 transition-all duration-700"
+                              style={{ width: `${widthPercent}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+                            <span>0%</span>
+                            <span>Target: 20%</span>
+                            <span>100%</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-3xl font-bold text-violet-700">
+                            {(conversionRate * 100).toFixed(1)}%
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {totalConversions} / {totalRemindersSent}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Default Settings */}
+          <Card className="border-violet-100">
+            <CardHeader>
+              <CardTitle className="text-lg">Default Settings</CardTitle>
+              <CardDescription>
+                These apply when no service-specific cycle is configured
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <Label>Default Recommended Days</Label>
+                  <Input
+                    type="number"
+                    value={settings?.defaultRecommendedDays || 30}
+                    onChange={(e) => updateSettingsMutation.mutate({ 
+                      defaultRecommendedDays: parseInt(e.target.value) 
+                    })}
+                    min={1}
+                    max={365}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Days between appointments</p>
+                </div>
+                <div>
+                  <Label>First Reminder (days before)</Label>
+                  <Input
+                    type="number"
+                    value={settings?.defaultFirstReminderDays || 7}
+                    onChange={(e) => updateSettingsMutation.mutate({ 
+                      defaultFirstReminderDays: parseInt(e.target.value) 
+                    })}
+                    min={1}
+                    max={30}
+                  />
+                </div>
+                <div>
+                  <Label>Second Reminder (days before)</Label>
+                  <Input
+                    type="number"
+                    value={settings?.defaultSecondReminderDays || 3}
+                    onChange={(e) => updateSettingsMutation.mutate({ 
+                      defaultSecondReminderDays: parseInt(e.target.value) 
+                    })}
+                    min={0}
+                    max={14}
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="font-medium">Reminder Channels</h4>
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={settings?.defaultReminderChannels?.includes('email')}
+                      onCheckedChange={(checked) => {
+                        const channels = settings?.defaultReminderChannels || [];
+                        const updated = checked
+                          ? [...channels, 'email']
+                          : channels.filter((c: string) => c !== 'email');
+                        updateSettingsMutation.mutate({ defaultReminderChannels: updated });
+                      }}
+                    />
+                    <Label className="flex items-center gap-2">
+                      <Mail className="h-4 w-4" /> Email
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={settings?.defaultReminderChannels?.includes('sms')}
+                      onCheckedChange={(checked) => {
+                        const channels = settings?.defaultReminderChannels || [];
+                        const updated = checked
+                          ? [...channels, 'sms']
+                          : channels.filter((c: string) => c !== 'sms');
+                        updateSettingsMutation.mutate({ defaultReminderChannels: updated });
+                      }}
+                    />
+                    <Label className="flex items-center gap-2">
+                      <Phone className="h-4 w-4" /> SMS
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={settings?.defaultReminderChannels?.includes('whatsapp')}
+                      onCheckedChange={(checked) => {
+                        const channels = settings?.defaultReminderChannels || [];
+                        const updated = checked
+                          ? [...channels, 'whatsapp']
+                          : channels.filter((c: string) => c !== 'whatsapp');
+                        updateSettingsMutation.mutate({ defaultReminderChannels: updated });
+                      }}
+                    />
+                    <Label className="flex items-center gap-2">
+                      <Smartphone className="h-4 w-4" /> WhatsApp
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={settings?.defaultReminderChannels?.includes('push')}
+                      onCheckedChange={(checked) => {
+                        const channels = settings?.defaultReminderChannels || [];
+                        const updated = checked
+                          ? [...channels, 'push']
+                          : channels.filter((c: string) => c !== 'push');
+                        updateSettingsMutation.mutate({ defaultReminderChannels: updated });
+                      }}
+                    />
+                    <Label className="flex items-center gap-2">
+                      <Bell className="h-4 w-4" /> Push
+                    </Label>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <h4 className="font-medium">Rebooking Discount</h4>
+                <div className="flex items-center gap-4">
+                  <Switch
+                    checked={settings?.enableRebookingDiscount === 1}
+                    onCheckedChange={(checked) => updateSettingsMutation.mutate({ 
+                      enableRebookingDiscount: checked 
+                    })}
+                  />
+                  <div className="flex-1">
+                    <Label>Offer discount for quick rebooking</Label>
+                    {settings?.enableRebookingDiscount === 1 && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <Input
+                          type="number"
+                          value={settings?.rebookingDiscountPercent || 10}
+                          onChange={(e) => updateSettingsMutation.mutate({ 
+                            rebookingDiscountPercent: parseFloat(e.target.value) 
+                          })}
+                          className="w-20"
+                          min={1}
+                          max={50}
+                        />
+                        <span>% off for</span>
+                        <Input
+                          type="number"
+                          value={settings?.discountValidDays || 7}
+                          onChange={(e) => updateSettingsMutation.mutate({ 
+                            discountValidDays: parseInt(e.target.value) 
+                          })}
+                          className="w-20"
+                          min={1}
+                          max={30}
+                        />
+                        <span>days after reminder</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Advanced Settings */}
+          <Card className="border-violet-100">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <SettingsIcon className="h-5 w-5 text-violet-600" />
+                Advanced Settings
+              </CardTitle>
+              <CardDescription>
+                Fine-tune reminder behavior and customer preferences
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Quiet Hours */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-violet-600" />
+                      Quiet Hours
+                    </h4>
+                    <p className="text-sm text-muted-foreground">
+                      Don't send reminders during these hours (customer's local time)
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm w-16">From</Label>
+                    <Select
+                      value={settings?.quietHoursStart || '21:00'}
+                      onValueChange={(value) => updateSettingsMutation.mutate({ quietHoursStart: value })}
+                    >
+                      <SelectTrigger className="w-28">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 24 }, (_, i) => {
+                          const hour = i.toString().padStart(2, '0');
+                          return (
+                            <SelectItem key={hour} value={`${hour}:00`}>
+                              {hour}:00
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm w-16">To</Label>
+                    <Select
+                      value={settings?.quietHoursEnd || '09:00'}
+                      onValueChange={(value) => updateSettingsMutation.mutate({ quietHoursEnd: value })}
+                    >
+                      <SelectTrigger className="w-28">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 24 }, (_, i) => {
+                          const hour = i.toString().padStart(2, '0');
+                          return (
+                            <SelectItem key={hour} value={`${hour}:00`}>
+                              {hour}:00
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground bg-violet-50 p-2 rounded">
+                  Example: Set 21:00 to 09:00 to avoid sending reminders between 9 PM and 9 AM
+                </p>
+              </div>
+
+              <Separator />
+
+              {/* Max Reminders Per Service */}
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-violet-600" />
+                    Maximum Reminders Per Service
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    Limit how many reminders a customer receives for each service before they book
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    value={settings?.maxRemindersPerService || 2}
+                    onChange={(e) => updateSettingsMutation.mutate({ 
+                      maxRemindersPerService: parseInt(e.target.value) 
+                    })}
+                    className="w-20"
+                    min={1}
+                    max={5}
+                  />
+                  <span className="text-sm text-muted-foreground">reminders maximum per service</span>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Min/Max Days Range */}
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-violet-600" />
+                    Default Rebooking Window
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    Define the earliest and latest a customer should rebook
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <Label>Minimum Days</Label>
+                    <Input
+                      type="number"
+                      value={settings?.defaultMinDays || 14}
+                      onChange={(e) => updateSettingsMutation.mutate({ 
+                        defaultMinDays: parseInt(e.target.value) 
+                      })}
+                      min={1}
+                      max={365}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Earliest suggested rebooking</p>
+                  </div>
+                  <div>
+                    <Label>Maximum Days</Label>
+                    <Input
+                      type="number"
+                      value={settings?.defaultMaxDays || 60}
+                      onChange={(e) => updateSettingsMutation.mutate({ 
+                        defaultMaxDays: parseInt(e.target.value) 
+                      })}
+                      min={1}
+                      max={365}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Latest before marked overdue</p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Customer Opt-Out Respect */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium flex items-center gap-2">
+                      <UserCheck className="h-4 w-4 text-violet-600" />
+                      Respect Customer Opt-Out
+                    </h4>
+                    <p className="text-sm text-muted-foreground">
+                      Stop sending reminders to customers who have opted out of marketing communications
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings?.respectCustomerOptOut === 1}
+                    onCheckedChange={(checked) => updateSettingsMutation.mutate({ 
+                      respectCustomerOptOut: checked 
+                    })}
+                  />
+                </div>
+                {settings?.respectCustomerOptOut === 1 && (
+                  <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                    <p className="text-sm text-green-700 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      Customer preferences are being respected. Opt-out customers won't receive reminders.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Service Cycles */}
+          <Card className="border-violet-100">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">Service Rebooking Cycles</CardTitle>
+                  <CardDescription>
+                    Set custom rebooking schedules for different services
+                  </CardDescription>
+                </div>
+                <Button
+                  onClick={() => {
+                    setEditingCycle(null);
+                    setShowCycleDialog(true);
+                  }}
+                  className="bg-gradient-to-r from-violet-500 to-purple-500"
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Add Cycle
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {cyclesLoading ? (
+                <div className="text-center py-8">Loading cycles...</div>
+              ) : cycles?.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <RefreshCw className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No service cycles configured yet</p>
+                  <p className="text-sm">Add a cycle to customize rebooking for specific services</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cycles?.map((cycle: any) => (
+                    <div
+                      key={cycle.id}
+                      className="flex items-center justify-between p-4 rounded-lg border border-violet-100 hover:bg-violet-50/50 transition-colors"
+                    >
+                      <div className="flex-1">
+                        <h4 className="font-medium">{getServiceName(cycle.serviceId)}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Recommended: {cycle.recommendedDays} days • 
+                          Reminders: {cycle.reminderEnabled ? 'On' : 'Off'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingCycle(cycle);
+                            setShowCycleDialog(true);
+                          }}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (confirm('Delete this cycle?')) {
+                              deleteCycleMutation.mutate(cycle.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Due Rebookings */}
+          <Card className="border-violet-100">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">Customers Due for Rebooking</CardTitle>
+                  <CardDescription>
+                    Customers who are due or overdue for their next appointment
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportToExcel}
+                    disabled={!dueRebookings || dueRebookings.length === 0}
+                    title="Export to Excel"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Excel
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportToPDF}
+                    disabled={!dueRebookings || dueRebookings.length === 0}
+                    title="Export to PDF"
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowPreviewDialog(true)}
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    Preview Reminder
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => scheduleRemindersMutation.mutate()}
+                    disabled={scheduleRemindersMutation.isPending}
+                  >
+                    <Bell className="h-4 w-4 mr-2" />
+                    {scheduleRemindersMutation.isPending ? 'Scheduling...' : 'Send Reminders'}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!dueRebookings || dueRebookings.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-500 opacity-50" />
+                  <p>No customers due for rebooking right now</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {dueRebookings.map((item: any) => (
+                    <div
+                      key={`${item.customerId}-${item.serviceId}`}
+                      className="flex items-center justify-between p-4 rounded-lg border border-violet-100"
+                    >
+                      <div className="flex-1">
+                        <h4 className="font-medium">{item.customerName || 'Unknown Customer'}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {item.serviceName} • Last visit: {item.lastBookingDate 
+                            ? new Date(item.lastBookingDate).toLocaleDateString() 
+                            : 'N/A'}
+                        </p>
+                        {item.customerPhone && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            <Phone className="h-3 w-3 inline mr-1" />
+                            {item.customerPhone}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {item.customerPhone && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              asChild
+                              title="Call customer"
+                            >
+                              <a href={`tel:${item.customerPhone.replace(/[^0-9+]/g, '')}`}>
+                                <Phone className="h-4 w-4 text-green-600" />
+                              </a>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              asChild
+                              title="Send WhatsApp message"
+                            >
+                              <a 
+                                href={`https://wa.me/${item.customerPhone.replace(/[^0-9]/g, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <MessageSquare className="h-4 w-4 text-green-500" />
+                              </a>
+                            </Button>
+                          </>
+                        )}
+                        {item.customerEmail && (
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            asChild
+                            title="Send email"
+                          >
+                            <a href={`mailto:${item.customerEmail}?subject=${encodeURIComponent(`Your Next Appointment at ${item.salonName || 'Our Salon'}`)}&body=${encodeURIComponent(`Hi ${item.customerName || 'there'},\n\nWe noticed it's been a while since your last ${item.serviceName || 'appointment'}. We'd love to have you back!\n\nBook your next appointment today.`)}`}>
+                              <Mail className="h-4 w-4 text-violet-600" />
+                            </a>
+                          </Button>
+                        )}
+                        <Badge className={getStatusBadge(item.rebookingStatus)}>
+                          {item.rebookingStatus}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* Cycle Dialog */}
+      <Dialog open={showCycleDialog} onOpenChange={setShowCycleDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingCycle ? 'Edit Cycle' : 'Add Service Cycle'}</DialogTitle>
+            <DialogDescription>
+              Configure rebooking schedule for a service
+            </DialogDescription>
+          </DialogHeader>
+          <ServiceCycleForm
+            cycle={editingCycle}
+            services={services || []}
+            existingCycles={cycles || []}
+            onSubmit={(data) => saveCycleMutation.mutate(data)}
+            onCancel={() => {
+              setShowCycleDialog(false);
+              setEditingCycle(null);
+            }}
+            isLoading={saveCycleMutation.isPending}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Reminder Preview Dialog */}
+      <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-violet-600" />
+              Reminder Preview
+            </DialogTitle>
+            <DialogDescription>
+              Preview how reminders will look to your customers
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Channel Selector */}
+            <div className="flex gap-2">
+              <Button
+                variant={previewChannel === 'email' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPreviewChannel('email')}
+                className={previewChannel === 'email' ? 'bg-violet-600' : ''}
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                Email
+              </Button>
+              <Button
+                variant={previewChannel === 'sms' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPreviewChannel('sms')}
+                className={previewChannel === 'sms' ? 'bg-violet-600' : ''}
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                SMS
+              </Button>
+              <Button
+                variant={previewChannel === 'whatsapp' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setPreviewChannel('whatsapp')}
+                className={previewChannel === 'whatsapp' ? 'bg-violet-600' : ''}
+              >
+                <MessageSquare className="h-4 w-4 mr-2" />
+                WhatsApp
+              </Button>
+            </div>
+
+            {/* Preview Content */}
+            <div className="border rounded-lg overflow-hidden">
+              {previewChannel === 'email' && (
+                <div className="bg-white">
+                  <div className="bg-gradient-to-r from-violet-600 to-purple-600 p-4 text-white">
+                    <p className="text-xs opacity-80">From: Your Salon</p>
+                    <p className="text-xs opacity-80">To: customer@example.com</p>
+                    <p className="font-semibold mt-2">Subject: Time for your next appointment!</p>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <p>Hi <span className="font-semibold text-violet-600">Priya</span>,</p>
+                    <p className="text-sm text-muted-foreground">
+                      It's been a while since your last <span className="font-medium">Haircut</span> appointment with us!
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      We'd love to have you back. Book your next appointment today and keep looking your best.
+                    </p>
+                    {settings?.enableRebookingDiscount === 1 && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 my-3">
+                        <p className="text-sm text-green-700 font-medium flex items-center gap-2">
+                          <Gift className="h-4 w-4" />
+                          Special Offer: {settings.rebookingDiscountPercent}% off your next booking!
+                        </p>
+                        <p className="text-xs text-green-600 mt-1">
+                          Valid for {settings.discountValidDays} days
+                        </p>
+                      </div>
+                    )}
+                    <div className="pt-3">
+                      <Button className="bg-gradient-to-r from-violet-600 to-purple-600 w-full">
+                        Book Now
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center pt-2">
+                      Your Salon Name • 123 Main Street
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {previewChannel === 'sms' && (
+                <div className="bg-gray-100 p-4">
+                  <div className="bg-white rounded-2xl rounded-tl-none p-3 max-w-[280px] shadow-sm">
+                    <p className="text-sm">
+                      Hi Priya! It's time for your next Haircut. 
+                      {settings?.enableRebookingDiscount === 1 && (
+                        <span> Get {settings.rebookingDiscountPercent}% off if you book within {settings.discountValidDays} days!</span>
+                      )}
+                      {' '}Book now: salonhub.com/book/abc123
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">- Your Salon</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-3 text-center">
+                    ~{settings?.enableRebookingDiscount === 1 ? '140' : '95'} characters
+                  </p>
+                </div>
+              )}
+
+              {previewChannel === 'whatsapp' && (
+                <div className="bg-[#e5ddd5] p-4">
+                  <div className="bg-white rounded-lg p-3 max-w-[300px] shadow-sm">
+                    <p className="text-sm">
+                      Hi Priya! 👋
+                    </p>
+                    <p className="text-sm mt-2">
+                      It's been a while since your last <strong>Haircut</strong> with us. We'd love to see you again!
+                    </p>
+                    {settings?.enableRebookingDiscount === 1 && (
+                      <p className="text-sm mt-2">
+                        🎁 Special offer: <strong>{settings.rebookingDiscountPercent}% off</strong> if you book within {settings.discountValidDays} days!
+                      </p>
+                    )}
+                    <p className="text-sm mt-2">
+                      📅 Tap below to book your appointment:
+                    </p>
+                    <div className="bg-violet-50 rounded p-2 mt-2 text-center">
+                      <p className="text-sm text-violet-600 font-medium">Book Now →</p>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">Your Salon ✨</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Preview Note */}
+            <div className="bg-violet-50 p-3 rounded-lg border border-violet-100">
+              <p className="text-sm text-violet-700 flex items-start gap-2">
+                <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>
+                  This is a sample preview. Actual reminders will include the customer's real name, service, and booking link.
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setShowPreviewDialog(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// Service Cycle Form Component
+function ServiceCycleForm({
+  cycle,
+  services,
+  existingCycles,
+  onSubmit,
+  onCancel,
+  isLoading,
+}: {
+  cycle: any;
+  services: any[];
+  existingCycles: any[];
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+}) {
+  const [serviceId, setServiceId] = useState(cycle?.serviceId || '');
+  const [recommendedDays, setRecommendedDays] = useState(cycle?.recommendedDays || 30);
+  const [minDays, setMinDays] = useState(cycle?.minDays || 14);
+  const [maxDays, setMaxDays] = useState(cycle?.maxDays || 60);
+  const [reminderEnabled, setReminderEnabled] = useState(cycle?.reminderEnabled ?? true);
+  const [firstReminderDays, setFirstReminderDays] = useState(cycle?.firstReminderDays || 7);
+  const [secondReminderDays, setSecondReminderDays] = useState(cycle?.secondReminderDays || 3);
+  const [reminderChannels, setReminderChannels] = useState<string[]>(cycle?.reminderChannels || ['email']);
+  const [customMessage, setCustomMessage] = useState(cycle?.customMessage || '');
+
+  const availableServices = services.filter(
+    (s) => !existingCycles.some((c) => c.serviceId === s.id && c.id !== cycle?.id)
+  );
+
+  const handleSubmit = () => {
+    if (!serviceId) return;
+    onSubmit({
+      serviceId,
+      recommendedDays,
+      minDays,
+      maxDays,
+      reminderEnabled,
+      firstReminderDays,
+      secondReminderDays,
+      reminderChannels,
+      customMessage: customMessage || undefined,
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <Label>Service</Label>
+        <Select value={serviceId} onValueChange={setServiceId} disabled={!!cycle}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select a service" />
+          </SelectTrigger>
+          <SelectContent>
+            {availableServices.map((service) => (
+              <SelectItem key={service.id} value={service.id}>
+                {service.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-4 grid-cols-3">
+        <div>
+          <Label>Min Days</Label>
+          <Input
+            type="number"
+            value={minDays}
+            onChange={(e) => setMinDays(parseInt(e.target.value))}
+            min={1}
+          />
+        </div>
+        <div>
+          <Label>Recommended</Label>
+          <Input
+            type="number"
+            value={recommendedDays}
+            onChange={(e) => setRecommendedDays(parseInt(e.target.value))}
+            min={1}
+          />
+        </div>
+        <div>
+          <Label>Max Days</Label>
+          <Input
+            type="number"
+            value={maxDays}
+            onChange={(e) => setMaxDays(parseInt(e.target.value))}
+            min={1}
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Switch checked={reminderEnabled} onCheckedChange={setReminderEnabled} />
+        <Label>Enable reminders for this service</Label>
+      </div>
+
+      {reminderEnabled && (
+        <>
+          <div className="grid gap-4 grid-cols-2">
+            <div>
+              <Label>First Reminder (days before)</Label>
+              <Input
+                type="number"
+                value={firstReminderDays}
+                onChange={(e) => setFirstReminderDays(parseInt(e.target.value))}
+                min={1}
+              />
+            </div>
+            <div>
+              <Label>Second Reminder (days before)</Label>
+              <Input
+                type="number"
+                value={secondReminderDays}
+                onChange={(e) => setSecondReminderDays(parseInt(e.target.value))}
+                min={0}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Reminder Channels</Label>
+            <div className="flex gap-4 mt-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={reminderChannels.includes('email')}
+                  onCheckedChange={(checked) => {
+                    setReminderChannels(
+                      checked
+                        ? [...reminderChannels, 'email']
+                        : reminderChannels.filter((c) => c !== 'email')
+                    );
+                  }}
+                />
+                <span>Email</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={reminderChannels.includes('sms')}
+                  onCheckedChange={(checked) => {
+                    setReminderChannels(
+                      checked
+                        ? [...reminderChannels, 'sms']
+                        : reminderChannels.filter((c) => c !== 'sms')
+                    );
+                  }}
+                />
+                <span>SMS</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <Label>Custom Message (optional)</Label>
+            <Textarea
+              value={customMessage}
+              onChange={(e) => setCustomMessage(e.target.value)}
+              placeholder="Use {customerName}, {serviceName}, {salonName} as placeholders..."
+              rows={3}
+            />
+          </div>
+        </>
+      )}
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={!serviceId || isLoading}
+          className="bg-gradient-to-r from-violet-500 to-purple-500"
+        >
+          {isLoading ? 'Saving...' : cycle ? 'Update' : 'Create'}
+        </Button>
+      </div>
     </div>
   );
 }

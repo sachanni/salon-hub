@@ -648,6 +648,21 @@ export default function ProfileScreen() {
         {activeTab === 'settings' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
+              <Ionicons name="sparkles-outline" size={18} color="#8B5CF6" />
+              <Text style={styles.sectionTitle}>Beauty Profile</Text>
+            </View>
+            <View style={styles.settingsCard}>
+              <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/beauty-profile' as any)}>
+                <Ionicons name="sparkles" size={20} color="#8B5CF6" />
+                <Text style={styles.settingText}>My Beauty Profile</Text>
+                <View style={styles.settingBadge}>
+                  <Text style={styles.settingBadgeText}>NEW</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
               <Ionicons name="gift-outline" size={18} color="#E91E63" />
               <Text style={styles.sectionTitle}>Rewards & Engagement</Text>
             </View>

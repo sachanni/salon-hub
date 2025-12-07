@@ -1011,7 +1011,7 @@ export const verifyPaymentSchema = z.object({
 });
 
 // Booking status enum for validation
-const bookingStatusEnum = z.enum(['pending', 'confirmed', 'cancelled', 'completed']);
+const bookingStatusEnum = z.enum(['pending', 'confirmed', 'cancelled', 'completed', 'no_show']);
 
 // Single booking update schema - status and optional notes
 export const updateBookingSchema = z.object({
@@ -1063,9 +1063,10 @@ export const updatePackageSchema = z.object({
 export const validateStatusTransition = (currentStatus: string, newStatus: string): { isValid: boolean, error?: string } => {
   const validTransitions: Record<string, string[]> = {
     pending: ['confirmed', 'cancelled'],
-    confirmed: ['completed', 'cancelled'],
+    confirmed: ['completed', 'cancelled', 'no_show'],
     completed: [], // Cannot transition from completed
-    cancelled: []  // Cannot transition from cancelled
+    cancelled: [], // Cannot transition from cancelled
+    no_show: []    // Cannot transition from no_show
   };
 
   if (!validTransitions[currentStatus]) {
@@ -6101,6 +6102,55 @@ export const depositTransactions = pgTable("deposit_transactions", {
 export type DepositTransaction = typeof depositTransactions.$inferSelect;
 export type InsertDepositTransaction = typeof depositTransactions.$inferInsert;
 
+// Customer Saved Payment Methods - Razorpay card tokenization
+export const customerSavedCards = pgTable("customer_saved_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  customerId: varchar("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  // Razorpay token reference
+  razorpayTokenId: varchar("razorpay_token_id", { length: 100 }).notNull(),
+  razorpayCustomerId: varchar("razorpay_customer_id", { length: 100 }),
+  
+  // Card display info (masked)
+  cardNetwork: varchar("card_network", { length: 50 }), // visa, mastercard, rupay, etc.
+  cardType: varchar("card_type", { length: 20 }), // credit, debit
+  cardLast4: varchar("card_last_4", { length: 4 }),
+  cardIssuer: varchar("card_issuer", { length: 100 }), // Bank name
+  cardBrand: varchar("card_brand", { length: 50 }),
+  expiryMonth: integer("expiry_month"),
+  expiryYear: integer("expiry_year"),
+  
+  // Card nickname for easy identification
+  nickname: varchar("nickname", { length: 50 }),
+  
+  // Status
+  isDefault: integer("is_default").notNull().default(0), // 1 = default card
+  isActive: integer("is_active").notNull().default(1), // 0 = deactivated
+  
+  // Compliance fields
+  consentGiven: integer("consent_given").notNull().default(1), // RBI compliance
+  consentTimestamp: timestamp("consent_timestamp"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  lastUsedAt: timestamp("last_used_at"),
+}, (table) => [
+  index("customer_saved_cards_customer_idx").on(table.customerId),
+  index("customer_saved_cards_token_idx").on(table.razorpayTokenId),
+  index("customer_saved_cards_active_idx").on(table.isActive),
+  unique("customer_saved_cards_token_unique").on(table.razorpayTokenId),
+]);
+
+export type CustomerSavedCard = typeof customerSavedCards.$inferSelect;
+export type InsertCustomerSavedCard = typeof customerSavedCards.$inferInsert;
+
+export const customerSavedCardsRelations = relations(customerSavedCards, ({ one }) => ({
+  customer: one(users, {
+    fields: [customerSavedCards.customerId],
+    references: [users.id],
+  }),
+}));
+
 // Relations for No-Show Protection tables
 export const depositSettingsRelations = relations(depositSettings, ({ one }) => ({
   salon: one(salons, {
@@ -6878,6 +6928,8 @@ export type UpdateRebookingSettingsRequest = z.infer<typeof updateRebookingSetti
 export const rebookingSuggestionSchema = z.object({
   serviceId: z.string(),
   serviceName: z.string(),
+  salonId: z.string(),
+  salonName: z.string(),
   lastBookingDate: z.string(),
   dueDate: z.string(),
   daysOverdue: z.number(),
@@ -6895,8 +6947,223 @@ export type RebookingSuggestion = z.infer<typeof rebookingSuggestionSchema>;
 // Dismiss rebooking reminder schema
 export const dismissRebookingSchema = z.object({
   serviceId: z.string(),
+  salonId: z.string(),
   reason: z.enum(['not_interested', 'already_booked', 'snooze', 'unsubscribe']),
   snoozeDays: z.number().int().positive().max(90).optional(), // Only for snooze reason
 });
 
 export type DismissRebookingRequest = z.infer<typeof dismissRebookingSchema>;
+
+// ==========================================
+// ROLE-BASED ACCESS CONTROL (RBAC) SYSTEM
+// ==========================================
+
+// Shop Role Types - defines available roles at shop level
+export const shopRoleTypes = ['business_owner', 'shop_admin', 'staff'] as const;
+export type ShopRoleType = typeof shopRoleTypes[number];
+
+// Permission Categories - groups of related permissions
+export const permissionCategories = [
+  'shop_management',
+  'staff_management', 
+  'services_products',
+  'bookings',
+  'events',
+  'analytics',
+  'settings',
+  'gift_cards',
+  'chat'
+] as const;
+export type PermissionCategory = typeof permissionCategories[number];
+
+// Permissions table - granular permission definitions
+export const permissions = pgTable("permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: varchar("code", { length: 100 }).notNull().unique(), // e.g., 'shop.edit', 'staff.create', 'booking.manage'
+  name: varchar("name", { length: 100 }).notNull(), // Human-readable name
+  description: text("description"),
+  category: varchar("category", { length: 50 }).notNull(), // shop_management, staff_management, etc.
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("permissions_category_idx").on(table.category),
+  index("permissions_code_idx").on(table.code),
+]);
+
+export const insertPermissionSchema = createInsertSchema(permissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPermission = z.infer<typeof insertPermissionSchema>;
+export type Permission = typeof permissions.$inferSelect;
+
+// Role Permissions - maps shop roles to permissions
+export const shopRolePermissions = pgTable("shop_role_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  role: varchar("role", { length: 50 }).notNull(), // 'business_owner', 'shop_admin', 'staff'
+  permissionId: varchar("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("shop_role_permissions_role_idx").on(table.role),
+  uniqueIndex("shop_role_permissions_unique").on(table.role, table.permissionId),
+]);
+
+export const insertShopRolePermissionSchema = createInsertSchema(shopRolePermissions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertShopRolePermission = z.infer<typeof insertShopRolePermissionSchema>;
+export type ShopRolePermission = typeof shopRolePermissions.$inferSelect;
+
+// Shop Role Assignments - assigns users to specific salons with roles
+export const shopRoleAssignments = pgTable("shop_role_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  role: varchar("role", { length: 50 }).notNull(), // 'shop_admin', 'staff'
+  assignedBy: varchar("assigned_by").references(() => users.id, { onDelete: "set null" }), // Who assigned this role
+  isActive: integer("is_active").notNull().default(1),
+  assignedAt: timestamp("assigned_at").defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: varchar("revoked_by").references(() => users.id, { onDelete: "set null" }),
+  notes: text("notes"), // Optional notes about the assignment
+}, (table) => [
+  index("shop_role_assignments_user_idx").on(table.userId),
+  index("shop_role_assignments_salon_idx").on(table.salonId),
+  index("shop_role_assignments_role_idx").on(table.role),
+  // Unique active assignment per user per salon (user can only have one active role per salon)
+  uniqueIndex("shop_role_assignments_active_unique").on(table.userId, table.salonId)
+    .where(sql`${table.isActive} = 1`),
+]);
+
+export const insertShopRoleAssignmentSchema = createInsertSchema(shopRoleAssignments).omit({
+  id: true,
+  assignedAt: true,
+  revokedAt: true,
+});
+
+export type InsertShopRoleAssignment = z.infer<typeof insertShopRoleAssignmentSchema>;
+export type ShopRoleAssignment = typeof shopRoleAssignments.$inferSelect;
+
+// Admin Audit Logs - tracks all permission changes and admin actions
+export const adminAuditLogs = pgTable("admin_audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), // Who performed the action
+  salonId: varchar("salon_id").references(() => salons.id, { onDelete: "cascade" }), // Which salon (null for org-level)
+  action: varchar("action", { length: 100 }).notNull(), // 'role_assigned', 'role_revoked', 'permission_changed', etc.
+  targetUserId: varchar("target_user_id").references(() => users.id, { onDelete: "set null" }), // User affected by action
+  previousValue: jsonb("previous_value"), // Previous state before change
+  newValue: jsonb("new_value"), // New state after change
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  metadata: jsonb("metadata"), // Additional context
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("admin_audit_logs_user_idx").on(table.userId),
+  index("admin_audit_logs_salon_idx").on(table.salonId),
+  index("admin_audit_logs_action_idx").on(table.action),
+  index("admin_audit_logs_created_at_idx").on(table.createdAt),
+]);
+
+export const insertAdminAuditLogSchema = createInsertSchema(adminAuditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAdminAuditLog = z.infer<typeof insertAdminAuditLogSchema>;
+export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
+
+// Relations for RBAC tables
+export const shopRoleAssignmentsRelations = relations(shopRoleAssignments, ({ one }) => ({
+  user: one(users, {
+    fields: [shopRoleAssignments.userId],
+    references: [users.id],
+  }),
+  salon: one(salons, {
+    fields: [shopRoleAssignments.salonId],
+    references: [salons.id],
+  }),
+  assignedByUser: one(users, {
+    fields: [shopRoleAssignments.assignedBy],
+    references: [users.id],
+    relationName: 'assignedBy',
+  }),
+}));
+
+export const shopRolePermissionsRelations = relations(shopRolePermissions, ({ one }) => ({
+  permission: one(permissions, {
+    fields: [shopRolePermissions.permissionId],
+    references: [permissions.id],
+  }),
+}));
+
+export const adminAuditLogsRelations = relations(adminAuditLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [adminAuditLogs.userId],
+    references: [users.id],
+    relationName: 'performer',
+  }),
+  salon: one(salons, {
+    fields: [adminAuditLogs.salonId],
+    references: [salons.id],
+  }),
+  targetUser: one(users, {
+    fields: [adminAuditLogs.targetUserId],
+    references: [users.id],
+    relationName: 'target',
+  }),
+}));
+
+// API Request Schemas for Shop Admin Management
+export const assignShopRoleSchema = z.object({
+  userId: z.string(),
+  salonId: z.string(),
+  role: z.enum(['shop_admin', 'staff']),
+  notes: z.string().max(500).optional(),
+});
+
+export type AssignShopRoleRequest = z.infer<typeof assignShopRoleSchema>;
+
+export const revokeShopRoleSchema = z.object({
+  userId: z.string(),
+  salonId: z.string(),
+});
+
+export type RevokeShopRoleRequest = z.infer<typeof revokeShopRoleSchema>;
+
+export const updateShopRoleSchema = z.object({
+  userId: z.string(),
+  salonId: z.string(),
+  newRole: z.enum(['shop_admin', 'staff']),
+  notes: z.string().max(500).optional(),
+});
+
+export type UpdateShopRoleRequest = z.infer<typeof updateShopRoleSchema>;
+
+// Permission check response type
+export const userSalonPermissionsSchema = z.object({
+  userId: z.string(),
+  salonId: z.string(),
+  role: z.enum(['business_owner', 'shop_admin', 'staff']),
+  permissions: z.array(z.string()), // Array of permission codes
+  isBusinessOwner: z.boolean(),
+});
+
+export type UserSalonPermissions = z.infer<typeof userSalonPermissionsSchema>;
+
+// Shop admin list response type
+export const shopAdminListItemSchema = z.object({
+  userId: z.string(),
+  userName: z.string(),
+  userEmail: z.string().nullable(),
+  userPhone: z.string().nullable(),
+  userProfileImage: z.string().nullable(),
+  role: z.enum(['shop_admin', 'staff']),
+  assignedAt: z.string(),
+  assignedByName: z.string().nullable(),
+  isActive: z.boolean(),
+});
+
+export type ShopAdminListItem = z.infer<typeof shopAdminListItemSchema>;

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Wallet, TrendingUp, Clock, Gift, CreditCard, QrCode, Store, Calendar, ArrowRight, Copy, Check } from "lucide-react";
+import { Wallet, TrendingUp, Clock, Gift, CreditCard, QrCode, Store, Calendar, ArrowRight, Copy, Check, Shield } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -146,7 +146,7 @@ export default function CustomerWallet() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="wallet" className="flex items-center gap-2">
               <Wallet className="w-4 h-4" />
               Wallet
@@ -157,6 +157,10 @@ export default function CustomerWallet() {
               {activeGiftCards.length > 0 && (
                 <Badge variant="secondary" className="ml-1">{activeGiftCards.length}</Badge>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="deposits" className="flex items-center gap-2">
+              <Shield className="w-4 h-4" />
+              Deposits
             </TabsTrigger>
           </TabsList>
 
@@ -454,6 +458,86 @@ export default function CustomerWallet() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="deposits" className="space-y-6">
+            <Card className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-blue-100 text-sm mb-1">Booking Deposits</p>
+                    <h2 className="text-2xl font-bold">Protect Your Appointments</h2>
+                    <p className="text-blue-100 text-sm mt-2">
+                      View all your deposit transactions and refund history
+                    </p>
+                  </div>
+                  <Shield className="w-16 h-16 text-blue-200" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardContent className="p-6 text-center">
+                  <Shield className="w-10 h-10 text-blue-600 mx-auto mb-3" />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Deposit History</h3>
+                  <p className="text-gray-600 text-sm mb-4">
+                    Track your deposits, refunds, and forfeited amounts.
+                  </p>
+                  <Button
+                    onClick={() => setLocation('/customer/deposits')}
+                    className="bg-blue-600 hover:bg-blue-700 w-full"
+                  >
+                    View Deposits
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-6 text-center">
+                  <CreditCard className="w-10 h-10 text-indigo-600 mx-auto mb-3" />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Saved Cards</h3>
+                  <p className="text-gray-600 text-sm mb-4">
+                    Manage your saved payment methods for faster checkout.
+                  </p>
+                  <Button
+                    onClick={() => setLocation('/customer/saved-cards')}
+                    className="bg-indigo-600 hover:bg-indigo-700 w-full"
+                  >
+                    Manage Cards
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="p-6">
+                <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                  <CreditCard className="w-5 h-5" />
+                  How Deposits Work
+                </h4>
+                <ul className="space-y-2 text-sm text-blue-800">
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">1.</span>
+                    Some services require a deposit to secure your booking
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">2.</span>
+                    Your deposit is applied to your final bill when you attend
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">3.</span>
+                    Cancel within the salon's policy window for a full refund
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">4.</span>
+                    Late cancellations or no-shows may result in deposit forfeiture
+                  </li>
+                </ul>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

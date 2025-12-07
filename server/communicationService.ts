@@ -11,6 +11,7 @@ export interface SendMessageRequest {
   customContent?: {
     subject?: string;
     body: string;
+    html?: string;
   };
   variables?: Record<string, string>;
   salonId: string;
@@ -96,7 +97,7 @@ class CommunicationService {
       
       const history = await storage.createCommunicationHistory(historyRecord);
       
-      let content: { subject?: string; body: string };
+      let content: { subject?: string; body: string; html?: string };
       
       if (request.templateId) {
         // Get template and apply variables
@@ -122,6 +123,7 @@ class CommunicationService {
           to: request.to,
           subject: content.subject || 'Notification from your salon',
           body: content.body,
+          html: content.html,
           salonId: request.salonId
         });
       } else if (request.channel === 'sms') {
@@ -189,6 +191,7 @@ class CommunicationService {
     to: string;
     subject: string;
     body: string;
+    html?: string;
     salonId: string;
   }): Promise<{ messageId: string }> {
     if (!this.emailService) {
@@ -207,7 +210,7 @@ class CommunicationService {
         name: fromName
       },
       subject: params.subject,
-      html: this.formatEmailHTML(params.body, salon?.name),
+      html: params.html || this.formatEmailHTML(params.body, salon?.name),
       text: params.body
     };
     

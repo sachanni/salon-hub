@@ -23,6 +23,7 @@ import { CategorySkeleton, OfferSkeleton, SalonSkeleton } from '../components/Sk
 import { locationService, LocationData, LocationError } from '../services/locationService';
 import { offersAPI } from '../services/api';
 import SideMenu from '../components/SideMenu';
+import { RebookingSuggestionsCard } from '../components/RebookingSuggestionsCard';
 import type { Salon, Category, SpecialOffer } from '../types/salon';
 
 const { width } = Dimensions.get('window');
@@ -579,6 +580,9 @@ export const HomeScreen = () => {
           ))}
         </View>
       </View>
+
+      {/* Rebooking Suggestions */}
+      <RebookingSuggestionsCard />
 
       {/* Special Offers Section */}
       <View style={styles.section}>

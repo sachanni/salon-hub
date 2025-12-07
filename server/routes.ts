@@ -12,6 +12,8 @@ import {
   requireStaffAccess,
   requireSuperAdmin,
   populateUserFromSession,
+  requirePermission,
+  requireBusinessOwner,
   type AuthenticatedRequest,
 } from "./middleware/auth";
 import Razorpay from "razorpay";
@@ -48,8 +50,12 @@ import chatRoutes from "./routes/chat.routes";
 import aiConsultantRoutes, { initializeAIConsultantRoutes } from "./routes/ai-consultant.routes";
 import { initializeChatSocket } from "./services/chat.service";
 import clientProfileRoutes from "./routes/client-profiles.routes";
-import depositsRoutes, { publicDepositsRouter } from "./routes/deposits.routes";
+import depositsRoutes, { publicDepositsRouter, registerMobileDepositRoutes } from "./routes/deposits.routes";
 import giftCardsRoutes, { publicGiftCardsRouter } from "./routes/gift-cards.routes";
+import rebookingRoutes, { registerMobileRebookingRoutes } from "./routes/rebooking.routes";
+import { rebookingService } from "./services/rebooking.service";
+import { rbacService } from "./services/rbacService";
+import shopAdminRoutes from "./routes/shopAdminRoutes";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -187,6 +193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax", // CSRF protection for session-authenticated endpoints
         maxAge: sessionTtl,
+        path: "/",
       },
     }),
   );
@@ -1922,7 +1929,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put(
     "/api/salons/:salonId",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'settings_manage'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -1949,11 +1956,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
-  // Delete salon (with validation to prevent deleting last salon)
+  // Delete salon (with validation to prevent deleting last salon) - business owner only
   app.delete(
     "/api/salons/:salonId",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner']),
+    requireBusinessOwner(),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -2404,7 +2412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/products",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'inventory_view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -2457,7 +2465,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/products/low-stock",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'inventory_view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -2473,7 +2481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/salons/:salonId/products",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'inventory_manage'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8171,6 +8179,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           input.status,
         );
 
+        // If booking is completed, update customer rebooking stats
+        if (input.status === "completed") {
+          try {
+            const updatedBooking = await storage.getBooking(bookingId);
+            if (updatedBooking) {
+              await rebookingService.updateCustomerStatsAfterBooking(updatedBooking);
+            }
+          } catch (rebookingError) {
+            console.error("Error updating rebooking stats:", rebookingError);
+          }
+        }
+
         let notesUpdateCount = 0;
         // If notes provided, update booking notes
         if (input.notes !== undefined) {
@@ -8178,6 +8198,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             bookingId,
             input.notes,
           );
+        }
+
+        // Log the booking update action for audit trail
+        try {
+          await rbacService.logBookingAction(
+            req.user.id,
+            salonId,
+            bookingId,
+            'booking_updated',
+            { status: booking.status, notes: booking.notes },
+            { status: input.status, notes: input.notes },
+            req.ip,
+            req.get('user-agent')
+          );
+        } catch (auditError) {
+          console.error("Error logging booking action:", auditError);
         }
 
         // Return affected row count for accurate UX feedback
@@ -8385,7 +8421,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/analytics",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'analytics_view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8410,7 +8446,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/analytics/staff",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'analytics_view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8433,7 +8469,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/analytics/retention",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'analytics_view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8852,6 +8888,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         await storage.updateService(serviceId, req.body);
 
+        // Log the service update action for audit trail
+        try {
+          await rbacService.logServiceAction(
+            req.user.id,
+            salonId,
+            serviceId,
+            'service_updated',
+            { name: existingService.name, price: existingService.price },
+            { name: req.body.name, price: req.body.price },
+            req.ip,
+            req.get('user-agent')
+          );
+        } catch (auditError) {
+          console.error("Error logging service action:", auditError);
+        }
+
         // Return updated service
         const updatedService = await storage.getService(serviceId);
         res.json(updatedService);
@@ -8882,6 +8934,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         await storage.deleteService(serviceId);
+
+        // Log the service delete action for audit trail
+        try {
+          await rbacService.logServiceAction(
+            req.user.id,
+            salonId,
+            serviceId,
+            'service_deleted',
+            { name: existingService.name, price: existingService.price },
+            null,
+            req.ip,
+            req.get('user-agent')
+          );
+        } catch (auditError) {
+          console.error("Error logging service action:", auditError);
+        }
+
         res.json({ success: true });
       } catch (error) {
         console.error("Error deleting salon service:", error);
@@ -9945,7 +10014,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/staff/manage",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'staff_view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -9995,7 +10064,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/salons/:salonId/staff",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'staff_manage'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -10012,7 +10081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put(
     "/api/salons/:salonId/staff/:staffId",
     isAuthenticated,
-    requireSalonAccess(),
+    requireSalonAccess(['owner', 'manager'], 'staff_manage'),
     async (req: any, res) => {
       try {
         const { staffId, salonId } = req.params;
@@ -10033,6 +10102,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Update the staff member with filtered data
         await storage.updateStaff(staffId, updateData);
+
+        // Log the staff update action for audit trail
+        try {
+          await rbacService.logStaffAction(
+            req.user.id,
+            salonId,
+            staffId,
+            'staff_updated',
+            { name: existingStaff.name, role: existingStaff.role },
+            { name: updateData.name, role: updateData.role },
+            req.ip,
+            req.get('user-agent')
+          );
+        } catch (auditError) {
+          console.error("Error logging staff action:", auditError);
+        }
 
         // Fetch and return the updated staff member
         const updatedStaff = await storage.getStaff(staffId);
@@ -16790,6 +16875,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/business/gift-cards', isAuthenticated, giftCardsRoutes);
   app.use('/api/gift-cards', publicGiftCardsRouter);
   console.log('✅ Gift Cards routes registered');
+
+  // Smart Rebooking Reminders routes (business dashboard + customer suggestions)
+  app.use('/api/rebooking', isAuthenticated, rebookingRoutes);
+  registerMobileRebookingRoutes(app);
+  console.log('✅ Rebooking routes registered (web + mobile)');
+
+  // Shop Admin RBAC routes (manage shop admins, permissions, roles)
+  app.use('/api/shop-admin', isAuthenticated, shopAdminRoutes);
+  console.log('✅ Shop Admin RBAC routes registered');
+
+  // User search for shop admin assignment (authenticated, business owners only)
+  app.get('/api/users/search', isAuthenticated, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user?.id || req.session?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Authentication required' });
+      }
+
+      // Check if user is a business owner of at least one salon
+      const { rbacService } = await import('./services/rbacService');
+      const userSalons = await rbacService.getSalonsForUser(userId);
+      const isOwner = userSalons.some(s => s.role === 'business_owner');
+      if (!isOwner) {
+        return res.status(403).json({ success: false, message: 'Only business owners can search users' });
+      }
+
+      const { email } = req.query;
+      if (!email || typeof email !== 'string' || email.length < 3) {
+        return res.status(400).json({ success: false, message: 'Email query must be at least 3 characters' });
+      }
+
+      const users = await storage.searchUsersByEmail(email, 10);
+      return res.json({ 
+        success: true, 
+        users: users.map(u => ({
+          id: u.id,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          email: u.email,
+          profileImageUrl: u.profileImageUrl,
+        }))
+      });
+    } catch (error) {
+      console.error('Error searching users:', error);
+      return res.status(500).json({ success: false, message: 'Failed to search users' });
+    }
+  });
+  console.log('✅ User search routes registered');
+
+  // Mobile deposit routes (no-show protection for mobile app)
+  registerMobileDepositRoutes(app);
+  console.log('✅ Mobile deposit routes registered');
 
   // ===============================================
   // PRODUCT E-COMMERCE ROUTES

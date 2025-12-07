@@ -6,6 +6,7 @@ import {
   cancellationPolicies,
   trustedCustomers,
   depositTransactions,
+  customerSavedCards,
   salons,
   services,
   users,
@@ -14,6 +15,7 @@ import {
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireSalonAccess, requireStaffAccess, type AuthenticatedRequest } from '../middleware/auth';
+import { authenticateMobileUser } from '../middleware/authMobile';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 
@@ -73,7 +75,7 @@ const depositTransactionSchema = z.object({
   notes: z.string().optional(),
 });
 
-router.get('/:salonId/deposit-settings', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/deposit-settings', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
 
@@ -102,7 +104,7 @@ router.get('/:salonId/deposit-settings', requireSalonAccess, async (req: Authent
   }
 });
 
-router.put('/:salonId/deposit-settings', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:salonId/deposit-settings', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const userId = req.user?.id;
@@ -141,7 +143,7 @@ router.put('/:salonId/deposit-settings', requireSalonAccess, async (req: Authent
   }
 });
 
-router.get('/:salonId/cancellation-policy', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/cancellation-policy', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
 
@@ -169,7 +171,7 @@ router.get('/:salonId/cancellation-policy', requireSalonAccess, async (req: Auth
   }
 });
 
-router.put('/:salonId/cancellation-policy', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:salonId/cancellation-policy', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const userId = req.user?.id;
@@ -208,7 +210,7 @@ router.put('/:salonId/cancellation-policy', requireSalonAccess, async (req: Auth
   }
 });
 
-router.get('/:salonId/service-deposit-rules', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/service-deposit-rules', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
 
@@ -235,7 +237,7 @@ router.get('/:salonId/service-deposit-rules', requireSalonAccess, async (req: Au
   }
 });
 
-router.post('/:salonId/service-deposit-rules', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:salonId/service-deposit-rules', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     
@@ -288,7 +290,7 @@ router.post('/:salonId/service-deposit-rules', requireSalonAccess, async (req: A
   }
 });
 
-router.delete('/:salonId/service-deposit-rules/:ruleId', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:salonId/service-deposit-rules/:ruleId', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, ruleId } = req.params;
 
@@ -312,7 +314,7 @@ router.delete('/:salonId/service-deposit-rules/:ruleId', requireSalonAccess, asy
   }
 });
 
-router.post('/:salonId/service-deposit-rules/bulk', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:salonId/service-deposit-rules/bulk', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { rules } = req.body as { rules: z.infer<typeof serviceDepositRuleSchema>[] };
@@ -386,7 +388,7 @@ router.post('/:salonId/service-deposit-rules/bulk', requireSalonAccess, async (r
   }
 });
 
-router.get('/:salonId/trusted-customers', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/trusted-customers', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { trustLevel, page = '1', limit = '20' } = req.query;
@@ -449,7 +451,7 @@ router.get('/:salonId/trusted-customers', requireSalonAccess, async (req: Authen
   }
 });
 
-router.post('/:salonId/trusted-customers', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:salonId/trusted-customers', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const userId = req.user?.id;
@@ -496,7 +498,7 @@ router.post('/:salonId/trusted-customers', requireSalonAccess, async (req: Authe
   }
 });
 
-router.put('/:salonId/trusted-customers/:trustedCustomerId', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:salonId/trusted-customers/:trustedCustomerId', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, trustedCustomerId } = req.params;
     const userId = req.user?.id;
@@ -533,7 +535,7 @@ router.put('/:salonId/trusted-customers/:trustedCustomerId', requireSalonAccess,
   }
 });
 
-router.delete('/:salonId/trusted-customers/:trustedCustomerId', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:salonId/trusted-customers/:trustedCustomerId', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, trustedCustomerId } = req.params;
 
@@ -557,7 +559,7 @@ router.delete('/:salonId/trusted-customers/:trustedCustomerId', requireSalonAcce
   }
 });
 
-router.get('/:salonId/check-deposit/:serviceId/:customerId', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/check-deposit/:serviceId/:customerId', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, serviceId, customerId } = req.params;
 
@@ -672,7 +674,7 @@ router.get('/:salonId/check-deposit/:serviceId/:customerId', requireSalonAccess,
   }
 });
 
-router.get('/:salonId/deposit-transactions', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/deposit-transactions', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { 
@@ -757,7 +759,7 @@ router.get('/:salonId/deposit-transactions', requireSalonAccess, async (req: Aut
   }
 });
 
-router.post('/:salonId/deposit-transactions', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:salonId/deposit-transactions', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { customerId } = req.body;
@@ -799,7 +801,7 @@ router.post('/:salonId/deposit-transactions', requireSalonAccess, async (req: Au
   }
 });
 
-router.put('/:salonId/deposit-transactions/:transactionId/refund', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:salonId/deposit-transactions/:transactionId/refund', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, transactionId } = req.params;
     const userId = req.user?.id;
@@ -840,7 +842,7 @@ router.put('/:salonId/deposit-transactions/:transactionId/refund', requireSalonA
   }
 });
 
-router.put('/:salonId/deposit-transactions/:transactionId/forfeit', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:salonId/deposit-transactions/:transactionId/forfeit', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId, transactionId } = req.params;
     const userId = req.user?.id;
@@ -919,7 +921,54 @@ router.put('/:salonId/deposit-transactions/:transactionId/forfeit', requireSalon
   }
 });
 
-router.get('/:salonId/customers', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:salonId/bookings/:bookingId/mark-no-show', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { salonId, bookingId } = req.params;
+    const userId = req.user?.id;
+
+    const { noShowService } = await import('../services/noshow.service');
+    
+    const result = await noShowService.markBookingAsNoShow(bookingId, salonId, userId);
+    
+    if (!result.success) {
+      return res.status(400).json({ 
+        error: result.error,
+        bookingId: result.bookingId,
+        previousStatus: result.previousStatus,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Booking marked as no-show',
+      bookingId: result.bookingId,
+      previousStatus: result.previousStatus,
+      depositAction: result.depositAction,
+      depositAmountPaisa: result.depositAmountPaisa,
+    });
+  } catch (error) {
+    console.error('Error marking booking as no-show:', error);
+    res.status(500).json({ error: 'Failed to mark booking as no-show' });
+  }
+});
+
+router.get('/:salonId/no-show-statistics', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    const { days = '30' } = req.query;
+
+    const { noShowService } = await import('../services/noshow.service');
+    
+    const stats = await noShowService.getNoShowStatistics(salonId, parseInt(days as string) || 30);
+    
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching no-show statistics:', error);
+    res.status(500).json({ error: 'Failed to fetch no-show statistics' });
+  }
+});
+
+router.get('/:salonId/customers', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { search = '', page = '1', limit = '20' } = req.query;
@@ -978,7 +1027,7 @@ router.get('/:salonId/customers', requireSalonAccess, async (req: AuthenticatedR
   }
 });
 
-router.get('/:salonId/deposit-analytics', requireSalonAccess, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:salonId/deposit-analytics', requireSalonAccess(), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { salonId } = req.params;
     const { period = '30' } = req.query;
@@ -1506,5 +1555,650 @@ publicDepositsRouter.post('/verify-deposit-payment', async (req: Request, res: R
     });
   }
 });
+
+// =============================================================================
+// CUSTOMER-FACING DEPOSIT ENDPOINTS
+// =============================================================================
+
+// Get customer's own deposit history across all salons
+router.get('/my-deposits', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Fetch customer's deposit transactions with salon and booking details
+    const transactions = await db
+      .select({
+        id: depositTransactions.id,
+        salonId: depositTransactions.salonId,
+        salonName: salons.name,
+        salonImageUrl: salons.imageUrl,
+        bookingId: depositTransactions.bookingId,
+        transactionType: depositTransactions.transactionType,
+        amountPaisa: depositTransactions.amountPaisa,
+        currency: depositTransactions.currency,
+        serviceAmountPaisa: depositTransactions.serviceAmountPaisa,
+        depositPercentage: depositTransactions.depositPercentage,
+        status: depositTransactions.status,
+        reason: depositTransactions.reason,
+        notes: depositTransactions.notes,
+        createdAt: depositTransactions.createdAt,
+        bookingDate: bookings.bookingDate,
+        bookingTime: bookings.bookingTime,
+        serviceName: services.name,
+      })
+      .from(depositTransactions)
+      .leftJoin(salons, eq(depositTransactions.salonId, salons.id))
+      .leftJoin(bookings, eq(depositTransactions.bookingId, bookings.id))
+      .leftJoin(services, eq(bookings.serviceId, services.id))
+      .where(eq(depositTransactions.customerId, userId))
+      .orderBy(desc(depositTransactions.createdAt))
+      .limit(100);
+
+    // Calculate summary statistics
+    const stats = {
+      totalDeposits: 0,
+      totalRefunded: 0,
+      totalForfeited: 0,
+      activeDeposits: 0,
+    };
+
+    transactions.forEach(tx => {
+      const amount = tx.amountPaisa || 0;
+      switch (tx.transactionType) {
+        case 'deposit_collected':
+          stats.totalDeposits += amount;
+          if (tx.status === 'completed' || tx.status === 'pending') {
+            stats.activeDeposits += amount;
+          }
+          break;
+        case 'deposit_refunded':
+          stats.totalRefunded += amount;
+          break;
+        case 'deposit_forfeited':
+        case 'no_show_charged':
+          stats.totalForfeited += amount;
+          break;
+        case 'deposit_applied':
+          stats.activeDeposits -= amount;
+          break;
+      }
+    });
+
+    res.json({
+      transactions,
+      stats,
+      count: transactions.length,
+    });
+  } catch (error) {
+    console.error('Error fetching customer deposits:', error);
+    res.status(500).json({ error: 'Failed to fetch deposit history' });
+  }
+});
+
+// Get specific deposit transaction details for customer
+router.get('/my-deposits/:transactionId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { transactionId } = req.params;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const [transaction] = await db
+      .select({
+        id: depositTransactions.id,
+        salonId: depositTransactions.salonId,
+        salonName: salons.name,
+        salonAddress: salons.address,
+        salonCity: salons.city,
+        salonImageUrl: salons.imageUrl,
+        bookingId: depositTransactions.bookingId,
+        transactionType: depositTransactions.transactionType,
+        amountPaisa: depositTransactions.amountPaisa,
+        currency: depositTransactions.currency,
+        serviceAmountPaisa: depositTransactions.serviceAmountPaisa,
+        depositPercentage: depositTransactions.depositPercentage,
+        razorpayPaymentId: depositTransactions.razorpayPaymentId,
+        razorpayRefundId: depositTransactions.razorpayRefundId,
+        status: depositTransactions.status,
+        reason: depositTransactions.reason,
+        notes: depositTransactions.notes,
+        createdAt: depositTransactions.createdAt,
+        updatedAt: depositTransactions.updatedAt,
+        bookingDate: bookings.bookingDate,
+        bookingTime: bookings.bookingTime,
+        bookingStatus: bookings.status,
+        serviceName: services.name,
+        serviceDuration: services.durationMinutes,
+      })
+      .from(depositTransactions)
+      .leftJoin(salons, eq(depositTransactions.salonId, salons.id))
+      .leftJoin(bookings, eq(depositTransactions.bookingId, bookings.id))
+      .leftJoin(services, eq(bookings.serviceId, services.id))
+      .where(
+        and(
+          eq(depositTransactions.id, transactionId),
+          eq(depositTransactions.customerId, userId)
+        )
+      );
+
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    res.json(transaction);
+  } catch (error) {
+    console.error('Error fetching deposit transaction:', error);
+    res.status(500).json({ error: 'Failed to fetch transaction details' });
+  }
+});
+
+// =============================================================================
+// CUSTOMER SAVED CARDS ENDPOINTS
+// =============================================================================
+
+const savedCardSchema = z.object({
+  razorpayTokenId: z.string().min(1),
+  razorpayCustomerId: z.string().optional(),
+  cardNetwork: z.string().optional(),
+  cardType: z.string().optional(),
+  cardLast4: z.string().length(4).optional(),
+  cardIssuer: z.string().optional(),
+  cardBrand: z.string().optional(),
+  expiryMonth: z.number().min(1).max(12).optional(),
+  expiryYear: z.number().min(2024).optional(),
+  nickname: z.string().max(50).optional(),
+  isDefault: z.number().min(0).max(1).optional(),
+});
+
+router.get('/my-cards', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const cards = await db.query.customerSavedCards.findMany({
+      where: and(
+        eq(customerSavedCards.customerId, userId),
+        eq(customerSavedCards.isActive, 1)
+      ),
+      orderBy: [desc(customerSavedCards.isDefault), desc(customerSavedCards.createdAt)],
+    });
+
+    const formattedCards = cards.map(card => ({
+      id: card.id,
+      cardNetwork: card.cardNetwork,
+      cardType: card.cardType,
+      cardLast4: card.cardLast4,
+      cardIssuer: card.cardIssuer,
+      cardBrand: card.cardBrand,
+      expiryMonth: card.expiryMonth,
+      expiryYear: card.expiryYear,
+      nickname: card.nickname,
+      isDefault: card.isDefault === 1,
+      lastUsedAt: card.lastUsedAt,
+      createdAt: card.createdAt,
+    }));
+
+    res.json({
+      cards: formattedCards,
+      count: formattedCards.length,
+    });
+  } catch (error) {
+    console.error('Error fetching saved cards:', error);
+    res.status(500).json({ error: 'Failed to fetch saved cards' });
+  }
+});
+
+router.post('/my-cards', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const parsed = savedCardSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid card data', details: parsed.error.errors });
+    }
+
+    const existingCard = await db.query.customerSavedCards.findFirst({
+      where: eq(customerSavedCards.razorpayTokenId, parsed.data.razorpayTokenId),
+    });
+
+    if (existingCard) {
+      return res.status(409).json({ error: 'Card already saved' });
+    }
+
+    if (parsed.data.isDefault === 1) {
+      await db
+        .update(customerSavedCards)
+        .set({ isDefault: 0, updatedAt: new Date() })
+        .where(eq(customerSavedCards.customerId, userId));
+    }
+
+    const [newCard] = await db.insert(customerSavedCards).values({
+      customerId: userId,
+      razorpayTokenId: parsed.data.razorpayTokenId,
+      razorpayCustomerId: parsed.data.razorpayCustomerId || null,
+      cardNetwork: parsed.data.cardNetwork || null,
+      cardType: parsed.data.cardType || null,
+      cardLast4: parsed.data.cardLast4 || null,
+      cardIssuer: parsed.data.cardIssuer || null,
+      cardBrand: parsed.data.cardBrand || null,
+      expiryMonth: parsed.data.expiryMonth || null,
+      expiryYear: parsed.data.expiryYear || null,
+      nickname: parsed.data.nickname || null,
+      isDefault: parsed.data.isDefault ?? 0,
+      consentTimestamp: new Date(),
+    }).returning();
+
+    res.status(201).json({
+      id: newCard.id,
+      cardNetwork: newCard.cardNetwork,
+      cardType: newCard.cardType,
+      cardLast4: newCard.cardLast4,
+      cardIssuer: newCard.cardIssuer,
+      nickname: newCard.nickname,
+      isDefault: newCard.isDefault === 1,
+      createdAt: newCard.createdAt,
+    });
+  } catch (error) {
+    console.error('Error saving card:', error);
+    res.status(500).json({ error: 'Failed to save card' });
+  }
+});
+
+router.put('/my-cards/:cardId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { cardId } = req.params;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const existingCard = await db.query.customerSavedCards.findFirst({
+      where: and(
+        eq(customerSavedCards.id, cardId),
+        eq(customerSavedCards.customerId, userId)
+      ),
+    });
+
+    if (!existingCard) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    const { nickname, isDefault } = req.body;
+
+    if (isDefault === 1 || isDefault === true) {
+      await db
+        .update(customerSavedCards)
+        .set({ isDefault: 0, updatedAt: new Date() })
+        .where(eq(customerSavedCards.customerId, userId));
+    }
+
+    const [updatedCard] = await db
+      .update(customerSavedCards)
+      .set({
+        nickname: nickname !== undefined ? nickname : existingCard.nickname,
+        isDefault: isDefault !== undefined ? (isDefault ? 1 : 0) : existingCard.isDefault,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(customerSavedCards.id, cardId),
+        eq(customerSavedCards.customerId, userId)
+      ))
+      .returning();
+
+    res.json({
+      id: updatedCard.id,
+      nickname: updatedCard.nickname,
+      isDefault: updatedCard.isDefault === 1,
+      updatedAt: updatedCard.updatedAt,
+    });
+  } catch (error) {
+    console.error('Error updating card:', error);
+    res.status(500).json({ error: 'Failed to update card' });
+  }
+});
+
+router.delete('/my-cards/:cardId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { cardId } = req.params;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const existingCard = await db.query.customerSavedCards.findFirst({
+      where: and(
+        eq(customerSavedCards.id, cardId),
+        eq(customerSavedCards.customerId, userId)
+      ),
+    });
+
+    if (!existingCard) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    await db
+      .update(customerSavedCards)
+      .set({ isActive: 0, updatedAt: new Date() })
+      .where(and(
+        eq(customerSavedCards.id, cardId),
+        eq(customerSavedCards.customerId, userId)
+      ));
+
+    res.json({ success: true, message: 'Card removed successfully' });
+  } catch (error) {
+    console.error('Error removing card:', error);
+    res.status(500).json({ error: 'Failed to remove card' });
+  }
+});
+
+router.post('/my-cards/:cardId/set-default', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { cardId } = req.params;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const existingCard = await db.query.customerSavedCards.findFirst({
+      where: and(
+        eq(customerSavedCards.id, cardId),
+        eq(customerSavedCards.customerId, userId),
+        eq(customerSavedCards.isActive, 1)
+      ),
+    });
+
+    if (!existingCard) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    await db
+      .update(customerSavedCards)
+      .set({ isDefault: 0, updatedAt: new Date() })
+      .where(eq(customerSavedCards.customerId, userId));
+
+    await db
+      .update(customerSavedCards)
+      .set({ isDefault: 1, updatedAt: new Date() })
+      .where(and(
+        eq(customerSavedCards.id, cardId),
+        eq(customerSavedCards.customerId, userId)
+      ));
+
+    res.json({ success: true, message: 'Default card updated' });
+  } catch (error) {
+    console.error('Error setting default card:', error);
+    res.status(500).json({ error: 'Failed to set default card' });
+  }
+});
+
+export function registerMobileDepositRoutes(app: any) {
+  app.get('/api/mobile/deposits/my-deposits', authenticateMobileUser, async (req: any, res: any) => {
+    try {
+      const userId = req.user?.id;
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const transactions = await db
+        .select({
+          id: depositTransactions.id,
+          salonId: depositTransactions.salonId,
+          salonName: salons.name,
+          salonImageUrl: salons.imageUrl,
+          bookingId: depositTransactions.bookingId,
+          transactionType: depositTransactions.transactionType,
+          amountPaisa: depositTransactions.amountPaisa,
+          currency: depositTransactions.currency,
+          serviceAmountPaisa: depositTransactions.serviceAmountPaisa,
+          depositPercentage: depositTransactions.depositPercentage,
+          status: depositTransactions.status,
+          reason: depositTransactions.reason,
+          notes: depositTransactions.notes,
+          wasNoShow: depositTransactions.wasNoShow,
+          createdAt: depositTransactions.createdAt,
+          bookingDate: bookings.bookingDate,
+          bookingTime: bookings.bookingTime,
+          serviceName: services.name,
+        })
+        .from(depositTransactions)
+        .leftJoin(salons, eq(depositTransactions.salonId, salons.id))
+        .leftJoin(bookings, eq(depositTransactions.bookingId, bookings.id))
+        .leftJoin(services, eq(bookings.serviceId, services.id))
+        .where(eq(depositTransactions.customerId, userId))
+        .orderBy(desc(depositTransactions.createdAt))
+        .limit(100);
+
+      const stats = {
+        totalDeposits: 0,
+        totalRefunded: 0,
+        totalForfeited: 0,
+        activeDeposits: 0,
+      };
+
+      transactions.forEach(tx => {
+        const amount = tx.amountPaisa || 0;
+        switch (tx.transactionType) {
+          case 'deposit_collected':
+            stats.totalDeposits += amount;
+            if (tx.status === 'completed' || tx.status === 'pending') {
+              stats.activeDeposits += amount;
+            }
+            break;
+          case 'deposit_refunded':
+            stats.totalRefunded += amount;
+            break;
+          case 'deposit_forfeited':
+          case 'no_show_charged':
+            stats.totalForfeited += amount;
+            break;
+          case 'deposit_applied':
+            stats.activeDeposits -= amount;
+            break;
+        }
+      });
+
+      res.json({
+        transactions,
+        stats,
+        count: transactions.length,
+      });
+    } catch (error) {
+      console.error('Error fetching mobile deposits:', error);
+      res.status(500).json({ error: 'Failed to fetch deposit history' });
+    }
+  });
+
+  app.post('/api/mobile/deposits/check-booking-deposit', authenticateMobileUser, async (req: any, res: any) => {
+    try {
+      const userId = req.user?.id;
+      const { salonId, serviceIds } = req.body;
+
+      if (!salonId || !serviceIds || !Array.isArray(serviceIds) || serviceIds.length === 0) {
+        return res.status(400).json({ error: 'salonId and serviceIds are required' });
+      }
+
+      const settings = await db.query.depositSettings.findFirst({
+        where: eq(depositSettings.salonId, salonId),
+      });
+
+      if (!settings || settings.isEnabled !== 1) {
+        return res.json({
+          requiresDeposit: false,
+          reason: 'deposits_disabled',
+          totalDepositPaisa: 0,
+          serviceDeposits: [],
+        });
+      }
+
+      let trustedCustomer = null;
+      if (userId) {
+        trustedCustomer = await db.query.trustedCustomers.findFirst({
+          where: and(
+            eq(trustedCustomers.salonId, salonId),
+            eq(trustedCustomers.customerId, userId)
+          ),
+        });
+
+        if (trustedCustomer && trustedCustomer.trustLevel === 'blacklisted') {
+          const allServices = await db.query.services.findMany({
+            where: inArray(services.id, serviceIds),
+          });
+          const totalServiceAmount = allServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
+          
+          return res.json({
+            requiresDeposit: true,
+            depositPercentage: 100,
+            totalDepositPaisa: totalServiceAmount,
+            totalServicePaisa: totalServiceAmount,
+            reason: 'customer_blacklisted',
+            forceFullPayment: true,
+          });
+        }
+
+        if (settings.allowTrustedCustomerBypass === 1 && trustedCustomer) {
+          if (trustedCustomer.canBypassDeposit === 1) {
+            if (settings.requireCardOnFile === 0 || trustedCustomer.hasCardOnFile === 1) {
+              return res.json({
+                requiresDeposit: false,
+                reason: 'trusted_customer',
+                totalDepositPaisa: 0,
+              });
+            }
+          }
+        }
+      }
+
+      const allServices = await db.query.services.findMany({
+        where: inArray(services.id, serviceIds),
+      });
+
+      const serviceRules = await db.select()
+        .from(serviceDepositRules)
+        .where(and(
+          eq(serviceDepositRules.salonId, salonId),
+          inArray(serviceDepositRules.serviceId, serviceIds)
+        ));
+
+      const rulesMap = new Map(serviceRules.map(r => [r.serviceId, r]));
+
+      let totalDepositPaisa = 0;
+      let totalServicePaisa = 0;
+      let anyServiceRequiresDeposit = false;
+
+      for (const service of allServices) {
+        const serviceRule = rulesMap.get(service.id);
+        let requiresDeposit = false;
+        let depositPercentage = settings.depositPercentage;
+
+        if (settings.useManualToggle === 1 && serviceRule?.requiresDeposit === 1) {
+          requiresDeposit = true;
+          if (serviceRule.customPercentage) {
+            depositPercentage = serviceRule.customPercentage;
+          }
+        } else if (settings.useCategoryBased === 1 && settings.protectedCategories?.includes(service.category || '')) {
+          requiresDeposit = true;
+        } else if (settings.usePriceThreshold === 1 && settings.priceThresholdPaisa && service.priceInPaisa >= settings.priceThresholdPaisa) {
+          requiresDeposit = true;
+        }
+
+        if (requiresDeposit) {
+          anyServiceRequiresDeposit = true;
+          let depositAmountPaisa = Math.round(service.priceInPaisa * depositPercentage / 100);
+
+          if (serviceRule?.minimumDepositPaisa && depositAmountPaisa < serviceRule.minimumDepositPaisa) {
+            depositAmountPaisa = serviceRule.minimumDepositPaisa;
+          }
+          if (serviceRule?.maximumDepositPaisa && depositAmountPaisa > serviceRule.maximumDepositPaisa) {
+            depositAmountPaisa = serviceRule.maximumDepositPaisa;
+          }
+
+          totalDepositPaisa += depositAmountPaisa;
+        }
+
+        totalServicePaisa += service.priceInPaisa;
+      }
+
+      if (!anyServiceRequiresDeposit) {
+        return res.json({
+          requiresDeposit: false,
+          reason: 'no_services_require_deposit',
+          totalDepositPaisa: 0,
+          totalServicePaisa,
+        });
+      }
+
+      const policy = await db.query.cancellationPolicies.findFirst({
+        where: eq(cancellationPolicies.salonId, salonId),
+      });
+
+      res.json({
+        requiresDeposit: true,
+        totalDepositPaisa,
+        totalServicePaisa,
+        balanceDuePaisa: totalServicePaisa - totalDepositPaisa,
+        cancellationPolicy: policy ? {
+          windowHours: policy.cancellationWindowHours,
+          noShowAction: policy.noShowAction,
+          noShowGraceMinutes: policy.noShowGraceMinutes,
+          policyText: policy.policyText,
+        } : null,
+      });
+    } catch (error) {
+      console.error('Error checking mobile booking deposit:', error);
+      res.status(500).json({ error: 'Failed to check deposit requirement' });
+    }
+  });
+
+  app.get('/api/mobile/deposits/cancellation-policy/:salonId', authenticateMobileUser, async (req: any, res: any) => {
+    try {
+      const { salonId } = req.params;
+
+      const policy = await db.query.cancellationPolicies.findFirst({
+        where: eq(cancellationPolicies.salonId, salonId),
+      });
+
+      if (!policy) {
+        return res.json({
+          cancellationWindowHours: 24,
+          withinWindowAction: 'forfeit_full',
+          noShowAction: 'forfeit_full',
+          noShowGraceMinutes: 15,
+          policyText: 'Standard cancellation policy applies. Please cancel at least 24 hours in advance to avoid losing your deposit.',
+        });
+      }
+
+      res.json({
+        cancellationWindowHours: policy.cancellationWindowHours,
+        withinWindowAction: policy.withinWindowAction,
+        partialForfeitPercentage: policy.partialForfeitPercentage,
+        noShowAction: policy.noShowAction,
+        noShowGraceMinutes: policy.noShowGraceMinutes,
+        policyText: policy.policyText,
+      });
+    } catch (error) {
+      console.error('Error fetching mobile cancellation policy:', error);
+      res.status(500).json({ error: 'Failed to fetch cancellation policy' });
+    }
+  });
+
+  console.log('✅ Mobile deposit routes registered');
+}
 
 export default router;

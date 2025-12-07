@@ -7,8 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
   Gift,
@@ -21,8 +24,9 @@ import {
   CreditCard,
   Store,
   Calendar,
+  CalendarDays,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 
 interface GiftCardTemplate {
   id: string;
@@ -61,6 +65,7 @@ export default function GiftCardsPage() {
   const [recipientEmail, setRecipientEmail] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
   const [personalMessage, setPersonalMessage] = useState('');
+  const [scheduledDeliveryDate, setScheduledDeliveryDate] = useState<Date | undefined>(undefined);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const { data: salon, isLoading: salonLoading } = useQuery<Salon>({
@@ -143,6 +148,7 @@ export default function GiftCardsPage() {
           recipientPhone: recipientPhone || undefined,
           personalMessage: personalMessage || undefined,
           deliveryMethod: recipientEmail ? 'email' : 'sms',
+          scheduledDeliveryAt: scheduledDeliveryDate ? scheduledDeliveryDate.toISOString() : undefined,
         }),
       });
 
@@ -504,6 +510,52 @@ export default function GiftCardsPage() {
                   </div>
                   <p className="text-sm text-gray-500 mt-1">{personalMessage.length}/500 characters</p>
                 </div>
+
+                <Separator />
+
+                <div>
+                  <Label>Schedule Delivery (Optional)</Label>
+                  <p className="text-sm text-gray-500 mb-2">Choose a future date to deliver this gift card</p>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !scheduledDeliveryDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarDays className="mr-2 h-4 w-4" />
+                        {scheduledDeliveryDate ? (
+                          format(scheduledDeliveryDate, "PPP")
+                        ) : (
+                          "Send immediately after purchase"
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <CalendarComponent
+                        mode="single"
+                        selected={scheduledDeliveryDate}
+                        onSelect={setScheduledDeliveryDate}
+                        disabled={(date) => date < new Date() || date > addDays(new Date(), 365)}
+                        initialFocus
+                      />
+                      {scheduledDeliveryDate && (
+                        <div className="p-3 border-t">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => setScheduledDeliveryDate(undefined)}
+                          >
+                            Clear date (send immediately)
+                          </Button>
+                        </div>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </CardContent>
             </Card>
 
@@ -573,6 +625,14 @@ export default function GiftCardsPage() {
                     <span className="text-gray-600">Validity</span>
                     <span className="font-medium">{selectedTemplate.validityDays} days</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Delivery</span>
+                    <span className="font-medium">
+                      {scheduledDeliveryDate 
+                        ? format(scheduledDeliveryDate, "PPP")
+                        : "Immediately after purchase"}
+                    </span>
+                  </div>
                 </div>
 
                 {personalMessage && (
@@ -599,7 +659,12 @@ export default function GiftCardsPage() {
                 <Check className="w-5 h-5 text-green-600 mt-0.5" />
                 <div>
                   <p className="font-medium text-green-800">Secure Payment</p>
-                  <p className="text-sm text-green-700">Your payment is secured by Razorpay. The gift card will be delivered immediately after payment.</p>
+                  <p className="text-sm text-green-700">
+                    Your payment is secured by Razorpay. 
+                    {scheduledDeliveryDate 
+                      ? ` The gift card will be delivered on ${format(scheduledDeliveryDate, "PPP")}.`
+                      : ' The gift card will be delivered immediately after payment.'}
+                  </p>
                 </div>
               </div>
             </div>

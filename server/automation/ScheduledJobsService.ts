@@ -5,6 +5,9 @@ import { winnerSelectionService } from './WinnerSelectionService';
 import { campaignOptimizationService } from './CampaignOptimizationService';
 import { communicationService } from '../communicationService';
 import { storage } from '../storage';
+import { rebookingService } from '../services/rebooking.service';
+import { noShowService } from '../services/noshow.service';
+import { giftCardService } from '../services/giftcard.service';
 import type { 
   AbTestCampaign,
   AutomationConfiguration,
@@ -50,12 +53,54 @@ class ScheduledJobsService {
       await this.runCleanupJob();
     }, { scheduled: false });
 
+    // Rebooking Status Update Job - Daily at 6 AM
+    const rebookingStatusJob = cron.schedule('0 6 * * *', async () => {
+      await this.runRebookingStatusUpdateJob();
+    }, { scheduled: false });
+
+    // Rebooking Reminder Scheduling Job - Daily at 7 AM
+    const rebookingScheduleJob = cron.schedule('0 7 * * *', async () => {
+      await this.runRebookingReminderSchedulingJob();
+    }, { scheduled: false });
+
+    // Rebooking Reminder Processing Job - Every hour at minute 30
+    const rebookingProcessJob = cron.schedule('30 * * * *', async () => {
+      await this.runRebookingReminderProcessingJob();
+    }, { scheduled: false });
+
+    // Weekly Rebooking Optimization Job - Sundays at 4 AM
+    const rebookingOptimizationJob = cron.schedule('0 4 * * 0', async () => {
+      await this.runWeeklyRebookingOptimizationJob();
+    }, { scheduled: false });
+
+    // No-Show Detection Job - Every 15 minutes during business hours (8 AM - 10 PM)
+    const noShowDetectionJob = cron.schedule('*/15 8-22 * * *', async () => {
+      await this.runNoShowDetectionJob();
+    }, { scheduled: false });
+
+    // Gift Card Expiry Job - Daily at 1 AM
+    const giftCardExpiryJob = cron.schedule('0 1 * * *', async () => {
+      await this.runGiftCardExpiryJob();
+    }, { scheduled: false });
+
+    // Gift Card Scheduled Delivery Job - Every 30 minutes
+    const giftCardDeliveryJob = cron.schedule('*/30 * * * *', async () => {
+      await this.runGiftCardDeliveryJob();
+    }, { scheduled: false });
+
     // Store job references
     this.jobs.set('performance_collection', performanceJob);
     this.jobs.set('winner_analysis', winnerAnalysisJob);
     this.jobs.set('campaign_optimization', optimizationJob);
     this.jobs.set('automated_reports', reportsJob);
     this.jobs.set('cleanup', cleanupJob);
+    this.jobs.set('rebooking_status_update', rebookingStatusJob);
+    this.jobs.set('rebooking_reminder_scheduling', rebookingScheduleJob);
+    this.jobs.set('rebooking_reminder_processing', rebookingProcessJob);
+    this.jobs.set('rebooking_weekly_optimization', rebookingOptimizationJob);
+    this.jobs.set('no_show_detection', noShowDetectionJob);
+    this.jobs.set('gift_card_expiry', giftCardExpiryJob);
+    this.jobs.set('gift_card_delivery', giftCardDeliveryJob);
 
     // Start all jobs
     performanceJob.start();
@@ -63,6 +108,13 @@ class ScheduledJobsService {
     optimizationJob.start();
     reportsJob.start();
     cleanupJob.start();
+    rebookingStatusJob.start();
+    rebookingScheduleJob.start();
+    rebookingProcessJob.start();
+    rebookingOptimizationJob.start();
+    noShowDetectionJob.start();
+    giftCardExpiryJob.start();
+    giftCardDeliveryJob.start();
 
     this.isRunning = true;
     console.log('All automation scheduled jobs started successfully');
@@ -476,6 +528,214 @@ class ScheduledJobsService {
     return summary;
   }
 
+  // Rebooking Status Update Job - Updates rebooking statuses for all salons
+  private async runRebookingStatusUpdateJob(): Promise<void> {
+    try {
+      console.log('Running rebooking status update job...');
+      
+      const salons = await storage.getAllSalons();
+      let totalUpdated = 0;
+      
+      for (const salon of salons) {
+        try {
+          const settings = await storage.getRebookingSettings(salon.id);
+          if (!settings?.isEnabled) continue;
+          
+          const updatedCount = await rebookingService.updateRebookingStatuses(salon.id);
+          totalUpdated += updatedCount;
+          
+        } catch (error) {
+          console.error(`Error updating rebooking statuses for salon ${salon.id}:`, error);
+        }
+      }
+      
+      console.log(`Rebooking status update completed: ${totalUpdated} statuses updated`);
+      
+    } catch (error) {
+      console.error('Error in rebooking status update job:', error);
+    }
+  }
+
+  // Rebooking Reminder Scheduling Job - Schedules reminders for all salons
+  private async runRebookingReminderSchedulingJob(): Promise<void> {
+    try {
+      console.log('Running rebooking reminder scheduling job...');
+      
+      const salons = await storage.getAllSalons();
+      let totalScheduled = 0;
+      
+      for (const salon of salons) {
+        try {
+          const settings = await storage.getRebookingSettings(salon.id);
+          if (!settings?.isEnabled) continue;
+          
+          const scheduledCount = await rebookingService.scheduleReminders(salon.id);
+          totalScheduled += scheduledCount;
+          
+          if (scheduledCount > 0) {
+            await this.logAutomationAction(salon.id, 'rebooking_reminders_scheduled', {
+              scheduledCount,
+              timestamp: new Date().toISOString()
+            });
+          }
+          
+        } catch (error) {
+          console.error(`Error scheduling rebooking reminders for salon ${salon.id}:`, error);
+        }
+      }
+      
+      console.log(`Rebooking reminder scheduling completed: ${totalScheduled} reminders scheduled`);
+      
+    } catch (error) {
+      console.error('Error in rebooking reminder scheduling job:', error);
+    }
+  }
+
+  // Rebooking Reminder Processing Job - Sends pending reminders
+  private async runRebookingReminderProcessingJob(): Promise<void> {
+    try {
+      console.log('Running rebooking reminder processing job...');
+      
+      const result = await rebookingService.processPendingReminders(100);
+      
+      console.log(`Rebooking reminder processing completed: ${result.sent} sent, ${result.failed} failed`);
+      
+    } catch (error) {
+      console.error('Error in rebooking reminder processing job:', error);
+    }
+  }
+
+  // Weekly Rebooking Optimization Job - Analyzes reminder performance and optimizes channels/timing
+  private async runWeeklyRebookingOptimizationJob(): Promise<void> {
+    try {
+      console.log('Running weekly rebooking optimization job...');
+      
+      const salons = await storage.getAllSalons();
+      let totalOptimized = 0;
+      
+      for (const salon of salons) {
+        try {
+          const settings = await storage.getRebookingSettings(salon.id);
+          if (!settings?.isEnabled) continue;
+          
+          const optimizedCount = await this.optimizeRebookingForSalon(salon.id);
+          totalOptimized += optimizedCount;
+          
+          if (optimizedCount > 0) {
+            await this.logAutomationAction(salon.id, 'rebooking_optimization', {
+              optimizedCount,
+              timestamp: new Date().toISOString()
+            });
+          }
+          
+        } catch (error) {
+          console.error(`Error optimizing rebooking for salon ${salon.id}:`, error);
+        }
+      }
+      
+      console.log(`Weekly rebooking optimization completed: ${totalOptimized} customer stats optimized`);
+      
+    } catch (error) {
+      console.error('Error in weekly rebooking optimization job:', error);
+    }
+  }
+
+  // Analyze reminder performance and update optimal channels/timing for customers
+  private async optimizeRebookingForSalon(salonId: string): Promise<number> {
+    const stats = await storage.getCustomerRebookingStatsBySalonId(salonId);
+    let optimizedCount = 0;
+    
+    // Get reminder history for analysis (last 90 days)
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 90);
+    const endDate = new Date();
+    
+    const reminders = await storage.getRebookingRemindersForChannelAnalysis(salonId, startDate, endDate);
+    
+    // Calculate optimal channel based on conversion rates
+    const channelPerformance: Record<string, { sent: number; converted: number }> = {
+      email: { sent: 0, converted: 0 },
+      sms: { sent: 0, converted: 0 }
+    };
+    
+    for (const reminder of reminders) {
+      const channel = reminder.channel || 'email';
+      if (channelPerformance[channel]) {
+        channelPerformance[channel].sent++;
+        if (reminder.convertedAt) {
+          channelPerformance[channel].converted++;
+        }
+      }
+    }
+    
+    // Calculate conversion rates
+    const emailRate = channelPerformance.email.sent > 0 
+      ? channelPerformance.email.converted / channelPerformance.email.sent 
+      : 0;
+    const smsRate = channelPerformance.sms.sent > 0 
+      ? channelPerformance.sms.converted / channelPerformance.sms.sent 
+      : 0;
+    
+    // Determine optimal channel order
+    const optimalChannels = emailRate >= smsRate ? ['email', 'sms'] : ['sms', 'email'];
+    
+    // Update settings if we have enough data
+    if (channelPerformance.email.sent + channelPerformance.sms.sent >= 10) {
+      await storage.updateRebookingSettings(salonId, {
+        defaultReminderChannels: optimalChannels
+      });
+      optimizedCount++;
+      
+      console.log(`Salon ${salonId}: Optimized channels to ${optimalChannels.join(', ')} (email: ${(emailRate * 100).toFixed(1)}%, sms: ${(smsRate * 100).toFixed(1)}%)`);
+    }
+    
+    return optimizedCount;
+  }
+
+  private async runNoShowDetectionJob(): Promise<void> {
+    try {
+      console.log('Running no-show detection job...');
+      
+      const result = await noShowService.detectAndMarkNoShows();
+      
+      console.log(`No-show detection completed: processed=${result.processed}, marked=${result.noShowsMarked}, deposits=${result.depositsForfeited}`);
+      
+      if (result.errors.length > 0) {
+        console.warn('No-show detection errors:', result.errors.slice(0, 5));
+      }
+      
+    } catch (error) {
+      console.error('Error in no-show detection job:', error);
+    }
+  }
+
+  private async runGiftCardExpiryJob(): Promise<void> {
+    try {
+      console.log('Running gift card expiry job...');
+      
+      const expiryResult = await giftCardService.processExpiredGiftCards();
+      const cleanupResult = await giftCardService.cleanupPendingPayments();
+      
+      console.log(`Gift card expiry completed: expired=${expiryResult.expired}, cleaned=${cleanupResult.cleaned}`);
+      
+    } catch (error) {
+      console.error('Error in gift card expiry job:', error);
+    }
+  }
+
+  private async runGiftCardDeliveryJob(): Promise<void> {
+    try {
+      console.log('Running gift card delivery job...');
+      
+      const result = await giftCardService.processScheduledDeliveries();
+      
+      console.log(`Gift card delivery completed: processed=${result.processed}, sent=${result.sent}`);
+      
+    } catch (error) {
+      console.error('Error in gift card delivery job:', error);
+    }
+  }
+
   private async cleanupExpiredRecommendations(): Promise<void> {
     try {
       const expiredCount = await storage.updateExpiredOptimizationRecommendations();
@@ -544,6 +804,27 @@ class ScheduledJobsService {
         break;
       case 'cleanup':
         await this.runCleanupJob();
+        break;
+      case 'rebooking_status_update':
+        await this.runRebookingStatusUpdateJob();
+        break;
+      case 'rebooking_reminder_scheduling':
+        await this.runRebookingReminderSchedulingJob();
+        break;
+      case 'rebooking_reminder_processing':
+        await this.runRebookingReminderProcessingJob();
+        break;
+      case 'rebooking_weekly_optimization':
+        await this.runWeeklyRebookingOptimizationJob();
+        break;
+      case 'no_show_detection':
+        await this.runNoShowDetectionJob();
+        break;
+      case 'gift_card_expiry':
+        await this.runGiftCardExpiryJob();
+        break;
+      case 'gift_card_delivery':
+        await this.runGiftCardDeliveryJob();
         break;
       default:
         throw new Error(`Unknown job type: ${jobType}`);
