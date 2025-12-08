@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
 import { db } from "./db";
-import { eq, and, or, inArray, sql, ne, isNotNull } from "drizzle-orm";
+import { eq, and, or, inArray, sql, ne, isNotNull, gte, lte } from "drizzle-orm";
 import * as schema from "@shared/schema";
 const { salons } = schema;
 import session from "express-session";
@@ -56,6 +56,11 @@ import rebookingRoutes, { registerMobileRebookingRoutes } from "./routes/rebooki
 import { rebookingService } from "./services/rebooking.service";
 import { rbacService } from "./services/rbacService";
 import shopAdminRoutes from "./routes/shopAdminRoutes";
+import jobCardRoutes, { registerJobCardRoutes } from "./routes/job-cards.routes";
+import { registerCustomerImportRoutes } from "./routes/customer-import.routes";
+import { registerCampaignRoutes } from "./routes/campaign.routes";
+import { registerWelcomeOfferRoutes } from "./routes/welcome-offer.routes";
+import { registerOnboardingAnalyticsRoutes } from "./routes/onboarding-analytics.routes";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -1929,7 +1934,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put(
     "/api/salons/:salonId",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'settings_manage'),
+    requireSalonAccess(['owner', 'manager'], 'settings.shop'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -2412,7 +2417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/products",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'inventory_view'),
+    requireSalonAccess(['owner', 'manager'], 'products.view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -2465,7 +2470,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/products/low-stock",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'inventory_view'),
+    requireSalonAccess(['owner', 'manager'], 'products.view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -2481,7 +2486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/salons/:salonId/products",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'inventory_manage'),
+    requireSalonAccess(['owner', 'manager'], 'products.manage'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8421,7 +8426,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/analytics",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'analytics_view'),
+    requireSalonAccess(['owner', 'manager'], 'analytics.shop'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8446,7 +8451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/analytics/staff",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'analytics_view'),
+    requireSalonAccess(['owner', 'manager'], 'analytics.shop'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -8469,7 +8474,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/analytics/retention",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'analytics_view'),
+    requireSalonAccess(['owner', 'manager'], 'analytics.shop'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -10014,7 +10019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/salons/:salonId/staff/manage",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'staff_view'),
+    requireSalonAccess(['owner', 'manager'], 'staff.view'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -10064,7 +10069,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/salons/:salonId/staff",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'staff_manage'),
+    requireSalonAccess(['owner', 'manager'], 'staff.create'),
     async (req: any, res) => {
       try {
         const { salonId } = req.params;
@@ -10081,7 +10086,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put(
     "/api/salons/:salonId/staff/:staffId",
     isAuthenticated,
-    requireSalonAccess(['owner', 'manager'], 'staff_manage'),
+    requireSalonAccess(['owner', 'manager'], 'staff.edit'),
     async (req: any, res) => {
       try {
         const { staffId, salonId } = req.params;
@@ -11796,6 +11801,241 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Error fetching commission analytics:", error);
         res.status(500).json({ error: "Failed to fetch commission analytics" });
+      }
+    },
+  );
+
+  // Commission Summary Endpoint - for dashboard metrics
+  app.get(
+    "/api/salons/:salonId/commissions/summary",
+    isAuthenticated,
+    requireSalonAccess(),
+    async (req: any, res) => {
+      try {
+        const { salonId } = req.params;
+        const { startDate, endDate } = req.query;
+        
+        // Parse date range with inclusive end-of-day handling
+        const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        let end = endDate ? new Date(endDate as string) : new Date();
+        // Ensure end of day for end date
+        end = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+
+        // Get all commissions within the date range using proper Drizzle operators
+        const allCommissions = await db.select()
+          .from(schema.commissions)
+          .where(
+            and(
+              eq(schema.commissions.salonId, salonId),
+              gte(schema.commissions.serviceDate, start),
+              lte(schema.commissions.serviceDate, end)
+            )
+          );
+
+        // Calculate summary metrics
+        const totalCommission = allCommissions.reduce((sum, c) => sum + c.commissionAmountPaisa, 0);
+        const totalServices = allCommissions.length;
+        
+        const pendingCommissions = allCommissions.filter(c => c.paymentStatus === 'pending');
+        const pendingAmount = pendingCommissions.reduce((sum, c) => sum + c.commissionAmountPaisa, 0);
+        const pendingCount = pendingCommissions.length;
+        
+        const paidCommissions = allCommissions.filter(c => c.paymentStatus === 'paid');
+        const paidAmount = paidCommissions.reduce((sum, c) => sum + c.commissionAmountPaisa, 0);
+        const paidCount = paidCommissions.length;
+        
+        // Get unique staff count
+        const uniqueStaffIds = new Set(allCommissions.map(c => c.staffId));
+        const staffCount = uniqueStaffIds.size;
+        const averagePerStaff = staffCount > 0 ? Math.round(totalCommission / staffCount) : 0;
+
+        res.json({
+          totalCommission,
+          totalServices,
+          pendingAmount,
+          pendingCount,
+          paidAmount,
+          paidCount,
+          averagePerStaff,
+          staffCount
+        });
+      } catch (error) {
+        console.error("Error fetching commission summary:", error);
+        res.status(500).json({ error: "Failed to fetch commission summary" });
+      }
+    },
+  );
+
+  // Commission By Staff Endpoint - for staff-wise breakdown
+  app.get(
+    "/api/salons/:salonId/commissions/by-staff",
+    isAuthenticated,
+    requireSalonAccess(),
+    async (req: any, res) => {
+      try {
+        const { salonId } = req.params;
+        const { startDate, endDate } = req.query;
+        
+        // Parse date range with inclusive end-of-day handling
+        const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        let end = endDate ? new Date(endDate as string) : new Date();
+        // Ensure end of day for end date
+        end = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+
+        // Get all commissions within the date range with staff info using left join
+        const commissionsWithStaff = await db.select({
+          staffId: schema.commissions.staffId,
+          staffName: schema.staff.name,
+          staffPhoto: schema.staff.profileImage,
+          baseAmountPaisa: schema.commissions.baseAmountPaisa,
+          commissionAmountPaisa: schema.commissions.commissionAmountPaisa,
+          paymentStatus: schema.commissions.paymentStatus,
+        })
+          .from(schema.commissions)
+          .leftJoin(schema.staff, eq(schema.commissions.staffId, schema.staff.id))
+          .where(
+            and(
+              eq(schema.commissions.salonId, salonId),
+              gte(schema.commissions.serviceDate, start),
+              lte(schema.commissions.serviceDate, end)
+            )
+          );
+
+        // Group by staff with correct aggregation
+        const staffMap = new Map<string, {
+          staffId: string;
+          staffName: string;
+          staffPhoto: string | null;
+          servicesCompleted: number;
+          totalServiceValue: number;
+          totalCommission: number;
+          pendingAmount: number;
+          paidAmount: number;
+        }>();
+
+        for (const commission of commissionsWithStaff) {
+          const existing = staffMap.get(commission.staffId);
+          const isPending = commission.paymentStatus === 'pending';
+          const isPaid = commission.paymentStatus === 'paid';
+          
+          if (existing) {
+            existing.servicesCompleted += 1;
+            existing.totalServiceValue += commission.baseAmountPaisa;
+            existing.totalCommission += commission.commissionAmountPaisa;
+            if (isPending) {
+              existing.pendingAmount += commission.commissionAmountPaisa;
+            }
+            if (isPaid) {
+              existing.paidAmount += commission.commissionAmountPaisa;
+            }
+          } else {
+            staffMap.set(commission.staffId, {
+              staffId: commission.staffId,
+              staffName: commission.staffName || 'Unknown Staff',
+              staffPhoto: commission.staffPhoto || null,
+              servicesCompleted: 1,
+              totalServiceValue: commission.baseAmountPaisa,
+              totalCommission: commission.commissionAmountPaisa,
+              pendingAmount: isPending ? commission.commissionAmountPaisa : 0,
+              paidAmount: isPaid ? commission.commissionAmountPaisa : 0
+            });
+          }
+        }
+
+        // Convert to array and sort by total commission descending
+        const staffCommissions = Array.from(staffMap.values())
+          .sort((a, b) => b.totalCommission - a.totalCommission);
+
+        res.json(staffCommissions);
+      } catch (error) {
+        console.error("Error fetching commissions by staff:", error);
+        res.status(500).json({ error: "Failed to fetch commissions by staff" });
+      }
+    },
+  );
+
+  // Commission Payout Endpoint - mark staff commissions as paid
+  app.post(
+    "/api/salons/:salonId/commissions/payout",
+    isAuthenticated,
+    requireSalonAccess(),
+    async (req: any, res) => {
+      try {
+        const { salonId } = req.params;
+        const { staffId, paymentMethod, notes, startDate, endDate } = req.body;
+
+        if (!staffId) {
+          return res.status(400).json({ error: "Staff ID is required" });
+        }
+
+        // Verify staff belongs to this salon
+        const staffMember = await db.select()
+          .from(schema.staff)
+          .where(and(
+            eq(schema.staff.id, staffId),
+            eq(schema.staff.salonId, salonId)
+          ))
+          .limit(1);
+
+        if (staffMember.length === 0) {
+          return res.status(400).json({ error: "Staff member not found in this salon" });
+        }
+
+        // Parse date range with inclusive end-of-day handling
+        const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        let end = endDate ? new Date(endDate) : new Date();
+        // Ensure end of day for end date
+        end = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+
+        // Validate date range
+        if (start > end) {
+          return res.status(400).json({ error: "Start date cannot be after end date" });
+        }
+
+        // Get all pending commissions for this staff within date range
+        const pendingCommissions = await db.select()
+          .from(schema.commissions)
+          .where(
+            and(
+              eq(schema.commissions.salonId, salonId),
+              eq(schema.commissions.staffId, staffId),
+              eq(schema.commissions.paymentStatus, 'pending'),
+              gte(schema.commissions.serviceDate, start),
+              lte(schema.commissions.serviceDate, end)
+            )
+          );
+
+        if (pendingCommissions.length === 0) {
+          return res.status(400).json({ error: "No pending commissions found for this staff in the selected period" });
+        }
+
+        // Update all pending commissions to paid in a transaction for atomicity
+        const commissionIds = pendingCommissions.map(c => c.id);
+        const paidAt = new Date();
+        const totalPaid = pendingCommissions.reduce((sum, c) => sum + c.commissionAmountPaisa, 0);
+        
+        await db.transaction(async (tx) => {
+          await tx.update(schema.commissions)
+            .set({
+              paymentStatus: 'paid',
+              paidAt,
+              paidBy: req.user.id,
+              paymentMethod: paymentMethod || 'cash',
+              notes: notes || null,
+              updatedAt: new Date()
+            })
+            .where(inArray(schema.commissions.id, commissionIds));
+        });
+
+        res.json({
+          success: true,
+          updatedCount: commissionIds.length,
+          totalPaidAmount: totalPaid,
+          message: `Marked ${commissionIds.length} commissions as paid totaling ₹${(totalPaid / 100).toFixed(2)}`
+        });
+      } catch (error) {
+        console.error("Error processing commission payout:", error);
+        res.status(500).json({ error: "Failed to process commission payout" });
       }
     },
   );
@@ -16869,6 +17109,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/business', isAuthenticated, depositsRoutes);
   console.log('✅ Deposits routes registered');
   
+  // Job Card System routes (Front Desk visit workflow)
+  registerJobCardRoutes(app);
+  console.log('✅ Job Card routes registered');
+  
   app.use('/api/deposits', publicDepositsRouter);
   console.log('✅ Public Deposits routes registered');
   
@@ -16884,6 +17128,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Shop Admin RBAC routes (manage shop admins, permissions, roles)
   app.use('/api/shop-admin', isAuthenticated, shopAdminRoutes);
   console.log('✅ Shop Admin RBAC routes registered');
+
+  // Customer Import routes (bulk CSV import, customer onboarding)
+  registerCustomerImportRoutes(app);
+  console.log('✅ Customer Import routes registered');
+
+  // Invitation Campaign routes (WhatsApp/SMS campaign sending)
+  registerCampaignRoutes(app);
+  console.log('✅ Invitation Campaign routes registered');
+
+  // Welcome Offer routes (offer management, redemption, auto-apply on registration)
+  registerWelcomeOfferRoutes(app);
+  console.log('✅ Welcome Offer routes registered');
+
+  // Onboarding Analytics routes (import, campaign, conversion, offer metrics)
+  registerOnboardingAnalyticsRoutes(app);
+  console.log('✅ Onboarding Analytics routes registered');
 
   // User search for shop admin assignment (authenticated, business owners only)
   app.get('/api/users/search', isAuthenticated, async (req: AuthenticatedRequest, res) => {

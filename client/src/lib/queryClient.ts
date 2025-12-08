@@ -74,14 +74,6 @@ export const getQueryFn: <T>(options: {
 
       await throwIfResNotOk(res);
       
-      // Check if response is JSON
-      const contentType = res.headers.get('content-type');
-      
-      if (!contentType || !contentType.includes('application/json')) {
-        return {} as unknown as T;
-      }
-      
-      // Parse JSON response
       const text = await res.text();
       
       if (!text || text.trim() === '') {
@@ -91,7 +83,6 @@ export const getQueryFn: <T>(options: {
       try {
         const jsonResponse = JSON.parse(text);
         
-        // Auto-unwrap standard API response format: { success, data }
         if (jsonResponse && typeof jsonResponse === 'object' && 'success' in jsonResponse && 'data' in jsonResponse) {
           return jsonResponse.data as T;
         }

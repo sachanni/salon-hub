@@ -120,7 +120,9 @@ import {
   productOrders, productOrderItems, wishlists, productReviews,
   deliverySettings, productViews,
   // Smart Rebooking tables
-  serviceRebookingCycles, customerRebookingStats, rebookingReminders, rebookingSettings
+  serviceRebookingCycles, customerRebookingStats, rebookingReminders, rebookingSettings,
+  // Job Card tables
+  jobCards
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne, like, isNotNull, lt, gt } from "drizzle-orm";
@@ -2068,7 +2070,7 @@ export class DatabaseStorage implements IStorage {
     return result.rowCount || 0;
   }
 
-  async getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<Booking[]> {
+  async getBookingsBySalonId(salonId: string, filters?: { status?: string; startDate?: string; endDate?: string }): Promise<any[]> {
     try {
       const conditions = [eq(bookings.salonId, salonId)];
 
@@ -2110,10 +2112,13 @@ export class DatabaseStorage implements IStorage {
           createdAt: bookings.createdAt,
           salonId: bookings.salonId,
           serviceName: services.name,
-          serviceDuration: services.durationMinutes
+          serviceDuration: services.durationMinutes,
+          jobCardId: jobCards.id,
+          jobCardStatus: jobCards.status
         })
         .from(bookings)
         .leftJoin(services, eq(bookings.serviceId, services.id))
+        .leftJoin(jobCards, eq(bookings.id, jobCards.bookingId))
         .where(and(...conditions))
         .orderBy(desc(bookings.createdAt));
     } catch (error) {
@@ -2382,6 +2387,10 @@ export class DatabaseStorage implements IStorage {
       
       // Today's date for daily metrics
       const today = new Date().toISOString().split('T')[0];
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
       
       switch (period) {
         case 'daily':
@@ -2429,12 +2438,25 @@ export class DatabaseStorage implements IStorage {
       const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
       const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
 
-      // Get current period stats
+      // Normalize date boundaries for timestamp comparisons (job cards use timestamps)
+      const periodStartDate = new Date(startDateStr);
+      periodStartDate.setHours(0, 0, 0, 0);
+      const periodEndDate = new Date(endDateStr);
+      periodEndDate.setHours(23, 59, 59, 999);
+      const prevPeriodStartDate = new Date(previousStartDateStr);
+      prevPeriodStartDate.setHours(0, 0, 0, 0);
+      const prevPeriodEndDate = new Date(previousEndDateStr);
+      prevPeriodEndDate.setHours(23, 59, 59, 999);
+
+      // Get current period booking stats
+      // Note: Only count EXPECTED revenue from bookings that are confirmed but NOT yet completed
+      // Actual/realized revenue is calculated from completed job cards with payments
       const bookingStats = await db
         .select({
           totalBookings: sql<number>`count(*)`,
-          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          expectedRevenue: sql<number>`sum(case when ${bookings.status} IN ('confirmed', 'arrived') then ${bookings.totalAmountPaisa} else 0 end)`,
           confirmedBookings: sql<number>`count(case when ${bookings.status} = 'confirmed' then 1 end)`,
+          arrivedBookings: sql<number>`count(case when ${bookings.status} = 'arrived' then 1 end)`,
           cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
           completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`
         })
@@ -2445,7 +2467,30 @@ export class DatabaseStorage implements IStorage {
           lte(bookings.bookingDate, endDateStr)
         ));
 
-      // Get previous period stats for comparison
+      // Get current period job card stats (includes walk-ins)
+      // IMPORTANT: Realized revenue is ONLY from completed job cards that are PAID
+      // This ensures we don't count revenue before service is delivered and payment is collected
+      const jobCardStats = await db
+        .select({
+          totalJobCards: sql<number>`count(*)`,
+          // Realized revenue = only from completed AND paid job cards
+          realizedRevenue: sql<number>`sum(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`,
+          // Pending revenue = from open/in-service job cards (service in progress but not yet paid)
+          pendingRevenue: sql<number>`sum(case when ${jobCards.status} IN ('open', 'in_service', 'pending_checkout') then ${jobCards.totalAmountPaisa} else 0 end)`,
+          completedJobCards: sql<number>`count(case when ${jobCards.status} = 'completed' then 1 end)`,
+          paidJobCards: sql<number>`count(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then 1 end)`,
+          walkInCount: sql<number>`count(case when ${jobCards.isWalkIn} = 1 then 1 end)`,
+          // Walk-in revenue only from paid walk-ins
+          walkInRevenue: sql<number>`sum(case when ${jobCards.isWalkIn} = 1 AND ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`
+        })
+        .from(jobCards)
+        .where(and(
+          eq(jobCards.salonId, salonId),
+          gte(jobCards.checkInAt, periodStartDate),
+          lte(jobCards.checkInAt, periodEndDate)
+        ));
+
+      // Get previous period booking stats for comparison
       const previousBookingStats = await db
         .select({
           totalBookings: sql<number>`count(*)`,
@@ -2461,8 +2506,23 @@ export class DatabaseStorage implements IStorage {
           lte(bookings.bookingDate, previousEndDateStr)
         ));
 
-      // Get today's specific data
-      const todayStats = await db
+      // Get previous period job card stats (for trend comparison)
+      const previousJobCardStats = await db
+        .select({
+          totalJobCards: sql<number>`count(*)`,
+          realizedRevenue: sql<number>`sum(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`,
+          completedJobCards: sql<number>`count(case when ${jobCards.status} = 'completed' then 1 end)`,
+          paidJobCards: sql<number>`count(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then 1 end)`
+        })
+        .from(jobCards)
+        .where(and(
+          eq(jobCards.salonId, salonId),
+          gte(jobCards.checkInAt, prevPeriodStartDate),
+          lte(jobCards.checkInAt, prevPeriodEndDate)
+        ));
+
+      // Get today's specific booking data
+      const todayBookingStats = await db
         .select({
           todayBookings: sql<number>`count(*)`,
           todayRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
@@ -2472,6 +2532,24 @@ export class DatabaseStorage implements IStorage {
         .where(and(
           eq(bookings.salonId, salonId),
           eq(bookings.bookingDate, today)
+        ));
+
+      // Get today's job card data (includes walk-ins)
+      // Only count realized revenue from PAID job cards
+      const todayJobCardStats = await db
+        .select({
+          todayJobCards: sql<number>`count(*)`,
+          todayRealizedRevenue: sql<number>`sum(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`,
+          todayPendingRevenue: sql<number>`sum(case when ${jobCards.status} IN ('open', 'in_service', 'pending_checkout') then ${jobCards.totalAmountPaisa} else 0 end)`,
+          todayWalkIns: sql<number>`count(case when ${jobCards.isWalkIn} = 1 then 1 end)`,
+          todayCompleted: sql<number>`count(case when ${jobCards.status} = 'completed' then 1 end)`,
+          todayPaid: sql<number>`count(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then 1 end)`
+        })
+        .from(jobCards)
+        .where(and(
+          eq(jobCards.salonId, salonId),
+          gte(jobCards.checkInAt, todayStart),
+          lte(jobCards.checkInAt, todayEnd)
         ));
 
       // Get active staff count
@@ -2536,7 +2614,28 @@ export class DatabaseStorage implements IStorage {
         .groupBy(staff.id, staff.name)
         .orderBy(desc(sql`count(*)`));
 
-      const stats = bookingStats[0] || {
+      // Process booking stats
+      const bookingData = bookingStats[0] || {
+        totalBookings: 0,
+        expectedRevenue: 0,
+        confirmedBookings: 0,
+        arrivedBookings: 0,
+        cancelledBookings: 0,
+        completedBookings: 0
+      };
+
+      // Process job card stats
+      const jobCardData = jobCardStats[0] || {
+        totalJobCards: 0,
+        realizedRevenue: 0,
+        pendingRevenue: 0,
+        completedJobCards: 0,
+        paidJobCards: 0,
+        walkInCount: 0,
+        walkInRevenue: 0
+      };
+
+      const previousBookingData = previousBookingStats[0] || {
         totalBookings: 0,
         totalRevenue: 0,
         confirmedBookings: 0,
@@ -2544,18 +2643,27 @@ export class DatabaseStorage implements IStorage {
         completedBookings: 0
       };
 
-      const previousStats = previousBookingStats[0] || {
-        totalBookings: 0,
-        totalRevenue: 0,
-        confirmedBookings: 0,
-        cancelledBookings: 0,
-        completedBookings: 0
+      const previousJobCardData = previousJobCardStats[0] || {
+        totalJobCards: 0,
+        realizedRevenue: 0,
+        completedJobCards: 0,
+        paidJobCards: 0
       };
 
-      const todayData = todayStats[0] || {
+      // Process today's data
+      const todayBookingData = todayBookingStats[0] || {
         todayBookings: 0,
         todayRevenue: 0,
         todayConfirmed: 0
+      };
+
+      const todayJobCardData = todayJobCardStats[0] || {
+        todayJobCards: 0,
+        todayRealizedRevenue: 0,
+        todayPendingRevenue: 0,
+        todayWalkIns: 0,
+        todayCompleted: 0,
+        todayPaid: 0
       };
 
       const staffCount = activeStaffCount[0]?.count || 0;
@@ -2570,50 +2678,120 @@ export class DatabaseStorage implements IStorage {
         };
       };
 
-      const currentBookings = Number(stats.totalBookings) || 0;
-      const currentRevenue = Number(stats.totalRevenue) || 0;
-      const previousBookings = Number(previousStats.totalBookings) || 0;
-      const previousRevenue = Number(previousStats.totalRevenue) || 0;
+      // Combined metrics (bookings + job cards)
+      const currentBookings = Number(bookingData.totalBookings) || 0;
+      const currentJobCards = Number(jobCardData.totalJobCards) || 0;
+      const totalCustomers = currentBookings + currentJobCards;
+      
+      // REVENUE BREAKDOWN:
+      // 1. Realized Revenue = ONLY from completed & paid job cards (money actually collected)
+      // 2. Expected Revenue = From confirmed bookings that haven't been serviced yet
+      // 3. Pending Revenue = From job cards in progress (service started but not yet paid)
+      const realizedRevenue = Number(jobCardData.realizedRevenue) || 0;
+      const expectedRevenue = Number(bookingData.expectedRevenue) || 0;
+      const pendingRevenue = Number(jobCardData.pendingRevenue) || 0;
+      
+      // Total Revenue shown in dashboard = ONLY realized revenue (actually collected)
+      const currentRevenue = realizedRevenue;
+      
+      // Walk-in specific stats (only from paid walk-ins)
+      const currentWalkIns = Number(jobCardData.walkInCount) || 0;
+      const walkInRevenue = Number(jobCardData.walkInRevenue) || 0;
+      const paidJobCards = Number(jobCardData.paidJobCards) || 0;
+      
+      // Previous period combined metrics
+      const previousBookings = Number(previousBookingData.totalBookings) || 0;
+      const previousJobCards = Number(previousJobCardData.totalJobCards) || 0;
+      const previousTotalCustomers = previousBookings + previousJobCards;
+      const previousRealizedRevenue = Number(previousJobCardData.realizedRevenue) || 0;
+      const previousRevenue = previousRealizedRevenue;
 
-      const bookingsTrend = calculateTrend(currentBookings, previousBookings);
+      // Today's combined metrics
+      const todayBookings = Number(todayBookingData.todayBookings) || 0;
+      const todayJobCards = Number(todayJobCardData.todayJobCards) || 0;
+      const todayTotalCustomers = todayBookings + todayJobCards;
+      // Today's revenue = only from paid job cards today
+      const todayRealizedRevenue = Number(todayJobCardData.todayRealizedRevenue) || 0;
+      const todayExpectedRevenue = Number(todayBookingData.todayRevenue) || 0;
+      const todayPendingRevenue = Number(todayJobCardData.todayPendingRevenue) || 0;
+      const todayRevenue = todayRealizedRevenue; // Show only realized revenue
+      const todayWalkIns = Number(todayJobCardData.todayWalkIns) || 0;
+      const todayCompleted = Number(todayJobCardData.todayCompleted) || 0;
+      const todayPaid = Number(todayJobCardData.todayPaid) || 0;
+
+      const bookingsTrend = calculateTrend(totalCustomers, previousTotalCustomers);
       const revenueTrend = calculateTrend(currentRevenue, previousRevenue);
 
-      // Calculate average booking value
-      const averageBookingValue = currentBookings > 0 ? currentRevenue / currentBookings : 0;
-      const previousAverageBookingValue = previousBookings > 0 ? previousRevenue / previousBookings : 0;
-      const averageValueTrend = calculateTrend(averageBookingValue, previousAverageBookingValue);
+      // Calculate average transaction value based on PAID transactions only
+      const averageTransactionValue = paidJobCards > 0 ? realizedRevenue / paidJobCards : 0;
+      const previousPaidJobCards = Number(previousJobCardData.paidJobCards) || 0;
+      const previousAverageTransactionValue = previousPaidJobCards > 0 ? previousRealizedRevenue / previousPaidJobCards : 0;
+      const averageValueTrend = calculateTrend(averageTransactionValue, previousAverageTransactionValue);
 
       return {
         period,
         startDate: startDateStr,
         endDate: endDateStr,
         overview: {
-          // Current period data
+          // Combined customer/transaction data
           totalBookings: currentBookings,
+          totalJobCards: currentJobCards,
+          totalCustomers: totalCustomers,
+          
+          // REVENUE BREAKDOWN - This is the key fix for the lifecycle issue
+          // totalRevenuePaisa = ONLY realized revenue (actually collected from paid job cards)
           totalRevenuePaisa: currentRevenue,
-          confirmedBookings: Number(stats.confirmedBookings) || 0,
-          cancelledBookings: Number(stats.cancelledBookings) || 0,
-          completedBookings: Number(stats.completedBookings) || 0,
+          realizedRevenuePaisa: realizedRevenue,      // Money actually collected
+          expectedRevenuePaisa: expectedRevenue,      // From confirmed bookings (not yet serviced)
+          pendingRevenuePaisa: pendingRevenue,        // From job cards in progress (not yet paid)
+          
+          // Booking status breakdown
+          confirmedBookings: Number(bookingData.confirmedBookings) || 0,
+          arrivedBookings: Number(bookingData.arrivedBookings) || 0,
+          cancelledBookings: Number(bookingData.cancelledBookings) || 0,
+          completedBookings: Number(bookingData.completedBookings) || 0,
+          
+          // Job card status breakdown
+          completedJobCards: Number(jobCardData.completedJobCards) || 0,
+          paidJobCards: paidJobCards,
+          
           cancellationRate: currentBookings > 0 
-            ? ((Number(stats.cancelledBookings) || 0) / currentBookings * 100).toFixed(2)
+            ? ((Number(bookingData.cancelledBookings) || 0) / currentBookings * 100).toFixed(2)
             : '0.00',
           
-          // Today's specific data
-          todayBookings: Number(todayData.todayBookings) || 0,
-          todayRevenuePaisa: Number(todayData.todayRevenue) || 0,
-          todayConfirmed: Number(todayData.todayConfirmed) || 0,
+          // Completion rate (job cards that were completed and paid vs total job cards)
+          completionRate: currentJobCards > 0
+            ? (paidJobCards / currentJobCards * 100).toFixed(1)
+            : '0.0',
+          
+          // Walk-in specific data (only from paid walk-ins)
+          walkInCount: currentWalkIns,
+          walkInRevenuePaisa: walkInRevenue,
+          
+          // Today's specific data (combined)
+          todayBookings: todayBookings,
+          todayJobCards: todayJobCards,
+          todayTotalCustomers: todayTotalCustomers,
+          todayRevenuePaisa: todayRevenue,           // Only realized revenue today
+          todayRealizedRevenuePaisa: todayRealizedRevenue,
+          todayExpectedRevenuePaisa: todayExpectedRevenue,
+          todayPendingRevenuePaisa: todayPendingRevenue,
+          todayConfirmed: Number(todayBookingData.todayConfirmed) || 0,
+          todayWalkIns: todayWalkIns,
+          todayCompleted: todayCompleted,
+          todayPaid: todayPaid,
           
           // Staff metrics
           activeStaffCount: Number(staffCount),
           
-          // Average values
-          averageBookingValuePaisa: Math.round(averageBookingValue),
+          // Average values (based on paid transactions only)
+          averageBookingValuePaisa: Math.round(averageTransactionValue),
           
           // Trending data with percentages
           bookingsTrend: {
             percentage: bookingsTrend.percentage.toFixed(1),
             direction: bookingsTrend.trend,
-            previousPeriodValue: previousBookings
+            previousPeriodValue: previousTotalCustomers
           },
           revenueTrend: {
             percentage: revenueTrend.percentage.toFixed(1),
@@ -2623,7 +2801,7 @@ export class DatabaseStorage implements IStorage {
           averageValueTrend: {
             percentage: averageValueTrend.percentage.toFixed(1),
             direction: averageValueTrend.trend,
-            previousPeriodValue: Math.round(previousAverageBookingValue)
+            previousPeriodValue: Math.round(previousAverageTransactionValue)
           }
         },
         popularServices: popularServices.map(service => ({
@@ -2642,7 +2820,7 @@ export class DatabaseStorage implements IStorage {
             staffName: performer.staffName,
             bookingCount: Number(performer.bookingCount) || 0,
             totalRevenuePaisa: Number(performer.totalRevenue) || 0,
-            utilization: staffCount > 0 ? ((Number(performer.bookingCount) || 0) / currentBookings * 100).toFixed(1) : '0.0'
+            utilization: totalCustomers > 0 ? ((Number(performer.bookingCount) || 0) / totalCustomers * 100).toFixed(1) : '0.0'
           }))
       };
     } catch (error) {
@@ -6772,6 +6950,53 @@ export class DatabaseStorage implements IStorage {
   async getCommunicationHistoryBySalonId(salonId: string, filters?: any): Promise<CommunicationHistory[]> { return []; }
   async getCommunicationHistoryByCustomer(customerId: string, salonId: string): Promise<CommunicationHistory[]> { return []; }
   async updateCommunicationHistory(id: string, updates: any): Promise<void> { }
+
+  // =================================
+  // COMMUNICATION CAMPAIGN OPERATIONS
+  // =================================
+
+  async getCommunicationCampaign(id: string): Promise<CommunicationCampaign | undefined> {
+    const [campaign] = await db.select().from(communicationCampaigns)
+      .where(eq(communicationCampaigns.id, id));
+    return campaign || undefined;
+  }
+
+  async getCommunicationCampaignsBySalonId(salonId: string, filters?: { status?: string; type?: string }): Promise<CommunicationCampaign[]> {
+    let conditions: any[] = [eq(communicationCampaigns.salonId, salonId)];
+    
+    if (filters?.status) {
+      conditions.push(eq(communicationCampaigns.status, filters.status));
+    }
+    if (filters?.type) {
+      conditions.push(eq(communicationCampaigns.type, filters.type));
+    }
+    
+    return await db.select().from(communicationCampaigns)
+      .where(and(...conditions))
+      .orderBy(desc(communicationCampaigns.createdAt));
+  }
+
+  async createCommunicationCampaign(campaign: InsertCommunicationCampaign): Promise<CommunicationCampaign> {
+    const [newCampaign] = await db.insert(communicationCampaigns).values(campaign).returning();
+    return newCampaign;
+  }
+
+  async updateCommunicationCampaign(id: string, salonId: string, updates: Partial<InsertCommunicationCampaign>): Promise<void> {
+    await db.update(communicationCampaigns)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(
+        eq(communicationCampaigns.id, id),
+        eq(communicationCampaigns.salonId, salonId)
+      ));
+  }
+
+  async deleteCommunicationCampaign(id: string, salonId: string): Promise<void> {
+    await db.delete(communicationCampaigns)
+      .where(and(
+        eq(communicationCampaigns.id, id),
+        eq(communicationCampaigns.salonId, salonId)
+      ));
+  }
 
   // Add hundreds of minimal stubs to satisfy interface - basic empty implementations
 

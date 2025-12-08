@@ -6,6 +6,10 @@ import {
   verifyRefreshToken,
   revokeRefreshToken,
 } from "../utils/jwt";
+import { 
+  autoApplyWelcomeOfferOnRegistration,
+  checkImportedCustomerByPhone,
+} from "../services/welcomeOfferService";
 
 interface OTPData {
   otp: string;
@@ -84,6 +88,13 @@ export function registerMobileAuthRoutes(app: Express) {
       otpStorage.delete(phoneNumber);
 
       let user = await storage.getUserByPhone(phoneNumber);
+      let isNewUser = false;
+      let welcomeOffersApplied: Array<{
+        offerId: string;
+        offerName: string;
+        salonId: string;
+        expiresAt: Date;
+      }> = [];
 
       if (!user) {
         user = await storage.createUser({
@@ -96,7 +107,18 @@ export function registerMobileAuthRoutes(app: Express) {
           await storage.assignUserRole(user.id, customerRole.id);
         }
         
+        isNewUser = true;
         console.log(`📱 [Mobile Auth] New user created: ${user.id}`);
+
+        try {
+          const offerResult = await autoApplyWelcomeOfferOnRegistration(user.id, phoneNumber);
+          welcomeOffersApplied = offerResult.offersApplied;
+          if (welcomeOffersApplied.length > 0) {
+            console.log(`📱 [Mobile Auth] Applied ${welcomeOffersApplied.length} welcome offer(s) for user: ${user.id}`);
+          }
+        } catch (offerError) {
+          console.error(`📱 [Mobile Auth] Failed to apply welcome offers:`, offerError);
+        }
       }
 
       const accessToken = generateAccessToken(user.id, user.email || "");
@@ -118,6 +140,8 @@ export function registerMobileAuthRoutes(app: Express) {
         accessToken,
         refreshToken,
         message: "OTP verified successfully",
+        isNewUser,
+        welcomeOffers: welcomeOffersApplied,
       });
     } catch (error) {
       console.error("Mobile OTP verification error:", error);

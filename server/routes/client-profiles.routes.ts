@@ -158,8 +158,8 @@ router.get('/:salonId/clients', requireSalonAccess(), async (req: AuthenticatedR
         }
       },
       orderBy: sortOrder === 'asc' 
-        ? asc(clientProfiles[sortBy as keyof typeof clientProfiles] || clientProfiles.lastVisitDate)
-        : desc(clientProfiles[sortBy as keyof typeof clientProfiles] || clientProfiles.lastVisitDate),
+        ? asc(clientProfiles.lastVisitDate)
+        : desc(clientProfiles.lastVisitDate),
       limit: limitNum,
       offset,
     });
@@ -1040,7 +1040,6 @@ router.get('/my-beauty-profile', async (req: Request, res: Response) => {
         visitStats: visibility.showVisitHistory ? {
           totalVisits: profile.totalVisits,
           lastVisitDate: profile.lastVisitDate,
-          totalSpentPaisa: profile.totalSpentPaisa,
         } : null,
         notes: visibleNotes.map(note => ({
           id: note.id,
@@ -1072,10 +1071,10 @@ router.get('/my-beauty-profile', async (req: Request, res: Response) => {
     }));
 
     const aggregatedProfile = {
-      hairTypes: [...new Set(profilesWithVisibleData.filter(p => p.hairProfile?.hairType).map(p => p.hairProfile?.hairType))],
-      skinTypes: [...new Set(profilesWithVisibleData.filter(p => p.skinProfile?.skinType).map(p => p.skinProfile?.skinType))],
-      allAllergies: [...new Set(profilesWithVisibleData.flatMap(p => p.allergies || []))],
-      allSensitivities: [...new Set(profilesWithVisibleData.flatMap(p => p.sensitivities || []))],
+      hairTypes: Array.from(new Set(profilesWithVisibleData.filter(p => p.hairProfile?.hairType).map(p => p.hairProfile?.hairType))),
+      skinTypes: Array.from(new Set(profilesWithVisibleData.filter(p => p.skinProfile?.skinType).map(p => p.skinProfile?.skinType))),
+      allAllergies: Array.from(new Set(profilesWithVisibleData.flatMap(p => p.allergies || []))),
+      allSensitivities: Array.from(new Set(profilesWithVisibleData.flatMap(p => p.sensitivities || []))),
       totalVisitsAcrossSalons: profilesWithVisibleData.reduce((sum, p) => sum + (p.visitStats?.totalVisits || 0), 0),
       isVipAnywhere: profilesWithVisibleData.some(p => p.isVip),
     };

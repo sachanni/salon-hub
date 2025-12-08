@@ -6,13 +6,10 @@ import { authenticateMobileUser } from "../middleware/authMobile";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
-let razorpay: Razorpay | null = null;
-if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-  razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-  });
-}
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID || '',
+  key_secret: process.env.RAZORPAY_KEY_SECRET || '',
+});
 
 export function registerWalletRoutes(app: Express) {
   app.get("/api/mobile/wallet", authenticateMobileUser, async (req: any, res: Response) => {

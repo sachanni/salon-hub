@@ -14,11 +14,13 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, Clock, Users, Plus, Edit, Trash2, Settings, CheckCircle, XCircle, Lock } from "lucide-react";
+import { Calendar, Clock, Users, Plus, Edit, Trash2, Settings, CheckCircle, XCircle, Lock, ClipboardList } from "lucide-react";
 import { Link } from "wouter";
 import BookingCalendarView from "@/components/BookingCalendarView";
 import BookingListView from "@/components/BookingListView";
 import CustomerProfilesView from "@/components/CustomerProfilesView";
+import FrontDeskPanel from "@/components/FrontDeskPanel";
+import JobCardDrawer from "@/components/JobCardDrawer";
 
 interface Staff {
   id: string;
@@ -72,6 +74,13 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
   const [isPatternDialogOpen, setIsPatternDialogOpen] = useState(false);
   const [editingPattern, setEditingPattern] = useState<AvailabilityPattern | null>(null);
   const [selectedSalonId, setSelectedSalonId] = useState<string>('');
+  const [jobCardDrawerOpen, setJobCardDrawerOpen] = useState(false);
+  const [selectedJobCardId, setSelectedJobCardId] = useState<string | null>(null);
+
+  const handleOpenJobCard = (jobCardId: string) => {
+    setSelectedJobCardId(jobCardId);
+    setJobCardDrawerOpen(true);
+  };
 
   // Get salonId from prop (dashboard embedding) or selected salon or first available salon
   const salonId = propSalonId || selectedSalonId || userSalons[0]?.id || '';
@@ -402,8 +411,12 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
         </div>
       </div>
 
-      <Tabs defaultValue="calendar" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+      <Tabs defaultValue="frontdesk" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-6">
+          <TabsTrigger value="frontdesk" data-testid="tab-frontdesk">
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Front Desk
+          </TabsTrigger>
           <TabsTrigger value="calendar" data-testid="tab-calendar">
             <Calendar className="h-4 w-4 mr-2" />
             Booking Calendar
@@ -425,6 +438,26 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
             Customer Profiles
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="frontdesk">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Today's Booking Calendar</CardTitle>
+                <CardDescription>
+                  Quick view of today's appointments with status indicators
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <BookingCalendarView salonId={salonId} defaultViewMode="day" />
+              </CardContent>
+            </Card>
+            <FrontDeskPanel 
+              salonId={salonId} 
+              onOpenJobCard={handleOpenJobCard}
+            />
+          </div>
+        </TabsContent>
 
         <TabsContent value="calendar">
           <Card>
@@ -815,6 +848,13 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
           <CustomerProfilesView salonId={salonId} />
         </TabsContent>
       </Tabs>
+
+      <JobCardDrawer
+        salonId={salonId}
+        jobCardId={selectedJobCardId}
+        open={jobCardDrawerOpen}
+        onOpenChange={setJobCardDrawerOpen}
+      />
     </div>
   );
 }

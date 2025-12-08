@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -75,13 +75,22 @@ import NotificationCenter from "@/pages/NotificationCenter";
 import PastEvents from "@/pages/PastEvents";
 import NotFound from "@/pages/not-found";
 import MyBeautyProfile from "@/pages/MyBeautyProfile";
+import SelfCheckIn from "@/pages/SelfCheckIn";
 import { AIBeautyConsultant } from "@/components/chat/AIBeautyConsultant";
 
 function Router() {
+  const [location] = useLocation();
+  const isPublicKioskRoute = location.startsWith('/checkin/');
+  
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      {!isPublicKioskRoute && <Header />}
       <Switch>
+        {/* QR Self Check-in Route (public kiosk page without header) */}
+        <Route path="/checkin/:salonId">
+          {(params) => <SelfCheckIn key={params.salonId} />}
+        </Route>
+        
         <Route path="/" component={Home} />
         <Route path="/salons" component={Salons} />
         <Route path="/shop" component={Shop} />
@@ -207,10 +216,8 @@ function Router() {
 }
 
 function App() {
-  // Initialize JWT authentication
   useJWTAuth();
 
-  // Initialize version management on first render
   useEffect(() => {
     VersionManager.check();
     VersionManager.cleanupOldVersions();

@@ -65,7 +65,10 @@ import {
   FileEdit,
   History,
   UserCog,
-  Shield
+  Shield,
+  Send,
+  Upload,
+  Wallet
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSalonPermissions } from "@/hooks/useSalonPermissions";
@@ -86,6 +89,9 @@ import EventDashboard from "@/pages/EventDashboard";
 import CreateEvent from "@/pages/CreateEvent";
 import DraftEvents from "@/pages/DraftEvents";
 import PastEvents from "@/pages/PastEvents";
+import CustomerImportDashboard from "@/components/business-dashboard/CustomerImportDashboard";
+import CampaignDashboard from "@/components/business-dashboard/CampaignDashboard";
+import CommissionManagement from "@/components/business-dashboard/CommissionManagement";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -118,6 +124,24 @@ interface AnalyticsOverview {
   cancelledBookings?: number;
   completedBookings?: number;
   confirmedBookings?: number;
+  arrivedBookings?: number;
+  totalCustomers?: number;
+  totalJobCards?: number;
+  walkInCount?: number;
+  walkInRevenuePaisa?: number;
+  todayTotalCustomers?: number;
+  todayJobCards?: number;
+  todayWalkIns?: number;
+  completedJobCards?: number;
+  paidJobCards?: number;
+  realizedRevenuePaisa?: number;
+  expectedRevenuePaisa?: number;
+  pendingRevenuePaisa?: number;
+  todayRealizedRevenuePaisa?: number;
+  todayExpectedRevenuePaisa?: number;
+  todayPendingRevenuePaisa?: number;
+  todayPaid?: number;
+  completionRate?: string;
 }
 
 interface PopularService {
@@ -145,6 +169,41 @@ interface AnalyticsData {
   popularServices?: PopularService[];
   staffPerformance?: StaffPerformance[];
   bookingTrends?: BookingTrend[];
+}
+
+// Navigation item interface for consistent typing
+interface NavigationItem {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  hasAccess: boolean;
+  isComplete?: boolean;
+  isSetup?: boolean;
+  isOptional?: boolean;
+  progress?: number;
+}
+
+interface NavigationSection {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  items: NavigationItem[];
+  requiresBusinessOwner?: boolean;
+  requiresAdmin?: boolean;
+}
+
+// Service type for query results
+interface ServiceData {
+  id: string;
+  name: string;
+  [key: string]: unknown;
+}
+
+// Staff type for query results
+interface StaffData {
+  id: string;
+  name: string;
+  [key: string]: unknown;
 }
 
 // Import step components - Use the same components as BusinessSetup
@@ -331,13 +390,13 @@ export default function BusinessDashboard() {
     staleTime: 30000
   });
 
-  const { data: services } = useQuery({
+  const { data: services } = useQuery<ServiceData[]>({
     queryKey: ['/api/salons', salonId, 'services'],
     enabled: !!salonId,
     staleTime: 30000
   });
 
-  const { data: staff } = useQuery({
+  const { data: staff } = useQuery<StaffData[]>({
     queryKey: ['/api/salons', salonId, 'staff'],
     enabled: !!salonId,
     staleTime: 30000
@@ -434,6 +493,24 @@ export default function BusinessDashboard() {
   const totalBookings = overview.totalBookings || 0;
   const averageBookingValue = overview.averageBookingValuePaisa || 0;
   
+  const totalCustomers = overview.totalCustomers || 0;
+  const totalJobCards = overview.totalJobCards || 0;
+  const walkInCount = overview.walkInCount || 0;
+  const walkInRevenue = overview.walkInRevenuePaisa || 0;
+  const todayTotalCustomers = overview.todayTotalCustomers || 0;
+  const todayWalkIns = overview.todayWalkIns || 0;
+  
+  // Revenue breakdown - the key metrics for proper lifecycle tracking
+  const realizedRevenue = overview.realizedRevenuePaisa || 0;
+  const expectedRevenue = overview.expectedRevenuePaisa || 0;
+  const pendingRevenue = overview.pendingRevenuePaisa || 0;
+  const todayRealizedRevenue = overview.todayRealizedRevenuePaisa || 0;
+  const todayExpectedRevenue = overview.todayExpectedRevenuePaisa || 0;
+  const todayPendingRevenue = overview.todayPendingRevenuePaisa || 0;
+  const paidJobCards = overview.paidJobCards || 0;
+  const completionRate = overview.completionRate || '0.0';
+  const confirmedBookings = overview.confirmedBookings || 0;
+  
   const bookingsTrend = overview.bookingsTrend || { percentage: '0.0', direction: 'neutral' };
   const revenueTrend = overview.revenueTrend || { percentage: '0.0', direction: 'neutral' };
   const averageValueTrend = overview.averageValueTrend || { percentage: '0.0', direction: 'neutral' };
@@ -481,13 +558,13 @@ export default function BusinessDashboard() {
   };
 
   // Navigation structure with grouped sections - Industry Standard Approach with RBAC
-  const allNavigationSections = [
+  const allNavigationSections: NavigationSection[] = [
     {
       id: "overview",
       label: "Overview",
       icon: Home,
       items: [
-        { id: "overview", label: "Dashboard", icon: BarChart, hasAccess: true }
+        { id: "overview", label: "Dashboard", icon: BarChart, hasAccess: true, isComplete: false, isSetup: false }
       ]
     },
     {
@@ -495,11 +572,11 @@ export default function BusinessDashboard() {
       label: "Operations",
       icon: Calendar,
       items: [
-        { id: "calendar", label: "Bookings & Calendar", icon: Calendar, hasAccess: canViewBookings || isAdmin },
-        { id: "client-profiles", label: "Client Profiles & Notes", icon: UserCog, hasAccess: canViewCustomers || isAdmin },
-        { id: "inventory", label: "Inventory Management", icon: Package, hasAccess: canViewInventory || isAdmin },
-        { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles, hasAccess: canViewInventory || isAdmin },
-        { id: "offers", label: "Offers & Promotions", icon: Gift, hasAccess: canViewMarketing || isAdmin }
+        { id: "calendar", label: "Bookings & Calendar", icon: Calendar, hasAccess: canViewBookings || isAdmin, isComplete: false, isSetup: false },
+        { id: "client-profiles", label: "Client Profiles & Notes", icon: UserCog, hasAccess: canViewCustomers || isAdmin, isComplete: false, isSetup: false },
+        { id: "inventory", label: "Inventory Management", icon: Package, hasAccess: canViewInventory || isAdmin, isComplete: false, isSetup: false },
+        { id: "beauty-catalog", label: "Beauty Products Catalog", icon: Sparkles, hasAccess: canViewInventory || isAdmin, isComplete: false, isSetup: false },
+        { id: "offers", label: "Offers & Promotions", icon: Gift, hasAccess: canViewMarketing || isAdmin, isComplete: false, isSetup: false }
       ]
     },
     {
@@ -508,10 +585,10 @@ export default function BusinessDashboard() {
       icon: CalendarDays,
       requiresAdmin: true,
       items: [
-        { id: "events-dashboard", label: "Event Dashboard", icon: BarChart, hasAccess: isAdmin },
-        { id: "create-event", label: "Create Event", icon: Plus, hasAccess: isAdmin },
-        { id: "draft-events", label: "Draft Events", icon: FileEdit, hasAccess: isAdmin },
-        { id: "past-events", label: "Past Events", icon: History, hasAccess: isAdmin }
+        { id: "events-dashboard", label: "Event Dashboard", icon: BarChart, isComplete: false, isSetup: false, hasAccess: isAdmin },
+        { id: "create-event", label: "Create Event", icon: Plus, isComplete: false, isSetup: false, hasAccess: isAdmin },
+        { id: "draft-events", label: "Draft Events", icon: FileEdit, isComplete: false, isSetup: false, hasAccess: isAdmin },
+        { id: "past-events", label: "Past Events", icon: History, isComplete: false, isSetup: false, hasAccess: isAdmin }
       ]
     },
     {
@@ -537,7 +614,7 @@ export default function BusinessDashboard() {
       icon: Shield,
       requiresBusinessOwner: true,
       items: [
-        { id: "shop-admins", label: "Shop Admin Management", icon: Shield, hasAccess: isBusinessOwner }
+        { id: "shop-admins", label: "Shop Admin Management", icon: Shield, isComplete: false, isSetup: false, hasAccess: isBusinessOwner }
       ]
     },
     {
@@ -545,8 +622,9 @@ export default function BusinessDashboard() {
       label: "Analytics & Reports",
       icon: BarChart,
       items: [
-        { id: "analytics", label: "Advanced Analytics", icon: TrendingUp, hasAccess: canViewReports || isAdmin },
-        { id: "financials", label: "Financial Reports", icon: CreditCard, hasAccess: canViewFinancials || isAdmin }
+        { id: "analytics", label: "Advanced Analytics", icon: TrendingUp, isComplete: false, isSetup: false, hasAccess: canViewReports || isAdmin },
+        { id: "financials", label: "Financial Reports", icon: CreditCard, isComplete: false, isSetup: false, hasAccess: canViewFinancials || isAdmin },
+        { id: "commissions", label: "Staff Commissions", icon: Wallet, isComplete: false, isSetup: false, hasAccess: isBusinessOwner || canViewFinancials || isAdmin }
       ]
     },
     {
@@ -554,7 +632,9 @@ export default function BusinessDashboard() {
       label: "Communications",
       icon: MessageSquare,
       items: [
-        { id: "communications", label: "Customer Communications", icon: MessageSquare, hasAccess: canViewCustomers || isAdmin }
+        { id: "communications", label: "Customer Communications", icon: MessageSquare, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin },
+        { id: "customer-import", label: "Customer Import", icon: Upload, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin },
+        { id: "campaigns", label: "Invitation Campaigns", icon: Send, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin }
       ]
     }
   ];
@@ -601,7 +681,7 @@ export default function BusinessDashboard() {
               <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
                 <p className="text-[10px] font-medium text-white/90">{getGreeting()}</p>
                 <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-bold text-white truncate">{user?.username || 'Business Owner'}</p>
+                  <p className="text-sm font-bold text-white truncate">{user?.firstName || user?.email || 'Business Owner'}</p>
                   {userRole && (
                     <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-medium ${
                       isBusinessOwner 
@@ -734,8 +814,8 @@ export default function BusinessDashboard() {
                                         <span className={isActive ? 'font-medium' : ''}>{item.label}</span>
                                         <div className="flex items-center gap-1.5">
                                           {item.isComplete && (
-                                            <div className="flex items-center justify-center h-5 w-5 rounded-full bg-green-500/20">
-                                              <CheckCircle className="h-3 w-3 text-green-600" title="Complete" />
+                                            <div className="flex items-center justify-center h-5 w-5 rounded-full bg-green-500/20" title="Complete">
+                                              <CheckCircle className="h-3 w-3 text-green-600" />
                                             </div>
                                           )}
                                           {item.isSetup && !item.isComplete && (
@@ -872,7 +952,7 @@ export default function BusinessDashboard() {
                                 {item.label}
                                 <div className="ml-auto flex items-center gap-1">
                                   {item.isComplete && (
-                                    <CheckCircle className="h-3 w-3 text-green-500" title="Complete" />
+                                    <span title="Complete"><CheckCircle className="h-3 w-3 text-green-500" /></span>
                                   )}
                                   {item.isSetup && !item.isComplete && (
                                     <div className="h-2 w-2 rounded-full bg-orange-500" title="Setup required" />
@@ -1065,7 +1145,7 @@ export default function BusinessDashboard() {
                       Location Set Successfully
                     </p>
                     <p className="text-sm text-green-700 dark:text-green-300">
-                      Coordinates: {typeof salonData.latitude === 'number' ? salonData.latitude.toFixed(6) : parseFloat(salonData.latitude).toFixed(6)}, {typeof salonData.longitude === 'number' ? salonData.longitude.toFixed(6) : parseFloat(salonData.longitude).toFixed(6)}
+                      Coordinates: {Number(salonData.latitude).toFixed(6)}, {Number(salonData.longitude).toFixed(6)}
                     </p>
                   </div>
                   <Link href="#location-contact">
@@ -1086,7 +1166,7 @@ export default function BusinessDashboard() {
                   <MapPin className="h-5 w-5 text-purple-600" />
                   <CardTitle>Location on Map</CardTitle>
                   <span className="text-xs text-muted-foreground ml-auto">
-                    📍 {typeof salonData.latitude === 'number' ? salonData.latitude.toFixed(6) : parseFloat(salonData.latitude).toFixed(6)}, {typeof salonData.longitude === 'number' ? salonData.longitude.toFixed(6) : parseFloat(salonData.longitude).toFixed(6)}
+                    📍 {Number(salonData.latitude).toFixed(6)}, {Number(salonData.longitude).toFixed(6)}
                   </span>
                 </div>
               </CardHeader>
@@ -1268,11 +1348,11 @@ export default function BusinessDashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-green-700 dark:text-green-300">
-                        {selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)} Revenue
+                        Collected Revenue
                       </p>
                       <div className="flex items-center gap-2">
                         <p className="text-2xl font-bold text-green-900 dark:text-green-100" data-testid="text-revenue">
-                          {formatCurrency(totalRevenue)}
+                          {formatCurrency(realizedRevenue)}
                         </p>
                         <div className="flex items-center gap-1">
                           {getTrendIcon(revenueTrend.direction)}
@@ -1282,7 +1362,12 @@ export default function BusinessDashboard() {
                         </div>
                       </div>
                       <p className="text-xs text-green-600 dark:text-green-400">
-                        Today: {formatCurrency(todayRevenue)}
+                        Today: {formatCurrency(todayRealizedRevenue)}
+                        {(expectedRevenue > 0 || pendingRevenue > 0) && (
+                          <span className="ml-2 text-amber-600">
+                            ({formatCurrency(expectedRevenue + pendingRevenue)} pending)
+                          </span>
+                        )}
                       </p>
                     </div>
                     <BarChart className="h-8 w-8 text-green-600" />
@@ -1351,7 +1436,7 @@ export default function BusinessDashboard() {
                 ) : (
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-orange-700 dark:text-orange-300">Average Booking Value</p>
+                      <p className="text-sm font-medium text-orange-700 dark:text-orange-300">Average Transaction Value</p>
                       <div className="flex items-center gap-2">
                         <p className="text-2xl font-bold text-orange-900 dark:text-orange-100" data-testid="text-avg-value">
                           {formatCurrency(averageBookingValue)}
@@ -1364,10 +1449,106 @@ export default function BusinessDashboard() {
                         </div>
                       </div>
                       <p className="text-xs text-orange-600 dark:text-orange-400">
-                        From {totalBookings} bookings
+                        From {paidJobCards} paid transactions
                       </p>
                     </div>
                     <CreditCard className="h-8 w-8 text-orange-600" />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Customer & Walk-in Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="bg-indigo-50 dark:bg-indigo-950" data-testid="card-total-customers">
+              <CardContent className="p-6">
+                {analyticsLoading ? (
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-2">
+                      <div className="h-4 w-28 bg-indigo-200 dark:bg-indigo-800 rounded animate-pulse"></div>
+                      <div className="h-8 w-16 bg-indigo-300 dark:bg-indigo-700 rounded animate-pulse"></div>
+                      <div className="h-3 w-32 bg-indigo-200 dark:bg-indigo-800 rounded animate-pulse"></div>
+                    </div>
+                    <div className="h-8 w-8 bg-indigo-300 dark:bg-indigo-700 rounded animate-pulse"></div>
+                  </div>
+                ) : isAnalyticsError ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300">Total Customers</p>
+                      <p className="text-2xl font-bold text-indigo-900 dark:text-indigo-100">--</p>
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400">Data unavailable</p>
+                    </div>
+                    <UserCircle className="h-8 w-8 text-indigo-600" />
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300">Total Customers</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-2xl font-bold text-indigo-900 dark:text-indigo-100" data-testid="text-total-customers">
+                          {totalCustomers}
+                        </p>
+                        <div className="flex items-center gap-1">
+                          {getTrendIcon(bookingsTrend.direction)}
+                          <span className={`text-xs font-medium ${getTrendColor(bookingsTrend.direction)}`}>
+                            {bookingsTrend.percentage}%
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400">
+                        {totalBookings} bookings + {totalJobCards} walk-ins/job cards
+                      </p>
+                      <p className="text-xs text-indigo-500 dark:text-indigo-400 mt-1">
+                        Today: {todayTotalCustomers} customers ({todayBookings} booked, {todayWalkIns} walk-in)
+                      </p>
+                    </div>
+                    <UserCircle className="h-8 w-8 text-indigo-600" />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-teal-50 dark:bg-teal-950" data-testid="card-walkin-stats">
+              <CardContent className="p-6">
+                {analyticsLoading ? (
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-2">
+                      <div className="h-4 w-24 bg-teal-200 dark:bg-teal-800 rounded animate-pulse"></div>
+                      <div className="h-8 w-16 bg-teal-300 dark:bg-teal-700 rounded animate-pulse"></div>
+                      <div className="h-3 w-28 bg-teal-200 dark:bg-teal-800 rounded animate-pulse"></div>
+                    </div>
+                    <div className="h-8 w-8 bg-teal-300 dark:bg-teal-700 rounded animate-pulse"></div>
+                  </div>
+                ) : isAnalyticsError ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-teal-700 dark:text-teal-300">Walk-in Customers</p>
+                      <p className="text-2xl font-bold text-teal-900 dark:text-teal-100">--</p>
+                      <p className="text-xs text-teal-600 dark:text-teal-400">Data unavailable</p>
+                    </div>
+                    <Users className="h-8 w-8 text-teal-600" />
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-teal-700 dark:text-teal-300">Walk-in Customers</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-2xl font-bold text-teal-900 dark:text-teal-100" data-testid="text-walkin-count">
+                          {walkInCount}
+                        </p>
+                        <span className="text-sm font-medium text-teal-600 dark:text-teal-400">
+                          ({formatCurrency(walkInRevenue)})
+                        </span>
+                      </div>
+                      <p className="text-xs text-teal-600 dark:text-teal-400">
+                        Walk-in revenue this {selectedPeriod}
+                      </p>
+                      <p className="text-xs text-teal-500 dark:text-teal-400 mt-1">
+                        Today: {todayWalkIns} walk-ins
+                      </p>
+                    </div>
+                    <Users className="h-8 w-8 text-teal-600" />
                   </div>
                 )}
               </CardContent>
@@ -1598,6 +1779,15 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle commissions tab
+    if (activeTab === "commissions") {
+      return (
+        <div className="p-6">
+          <CommissionManagement salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     // Handle communications tab
     if (activeTab === "communications") {
       return (
@@ -1606,6 +1796,24 @@ export default function BusinessDashboard() {
             salonId={salonId || ''} 
             selectedPeriod={selectedPeriod}
           />
+        </div>
+      );
+    }
+
+    // Handle customer import tab
+    if (activeTab === "customer-import") {
+      return (
+        <div className="p-6">
+          <CustomerImportDashboard salonId={salonId || ''} />
+        </div>
+      );
+    }
+
+    // Handle invitation campaigns tab
+    if (activeTab === "campaigns") {
+      return (
+        <div className="p-6">
+          <CampaignDashboard salonId={salonId || ''} />
         </div>
       );
     }
@@ -1735,7 +1943,7 @@ export default function BusinessDashboard() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h1 className="text-xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
-                      {user?.username || 'Business Owner'}
+                      {user?.firstName || user?.email || 'Business Owner'}
                     </h1>
                     <div className="h-4 w-4 rounded-full bg-green-500 ring-2 ring-green-100" title="Online" />
                   </div>

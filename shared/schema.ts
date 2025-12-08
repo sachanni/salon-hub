@@ -1011,7 +1011,18 @@ export const verifyPaymentSchema = z.object({
 });
 
 // Booking status enum for validation
-const bookingStatusEnum = z.enum(['pending', 'confirmed', 'cancelled', 'completed', 'no_show']);
+// Flow: pending → confirmed → arrived (checked in) → completed
+const bookingStatusEnum = z.enum(['pending', 'confirmed', 'arrived', 'cancelled', 'completed', 'no_show']);
+
+// Booking status constants for consistent usage across the app
+export const BOOKING_STATUSES = {
+  PENDING: 'pending',      // Initial state when booking is created
+  CONFIRMED: 'confirmed',  // Booking is confirmed but customer hasn't arrived
+  ARRIVED: 'arrived',      // Customer has checked in, job card created
+  COMPLETED: 'completed',  // Service done and booking closed
+  CANCELLED: 'cancelled',  // Booking was cancelled
+  NO_SHOW: 'no_show',      // Customer didn't show up
+} as const;
 
 // Single booking update schema - status and optional notes
 export const updateBookingSchema = z.object({
@@ -1060,10 +1071,13 @@ export const updatePackageSchema = z.object({
 });
 
 // Status transition validation function
+// Booking lifecycle: pending → confirmed → arrived (checked in) → completed
+// Note: Direct confirmed → completed is NOT allowed - must go through arrived (job card check-in)
 export const validateStatusTransition = (currentStatus: string, newStatus: string): { isValid: boolean, error?: string } => {
   const validTransitions: Record<string, string[]> = {
     pending: ['confirmed', 'cancelled'],
-    confirmed: ['completed', 'cancelled', 'no_show'],
+    confirmed: ['arrived', 'cancelled', 'no_show'],  // Must check in (arrived) before completing
+    arrived: ['completed', 'cancelled', 'no_show'],  // Customer has arrived and job card created
     completed: [], // Cannot transition from completed
     cancelled: [], // Cannot transition from cancelled
     no_show: []    // Cannot transition from no_show
@@ -7167,3 +7181,942 @@ export const shopAdminListItemSchema = z.object({
 });
 
 export type ShopAdminListItem = z.infer<typeof shopAdminListItemSchema>;
+
+// ============================================================================
+// JOB CARD SYSTEM - Front Desk Visit Workflow
+// ============================================================================
+// Flow: Booking Confirmed → Customer Check-in → Job Card Created → Service In-Progress
+//       → Add-ons/Products → Pre-Checkout Review → Payment → Close & Receipt
+//       → Staff Commission → Customer Feedback
+
+// Job Card Status Enum Values
+// 'open' - Job card created, customer checked in
+// 'in_service' - Service being performed
+// 'pending_checkout' - Service complete, awaiting payment
+// 'completed' - Paid and closed
+// 'cancelled' - Job card cancelled
+// 'no_show' - Customer didn't show up
+
+// Job Cards table - Master record for each customer visit
+export const jobCards = pgTable("job_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Core References
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  customerId: varchar("customer_id").references(() => users.id, { onDelete: "set null" }),
+  
+  // Job Card Number - Sequential per salon per day (e.g., "JC-20251207-001")
+  jobCardNumber: varchar("job_card_number", { length: 30 }).notNull(),
+  
+  // Customer Info (snapshot - may differ from booking for walk-ins)
+  customerName: text("customer_name").notNull(),
+  customerEmail: text("customer_email"),
+  customerPhone: text("customer_phone"),
+  
+  // Check-in Details
+  checkInMethod: varchar("check_in_method", { length: 20 }).notNull().default('manual'),
+  checkInAt: timestamp("check_in_at").notNull().defaultNow(),
+  checkInBy: varchar("check_in_by").references(() => users.id, { onDelete: "set null" }),
+  
+  // Assigned Staff (primary stylist/therapist)
+  assignedStaffId: varchar("assigned_staff_id").references(() => staff.id, { onDelete: "set null" }),
+  
+  // Service Timing
+  serviceStartAt: timestamp("service_start_at"),
+  serviceEndAt: timestamp("service_end_at"),
+  estimatedDurationMinutes: integer("estimated_duration_minutes"),
+  actualDurationMinutes: integer("actual_duration_minutes"),
+  
+  // Status Workflow
+  status: varchar("status", { length: 20 }).notNull().default('open'),
+  
+  // Billing Summary (all amounts in paisa)
+  subtotalPaisa: integer("subtotal_paisa").notNull().default(0),
+  discountAmountPaisa: integer("discount_amount_paisa").notNull().default(0),
+  discountType: varchar("discount_type", { length: 20 }),
+  discountValue: decimal("discount_value", { precision: 10, scale: 2 }),
+  discountReason: text("discount_reason"),
+  taxAmountPaisa: integer("tax_amount_paisa").notNull().default(0),
+  tipAmountPaisa: integer("tip_amount_paisa").notNull().default(0),
+  totalAmountPaisa: integer("total_amount_paisa").notNull().default(0),
+  paidAmountPaisa: integer("paid_amount_paisa").notNull().default(0),
+  balancePaisa: integer("balance_paisa").notNull().default(0),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Payment Status
+  paymentStatus: varchar("payment_status", { length: 20 }).notNull().default('unpaid'),
+  
+  // Checkout Details
+  checkoutAt: timestamp("checkout_at"),
+  checkoutBy: varchar("checkout_by").references(() => users.id, { onDelete: "set null" }),
+  receiptNumber: varchar("receipt_number", { length: 50 }),
+  receiptUrl: text("receipt_url"),
+  
+  // Notes
+  internalNotes: text("internal_notes"),
+  customerNotes: text("customer_notes"),
+  
+  // Walk-in vs Booking
+  isWalkIn: integer("is_walk_in").notNull().default(0),
+  
+  // Cancellation Details
+  cancellationReason: text("cancellation_reason"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledBy: varchar("cancelled_by").references(() => users.id, { onDelete: "set null" }),
+  
+  // Feedback
+  feedbackRequested: integer("feedback_requested").notNull().default(0),
+  feedbackRequestedAt: timestamp("feedback_requested_at"),
+  
+  // Metadata
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("job_cards_salon_idx").on(table.salonId),
+  index("job_cards_booking_idx").on(table.bookingId),
+  index("job_cards_customer_idx").on(table.customerId),
+  index("job_cards_status_idx").on(table.status),
+  index("job_cards_check_in_at_idx").on(table.checkInAt),
+  index("job_cards_assigned_staff_idx").on(table.assignedStaffId),
+  unique("job_cards_number_salon_unique").on(table.salonId, table.jobCardNumber),
+  check("job_card_status_valid", sql`status IN ('open', 'in_service', 'pending_checkout', 'completed', 'cancelled', 'no_show')`),
+  check("check_in_method_valid", sql`check_in_method IN ('manual', 'qr_code', 'self_checkin', 'booking_auto')`),
+  check("payment_status_valid", sql`payment_status IN ('unpaid', 'partial', 'paid', 'refunded')`),
+  check("is_walk_in_valid", sql`is_walk_in IN (0, 1)`),
+  check("feedback_requested_valid", sql`feedback_requested IN (0, 1)`),
+]);
+
+// Job Card Services - Services performed during the visit
+export const jobCardServices = pgTable("job_card_services", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobCardId: varchar("job_card_id").notNull().references(() => jobCards.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "restrict" }),
+  staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }),
+  
+  // Service Details (snapshot at time of addition)
+  serviceName: text("service_name").notNull(),
+  serviceCategory: varchar("service_category", { length: 100 }),
+  
+  // Pricing
+  originalPricePaisa: integer("original_price_paisa").notNull(),
+  discountPaisa: integer("discount_paisa").notNull().default(0),
+  finalPricePaisa: integer("final_price_paisa").notNull(),
+  
+  // Duration
+  estimatedDurationMinutes: integer("estimated_duration_minutes").notNull(),
+  actualDurationMinutes: integer("actual_duration_minutes"),
+  
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  
+  // Sequence/Order
+  sequence: integer("sequence").notNull().default(1),
+  
+  // Notes
+  notes: text("notes"),
+  
+  // Commission tracking
+  commissionCalculated: integer("commission_calculated").notNull().default(0),
+  commissionId: varchar("commission_id").references(() => commissions.id, { onDelete: "set null" }),
+  
+  // Source tracking
+  source: varchar("source", { length: 20 }).notNull().default('booking'),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("job_card_services_job_card_idx").on(table.jobCardId),
+  index("job_card_services_salon_idx").on(table.salonId),
+  index("job_card_services_service_idx").on(table.serviceId),
+  index("job_card_services_staff_idx").on(table.staffId),
+  check("jcs_status_valid", sql`status IN ('pending', 'in_progress', 'completed', 'cancelled')`),
+  check("jcs_source_valid", sql`source IN ('booking', 'addon', 'walk_in')`),
+  check("jcs_commission_calculated_valid", sql`commission_calculated IN (0, 1)`),
+]);
+
+// Job Card Products - Products sold during the visit
+export const jobCardProducts = pgTable("job_card_products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobCardId: varchar("job_card_id").notNull().references(() => jobCards.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }),
+  
+  // Product Details (snapshot at time of sale)
+  productName: text("product_name").notNull(),
+  productSku: varchar("product_sku", { length: 100 }),
+  productCategory: varchar("product_category", { length: 100 }),
+  
+  // Quantity and Pricing
+  quantity: integer("quantity").notNull().default(1),
+  unitPricePaisa: integer("unit_price_paisa").notNull(),
+  discountPaisa: integer("discount_paisa").notNull().default(0),
+  totalPricePaisa: integer("total_price_paisa").notNull(),
+  
+  // Tax (products may have different GST than services)
+  taxRatePercent: decimal("tax_rate_percent", { precision: 5, scale: 2 }),
+  taxAmountPaisa: integer("tax_amount_paisa").notNull().default(0),
+  
+  // Inventory tracking
+  inventoryDeducted: integer("inventory_deducted").notNull().default(0),
+  inventoryTransactionId: varchar("inventory_transaction_id"),
+  
+  // Notes
+  notes: text("notes"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("job_card_products_job_card_idx").on(table.jobCardId),
+  index("job_card_products_salon_idx").on(table.salonId),
+  index("job_card_products_product_idx").on(table.productId),
+  index("job_card_products_staff_idx").on(table.staffId),
+  check("jcp_inventory_deducted_valid", sql`inventory_deducted IN (0, 1)`),
+]);
+
+// Job Card Payments - Split payment support
+export const jobCardPayments = pgTable("job_card_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobCardId: varchar("job_card_id").notNull().references(() => jobCards.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Payment Details
+  paymentMethod: varchar("payment_method", { length: 30 }).notNull(),
+  amountPaisa: integer("amount_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Status
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  
+  // Payment Gateway Details (if online)
+  razorpayOrderId: text("razorpay_order_id"),
+  razorpayPaymentId: text("razorpay_payment_id"),
+  razorpaySignature: text("razorpay_signature"),
+  transactionId: varchar("transaction_id", { length: 100 }),
+  
+  // For card payments
+  cardLast4: varchar("card_last_4", { length: 4 }),
+  cardNetwork: varchar("card_network", { length: 20 }),
+  
+  // For UPI payments
+  upiId: varchar("upi_id", { length: 100 }),
+  
+  // Refund tracking
+  isRefund: integer("is_refund").notNull().default(0),
+  refundedFromPaymentId: varchar("refunded_from_payment_id"),
+  refundReason: text("refund_reason"),
+  
+  // Notes
+  notes: text("notes"),
+  
+  // Collected by
+  collectedBy: varchar("collected_by").references(() => users.id, { onDelete: "set null" }),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("job_card_payments_job_card_idx").on(table.jobCardId),
+  index("job_card_payments_salon_idx").on(table.salonId),
+  index("job_card_payments_method_idx").on(table.paymentMethod),
+  index("job_card_payments_status_idx").on(table.status),
+  check("jcpay_method_valid", sql`payment_method IN ('cash', 'card', 'upi', 'wallet', 'razorpay', 'bank_transfer', 'other')`),
+  check("jcpay_status_valid", sql`status IN ('pending', 'completed', 'failed', 'refunded')`),
+  check("jcpay_is_refund_valid", sql`is_refund IN (0, 1)`),
+]);
+
+// Job Card Tips - Tips given to staff
+export const jobCardTips = pgTable("job_card_tips", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobCardId: varchar("job_card_id").notNull().references(() => jobCards.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
+  
+  // Tip Amount
+  amountPaisa: integer("amount_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Payment Method (may differ from main payment)
+  paymentMethod: varchar("payment_method", { length: 30 }).notNull().default('cash'),
+  
+  // Notes
+  notes: text("notes"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("job_card_tips_job_card_idx").on(table.jobCardId),
+  index("job_card_tips_salon_idx").on(table.salonId),
+  index("job_card_tips_staff_idx").on(table.staffId),
+  check("jct_payment_method_valid", sql`payment_method IN ('cash', 'card', 'upi', 'wallet', 'included_in_payment')`),
+]);
+
+// Job Card Activity Log - Audit trail for all job card changes
+export const jobCardActivityLog = pgTable("job_card_activity_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobCardId: varchar("job_card_id").notNull().references(() => jobCards.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  // Activity Details
+  activityType: varchar("activity_type", { length: 50 }).notNull(),
+  description: text("description").notNull(),
+  
+  // Before/After state (for auditing)
+  previousValue: jsonb("previous_value"),
+  newValue: jsonb("new_value"),
+  
+  // Who performed the action
+  performedBy: varchar("performed_by").references(() => users.id, { onDelete: "set null" }),
+  performedByName: text("performed_by_name"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("job_card_activity_job_card_idx").on(table.jobCardId),
+  index("job_card_activity_salon_idx").on(table.salonId),
+  index("job_card_activity_type_idx").on(table.activityType),
+  index("job_card_activity_created_idx").on(table.createdAt),
+]);
+
+// Job Card Relations
+export const jobCardsRelations = relations(jobCards, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [jobCards.salonId],
+    references: [salons.id],
+  }),
+  booking: one(bookings, {
+    fields: [jobCards.bookingId],
+    references: [bookings.id],
+  }),
+  customer: one(users, {
+    fields: [jobCards.customerId],
+    references: [users.id],
+  }),
+  assignedStaff: one(staff, {
+    fields: [jobCards.assignedStaffId],
+    references: [staff.id],
+  }),
+  checkInByUser: one(users, {
+    fields: [jobCards.checkInBy],
+    references: [users.id],
+    relationName: 'checkInBy',
+  }),
+  checkoutByUser: one(users, {
+    fields: [jobCards.checkoutBy],
+    references: [users.id],
+    relationName: 'checkoutBy',
+  }),
+  services: many(jobCardServices),
+  products: many(jobCardProducts),
+  payments: many(jobCardPayments),
+  tips: many(jobCardTips),
+  activityLog: many(jobCardActivityLog),
+}));
+
+export const jobCardServicesRelations = relations(jobCardServices, ({ one }) => ({
+  jobCard: one(jobCards, {
+    fields: [jobCardServices.jobCardId],
+    references: [jobCards.id],
+  }),
+  salon: one(salons, {
+    fields: [jobCardServices.salonId],
+    references: [salons.id],
+  }),
+  service: one(services, {
+    fields: [jobCardServices.serviceId],
+    references: [services.id],
+  }),
+  staff: one(staff, {
+    fields: [jobCardServices.staffId],
+    references: [staff.id],
+  }),
+  commission: one(commissions, {
+    fields: [jobCardServices.commissionId],
+    references: [commissions.id],
+  }),
+}));
+
+export const jobCardProductsRelations = relations(jobCardProducts, ({ one }) => ({
+  jobCard: one(jobCards, {
+    fields: [jobCardProducts.jobCardId],
+    references: [jobCards.id],
+  }),
+  salon: one(salons, {
+    fields: [jobCardProducts.salonId],
+    references: [salons.id],
+  }),
+  product: one(products, {
+    fields: [jobCardProducts.productId],
+    references: [products.id],
+  }),
+  staff: one(staff, {
+    fields: [jobCardProducts.staffId],
+    references: [staff.id],
+  }),
+}));
+
+export const jobCardPaymentsRelations = relations(jobCardPayments, ({ one }) => ({
+  jobCard: one(jobCards, {
+    fields: [jobCardPayments.jobCardId],
+    references: [jobCards.id],
+  }),
+  salon: one(salons, {
+    fields: [jobCardPayments.salonId],
+    references: [salons.id],
+  }),
+  collectedByUser: one(users, {
+    fields: [jobCardPayments.collectedBy],
+    references: [users.id],
+  }),
+}));
+
+export const jobCardTipsRelations = relations(jobCardTips, ({ one }) => ({
+  jobCard: one(jobCards, {
+    fields: [jobCardTips.jobCardId],
+    references: [jobCards.id],
+  }),
+  salon: one(salons, {
+    fields: [jobCardTips.salonId],
+    references: [salons.id],
+  }),
+  staff: one(staff, {
+    fields: [jobCardTips.staffId],
+    references: [staff.id],
+  }),
+}));
+
+export const jobCardActivityLogRelations = relations(jobCardActivityLog, ({ one }) => ({
+  jobCard: one(jobCards, {
+    fields: [jobCardActivityLog.jobCardId],
+    references: [jobCards.id],
+  }),
+  salon: one(salons, {
+    fields: [jobCardActivityLog.salonId],
+    references: [salons.id],
+  }),
+  performedByUser: one(users, {
+    fields: [jobCardActivityLog.performedBy],
+    references: [users.id],
+  }),
+}));
+
+// Job Card Insert Schemas
+export const insertJobCardSchema = createInsertSchema(jobCards).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  checkInAt: z.union([z.date(), z.string().datetime()]).optional().transform((val) => {
+    if (!val) return new Date();
+    if (typeof val === 'string') return new Date(val);
+    return val;
+  }),
+});
+
+export const insertJobCardServiceSchema = createInsertSchema(jobCardServices).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertJobCardProductSchema = createInsertSchema(jobCardProducts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertJobCardPaymentSchema = createInsertSchema(jobCardPayments).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export const insertJobCardTipSchema = createInsertSchema(jobCardTips).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertJobCardActivityLogSchema = createInsertSchema(jobCardActivityLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Job Card Types
+export type JobCard = typeof jobCards.$inferSelect;
+export type InsertJobCard = z.infer<typeof insertJobCardSchema>;
+export type JobCardService = typeof jobCardServices.$inferSelect;
+export type InsertJobCardService = z.infer<typeof insertJobCardServiceSchema>;
+export type JobCardProduct = typeof jobCardProducts.$inferSelect;
+export type InsertJobCardProduct = z.infer<typeof insertJobCardProductSchema>;
+export type JobCardPayment = typeof jobCardPayments.$inferSelect;
+export type InsertJobCardPayment = z.infer<typeof insertJobCardPaymentSchema>;
+export type JobCardTip = typeof jobCardTips.$inferSelect;
+export type InsertJobCardTip = z.infer<typeof insertJobCardTipSchema>;
+export type JobCardActivityLog = typeof jobCardActivityLog.$inferSelect;
+export type InsertJobCardActivityLog = z.infer<typeof insertJobCardActivityLogSchema>;
+
+// Job Card API Request Schemas
+export const checkInCustomerSchema = z.object({
+  bookingId: z.string().optional(),
+  customerName: z.string().min(1, "Customer name is required"),
+  customerEmail: z.string().email().optional(),
+  customerPhone: z.string().optional(),
+  assignedStaffId: z.string().optional(),
+  checkInMethod: z.enum(['manual', 'qr_code', 'self_checkin', 'booking_auto', 'walk_in']).default('manual'),
+  isWalkIn: z.boolean().default(false),
+  serviceIds: z.array(z.string()).optional(),
+  staffId: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+export type CheckInCustomerRequest = z.infer<typeof checkInCustomerSchema>;
+
+export const addJobCardServiceSchema = z.object({
+  serviceId: z.string(),
+  staffId: z.string().optional(),
+  discountPaisa: z.number().min(0, 'Discount cannot be negative').optional().default(0),
+  notes: z.string().optional(),
+});
+
+export type AddJobCardServiceRequest = z.infer<typeof addJobCardServiceSchema>;
+
+export const addJobCardProductSchema = z.object({
+  productId: z.string(),
+  staffId: z.string().optional(),
+  quantity: z.number().min(1).default(1),
+  discountPaisa: z.number().min(0, 'Discount cannot be negative').optional().default(0),
+  notes: z.string().optional(),
+});
+
+export type AddJobCardProductRequest = z.infer<typeof addJobCardProductSchema>;
+
+export const processJobCardPaymentSchema = z.object({
+  paymentMethod: z.enum(['cash', 'card', 'upi', 'wallet', 'razorpay', 'bank_transfer', 'other']),
+  amountPaisa: z.number().min(1),
+  transactionId: z.string().optional(),
+  cardLast4: z.string().max(4).optional(),
+  cardNetwork: z.string().optional(),
+  upiId: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+export type ProcessJobCardPaymentRequest = z.infer<typeof processJobCardPaymentSchema>;
+
+export const addJobCardTipSchema = z.object({
+  staffId: z.string(),
+  amountPaisa: z.number().min(1),
+  paymentMethod: z.enum(['cash', 'card', 'upi', 'wallet', 'included_in_payment']).default('cash'),
+  notes: z.string().optional(),
+});
+
+export type AddJobCardTipRequest = z.infer<typeof addJobCardTipSchema>;
+
+export const applyJobCardDiscountSchema = z.object({
+  discountType: z.enum(['percentage', 'fixed']),
+  discountValue: z.number().min(0),
+  discountReason: z.string().optional(),
+}).refine(
+  (data) => !(data.discountType === 'percentage' && data.discountValue > 100),
+  { message: 'Percentage discount cannot exceed 100%', path: ['discountValue'] }
+);
+
+export type ApplyJobCardDiscountRequest = z.infer<typeof applyJobCardDiscountSchema>;
+
+export const updateJobCardStatusSchema = z.object({
+  status: z.enum(['open', 'in_service', 'pending_checkout', 'completed', 'cancelled', 'no_show']),
+  notes: z.string().optional(),
+});
+
+export type UpdateJobCardStatusRequest = z.infer<typeof updateJobCardStatusSchema>;
+
+// Job Card Status Constants
+export const JOB_CARD_STATUSES = {
+  OPEN: 'open',
+  IN_SERVICE: 'in_service',
+  PENDING_CHECKOUT: 'pending_checkout',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled',
+  NO_SHOW: 'no_show',
+} as const;
+
+// Valid job card status transitions
+export const JOB_CARD_STATUS_TRANSITIONS: Record<string, string[]> = {
+  [JOB_CARD_STATUSES.OPEN]: [JOB_CARD_STATUSES.IN_SERVICE, JOB_CARD_STATUSES.CANCELLED, JOB_CARD_STATUSES.NO_SHOW],
+  [JOB_CARD_STATUSES.IN_SERVICE]: [JOB_CARD_STATUSES.PENDING_CHECKOUT, JOB_CARD_STATUSES.CANCELLED],
+  [JOB_CARD_STATUSES.PENDING_CHECKOUT]: [JOB_CARD_STATUSES.IN_SERVICE, JOB_CARD_STATUSES.COMPLETED, JOB_CARD_STATUSES.CANCELLED],
+  [JOB_CARD_STATUSES.COMPLETED]: [], // Terminal state - no transitions allowed
+  [JOB_CARD_STATUSES.CANCELLED]: [], // Terminal state - no transitions allowed
+  [JOB_CARD_STATUSES.NO_SHOW]: [JOB_CARD_STATUSES.OPEN], // Can reopen if customer arrives late
+};
+
+// Validate job card status transition
+export function validateJobCardStatusTransition(currentStatus: string, newStatus: string): { valid: boolean; error?: string } {
+  if (currentStatus === newStatus) {
+    return { valid: true }; // No change is always valid
+  }
+  
+  const allowedTransitions = JOB_CARD_STATUS_TRANSITIONS[currentStatus];
+  if (!allowedTransitions) {
+    return { valid: false, error: `Unknown current status: ${currentStatus}` };
+  }
+  
+  if (!allowedTransitions.includes(newStatus)) {
+    return { 
+      valid: false, 
+      error: `Invalid status transition from '${currentStatus}' to '${newStatus}'. Allowed: ${allowedTransitions.join(', ') || 'none (terminal state)'}` 
+    };
+  }
+  
+  return { valid: true };
+}
+
+// Phone number normalization for consistent lookup
+export function normalizePhoneNumber(phone: string): string {
+  // Remove all non-digit characters
+  let normalized = phone.replace(/\D/g, '');
+  
+  // Handle Indian phone numbers
+  if (normalized.startsWith('91') && normalized.length === 12) {
+    normalized = normalized.slice(2); // Remove country code
+  } else if (normalized.startsWith('0') && normalized.length === 11) {
+    normalized = normalized.slice(1); // Remove leading zero
+  }
+  
+  return normalized;
+}
+
+export const JOB_CARD_PAYMENT_STATUSES = {
+  UNPAID: 'unpaid',
+  PARTIAL: 'partial',
+  PAID: 'paid',
+  REFUNDED: 'refunded',
+} as const;
+
+export const CHECK_IN_METHODS = {
+  MANUAL: 'manual',
+  QR_CODE: 'qr_code',
+  SELF_CHECKIN: 'self_checkin',
+  BOOKING_AUTO: 'booking_auto',
+} as const;
+
+export const PAYMENT_METHODS = {
+  CASH: 'cash',
+  CARD: 'card',
+  UPI: 'upi',
+  WALLET: 'wallet',
+  RAZORPAY: 'razorpay',
+  BANK_TRANSFER: 'bank_transfer',
+  OTHER: 'other',
+} as const;
+
+// ===============================================
+// CUSTOMER ONBOARDING SYSTEM TABLES
+// ===============================================
+
+// Customer Import Batches - tracks bulk import operations
+export const customerImportBatches = pgTable("customer_import_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  importedBy: varchar("imported_by").notNull().references(() => users.id),
+  fileName: varchar("file_name", { length: 255 }),
+  totalRecords: integer("total_records").notNull().default(0),
+  successfulImports: integer("successful_imports").notNull().default(0),
+  failedImports: integer("failed_imports").notNull().default(0),
+  duplicateSkipped: integer("duplicate_skipped").notNull().default(0),
+  status: varchar("status", { length: 20 }).notNull().default('processing'),
+  errorLog: jsonb("error_log"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("customer_import_batches_salon_id_idx").on(table.salonId),
+  index("customer_import_batches_status_idx").on(table.status),
+]);
+
+export const insertCustomerImportBatchSchema = createInsertSchema(customerImportBatches).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export type InsertCustomerImportBatch = z.infer<typeof insertCustomerImportBatchSchema>;
+export type CustomerImportBatch = typeof customerImportBatches.$inferSelect;
+
+// Imported Customers - individual imported customer records
+export const importedCustomers = pgTable("imported_customers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  importBatchId: varchar("import_batch_id").references(() => customerImportBatches.id, { onDelete: "set null" }),
+  customerName: varchar("customer_name", { length: 255 }).notNull(),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  email: varchar("email", { length: 255 }),
+  normalizedPhone: varchar("normalized_phone", { length: 20 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  invitedAt: timestamp("invited_at"),
+  registeredAt: timestamp("registered_at"),
+  linkedUserId: varchar("linked_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  unique("imported_customers_salon_phone_unique").on(table.salonId, table.normalizedPhone),
+  index("imported_customers_normalized_phone_idx").on(table.normalizedPhone),
+  index("imported_customers_salon_id_idx").on(table.salonId),
+  index("imported_customers_status_idx").on(table.status),
+]);
+
+export const insertImportedCustomerSchema = createInsertSchema(importedCustomers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertImportedCustomer = z.infer<typeof insertImportedCustomerSchema>;
+export type ImportedCustomer = typeof importedCustomers.$inferSelect;
+
+// Welcome Offers - welcome offer configurations per salon
+export const welcomeOffers = pgTable("welcome_offers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  discountType: varchar("discount_type", { length: 20 }).notNull(),
+  discountValue: integer("discount_value").notNull(),
+  maxDiscountInPaisa: integer("max_discount_in_paisa"),
+  minimumPurchaseInPaisa: integer("minimum_purchase_in_paisa"),
+  validityDays: integer("validity_days").notNull().default(30),
+  usageLimit: integer("usage_limit").notNull().default(1),
+  isActive: integer("is_active").notNull().default(1),
+  totalRedemptions: integer("total_redemptions").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("welcome_offers_salon_id_idx").on(table.salonId),
+  index("welcome_offers_is_active_idx").on(table.isActive),
+]);
+
+export const insertWelcomeOfferSchema = createInsertSchema(welcomeOffers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  totalRedemptions: true,
+});
+
+export type InsertWelcomeOffer = z.infer<typeof insertWelcomeOfferSchema>;
+export type WelcomeOffer = typeof welcomeOffers.$inferSelect;
+
+// Invitation Campaigns - campaign configurations for sending invitations
+export const invitationCampaigns = pgTable("invitation_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  channel: varchar("channel", { length: 20 }).notNull().default('whatsapp'),
+  messageTemplate: text("message_template").notNull(),
+  welcomeOfferId: varchar("welcome_offer_id").references(() => welcomeOffers.id, { onDelete: "set null" }),
+  status: varchar("status", { length: 20 }).notNull().default('draft'),
+  scheduledFor: timestamp("scheduled_for"),
+  targetCustomerCount: integer("target_customer_count").notNull().default(0),
+  messagesSent: integer("messages_sent").notNull().default(0),
+  messagesDelivered: integer("messages_delivered").notNull().default(0),
+  messagesFailed: integer("messages_failed").notNull().default(0),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("invitation_campaigns_salon_id_idx").on(table.salonId),
+  index("invitation_campaigns_status_idx").on(table.status),
+]);
+
+export const insertInvitationCampaignSchema = createInsertSchema(invitationCampaigns).omit({
+  id: true,
+  createdAt: true,
+  startedAt: true,
+  completedAt: true,
+  messagesSent: true,
+  messagesDelivered: true,
+  messagesFailed: true,
+});
+
+export type InsertInvitationCampaign = z.infer<typeof insertInvitationCampaignSchema>;
+export type InvitationCampaign = typeof invitationCampaigns.$inferSelect;
+
+// Invitation Messages - individual message delivery tracking
+export const invitationMessages = pgTable("invitation_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull().references(() => invitationCampaigns.id, { onDelete: "cascade" }),
+  importedCustomerId: varchar("imported_customer_id").notNull().references(() => importedCustomers.id, { onDelete: "cascade" }),
+  channel: varchar("channel", { length: 20 }).notNull(),
+  twilioMessageSid: varchar("twilio_message_sid", { length: 50 }),
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  errorMessage: text("error_message"),
+  sentAt: timestamp("sent_at"),
+  deliveredAt: timestamp("delivered_at"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("invitation_messages_campaign_id_idx").on(table.campaignId),
+  index("invitation_messages_customer_id_idx").on(table.importedCustomerId),
+  index("invitation_messages_status_idx").on(table.status),
+  index("invitation_messages_twilio_sid_idx").on(table.twilioMessageSid),
+]);
+
+export const insertInvitationMessageSchema = createInsertSchema(invitationMessages).omit({
+  id: true,
+  createdAt: true,
+  sentAt: true,
+  deliveredAt: true,
+  readAt: true,
+});
+
+export type InsertInvitationMessage = z.infer<typeof insertInvitationMessageSchema>;
+export type InvitationMessage = typeof invitationMessages.$inferSelect;
+
+// Welcome Offer Redemptions - tracks individual offer usage
+export const welcomeOfferRedemptions = pgTable("welcome_offer_redemptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  welcomeOfferId: varchar("welcome_offer_id").notNull().references(() => welcomeOffers.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  importedCustomerId: varchar("imported_customer_id").references(() => importedCustomers.id, { onDelete: "set null" }),
+  bookingId: varchar("booking_id"),
+  discountAppliedInPaisa: integer("discount_applied_in_paisa").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  redeemedAt: timestamp("redeemed_at"),
+  status: varchar("status", { length: 20 }).notNull().default('active'),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("welcome_offer_redemptions_offer_id_idx").on(table.welcomeOfferId),
+  index("welcome_offer_redemptions_user_id_idx").on(table.userId),
+  index("welcome_offer_redemptions_status_idx").on(table.status),
+]);
+
+export const insertWelcomeOfferRedemptionSchema = createInsertSchema(welcomeOfferRedemptions).omit({
+  id: true,
+  createdAt: true,
+  redeemedAt: true,
+});
+
+export type InsertWelcomeOfferRedemption = z.infer<typeof insertWelcomeOfferRedemptionSchema>;
+export type WelcomeOfferRedemption = typeof welcomeOfferRedemptions.$inferSelect;
+
+// Customer Onboarding Relations
+export const customerImportBatchesRelations = relations(customerImportBatches, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [customerImportBatches.salonId],
+    references: [salons.id],
+  }),
+  importedBy: one(users, {
+    fields: [customerImportBatches.importedBy],
+    references: [users.id],
+  }),
+  customers: many(importedCustomers),
+}));
+
+export const importedCustomersRelations = relations(importedCustomers, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [importedCustomers.salonId],
+    references: [salons.id],
+  }),
+  importBatch: one(customerImportBatches, {
+    fields: [importedCustomers.importBatchId],
+    references: [customerImportBatches.id],
+  }),
+  linkedUser: one(users, {
+    fields: [importedCustomers.linkedUserId],
+    references: [users.id],
+  }),
+  messages: many(invitationMessages),
+}));
+
+export const welcomeOffersRelations = relations(welcomeOffers, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [welcomeOffers.salonId],
+    references: [salons.id],
+  }),
+  campaigns: many(invitationCampaigns),
+  redemptions: many(welcomeOfferRedemptions),
+}));
+
+export const invitationCampaignsRelations = relations(invitationCampaigns, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [invitationCampaigns.salonId],
+    references: [salons.id],
+  }),
+  welcomeOffer: one(welcomeOffers, {
+    fields: [invitationCampaigns.welcomeOfferId],
+    references: [welcomeOffers.id],
+  }),
+  createdByUser: one(users, {
+    fields: [invitationCampaigns.createdBy],
+    references: [users.id],
+  }),
+  messages: many(invitationMessages),
+}));
+
+export const invitationMessagesRelations = relations(invitationMessages, ({ one }) => ({
+  campaign: one(invitationCampaigns, {
+    fields: [invitationMessages.campaignId],
+    references: [invitationCampaigns.id],
+  }),
+  importedCustomer: one(importedCustomers, {
+    fields: [invitationMessages.importedCustomerId],
+    references: [importedCustomers.id],
+  }),
+}));
+
+export const welcomeOfferRedemptionsRelations = relations(welcomeOfferRedemptions, ({ one }) => ({
+  welcomeOffer: one(welcomeOffers, {
+    fields: [welcomeOfferRedemptions.welcomeOfferId],
+    references: [welcomeOffers.id],
+  }),
+  user: one(users, {
+    fields: [welcomeOfferRedemptions.userId],
+    references: [users.id],
+  }),
+  importedCustomer: one(importedCustomers, {
+    fields: [welcomeOfferRedemptions.importedCustomerId],
+    references: [importedCustomers.id],
+  }),
+}));
+
+// Customer Import Status Constants
+export const IMPORT_BATCH_STATUSES = {
+  PROCESSING: 'processing',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+} as const;
+
+export const IMPORTED_CUSTOMER_STATUSES = {
+  PENDING: 'pending',
+  INVITED: 'invited',
+  REGISTERED: 'registered',
+  EXPIRED: 'expired',
+} as const;
+
+export const CAMPAIGN_STATUSES = {
+  DRAFT: 'draft',
+  SCHEDULED: 'scheduled',
+  SENDING: 'sending',
+  COMPLETED: 'completed',
+  PAUSED: 'paused',
+} as const;
+
+export const MESSAGE_STATUSES = {
+  PENDING: 'pending',
+  SENT: 'sent',
+  DELIVERED: 'delivered',
+  FAILED: 'failed',
+  READ: 'read',
+} as const;
+
+export const CHANNEL_TYPES = {
+  WHATSAPP: 'whatsapp',
+  SMS: 'sms',
+  BOTH: 'both',
+} as const;
+
+export const DISCOUNT_TYPES = {
+  PERCENTAGE: 'percentage',
+  FIXED: 'fixed',
+} as const;
+
+export const REDEMPTION_STATUSES = {
+  ACTIVE: 'active',
+  REDEEMED: 'redeemed',
+  EXPIRED: 'expired',
+} as const;

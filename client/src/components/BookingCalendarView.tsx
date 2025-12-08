@@ -39,8 +39,20 @@ interface Booking {
   serviceName?: string;
   staffName?: string;
   staffId?: string;
-  serviceDuration?: number; // Duration in minutes from service data
+  serviceDuration?: number;
+  jobCardId?: string | null;
+  jobCardStatus?: 'open' | 'in_service' | 'pending_checkout' | 'completed' | 'cancelled' | 'no_show' | null;
 }
+
+type DisplayStatus = 
+  | 'pending' 
+  | 'confirmed' 
+  | 'arrived' 
+  | 'in_service' 
+  | 'pending_checkout' 
+  | 'completed' 
+  | 'cancelled' 
+  | 'no_show';
 
 interface Staff {
   id: string;
@@ -61,25 +73,57 @@ interface TimeSlot {
 
 interface BookingCalendarViewProps {
   salonId: string;
+  defaultViewMode?: 'day' | 'week' | 'month';
 }
 
-const statusColors = {
+const statusColors: Record<DisplayStatus, string> = {
   pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  confirmed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200", 
+  confirmed: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200", 
+  arrived: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  in_service: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  pending_checkout: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+  completed: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
   cancelled: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-  completed: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+  no_show: "bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200"
 };
 
-const statusIcons = {
+const statusIcons: Record<DisplayStatus, typeof CheckCircle> = {
   pending: AlertCircle,
   confirmed: CheckCircle,
+  arrived: Clock,
+  in_service: User,
+  pending_checkout: Clock,
+  completed: CheckCircle,
   cancelled: XCircle,
-  completed: CheckCircle
+  no_show: XCircle
 };
 
-export default function BookingCalendarView({ salonId }: BookingCalendarViewProps) {
+const statusLabels: Record<DisplayStatus, string> = {
+  pending: "Pending",
+  confirmed: "Confirmed",
+  arrived: "Arrived",
+  in_service: "In Service",
+  pending_checkout: "Checkout",
+  completed: "Completed",
+  cancelled: "Cancelled",
+  no_show: "No Show"
+};
+
+const getDisplayStatus = (booking: Booking): DisplayStatus => {
+  if (booking.jobCardStatus) {
+    if (booking.jobCardStatus === 'open') return 'arrived';
+    if (booking.jobCardStatus === 'in_service') return 'in_service';
+    if (booking.jobCardStatus === 'pending_checkout') return 'pending_checkout';
+    if (booking.jobCardStatus === 'completed') return 'completed';
+    if (booking.jobCardStatus === 'cancelled') return 'cancelled';
+    if (booking.jobCardStatus === 'no_show') return 'no_show';
+  }
+  return booking.status as DisplayStatus;
+};
+
+export default function BookingCalendarView({ salonId, defaultViewMode = 'week' }: BookingCalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>(defaultViewMode);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [draggedBooking, setDraggedBooking] = useState<Booking | null>(null);
@@ -1537,8 +1581,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                       const overlaps = detectOverlaps(bookings, booking, staffBookingsMap);
                       const hasConflicts = overlaps.length > 0;
                       
-                      const StatusIcon = statusIcons[booking.status];
-                      const isDraggable = ['pending', 'confirmed'].includes(booking.status);
+                      const displayStatus = getDisplayStatus(booking);
+                      const StatusIcon = statusIcons[displayStatus];
+                      const isDraggable = ['pending', 'confirmed'].includes(booking.status) && !booking.jobCardId;
                       const isBeingDragged = draggedBooking?.id === booking.id;
                       
                       // Skip if booking is outside business hours
@@ -1554,11 +1599,11 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                           draggable={isDraggable}
                           tabIndex={0}
                           role="button"
-                          aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name} for ${bookingDuration} minutes. Status: ${booking.status}. ${isDraggable ? 'Draggable. Press Enter to view details, Space to move appointment, or drag to reschedule.' : 'Press Enter to view details.'}${hasConflicts ? ' Warning: scheduling conflict detected with other appointments.' : ''}`}
+                          aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime} with ${staffMember.name} for ${bookingDuration} minutes. Status: ${statusLabels[displayStatus]}. ${isDraggable ? 'Draggable. Press Enter to view details, Space to move appointment, or drag to reschedule.' : 'Press Enter to view details.'}${hasConflicts ? ' Warning: scheduling conflict detected with other appointments.' : ''}`}
                           aria-describedby={hasConflicts ? `conflict-description-${booking.id}` : undefined}
                           aria-pressed={isBeingDragged}
                           className={`p-2 rounded-lg focus:ring-2 focus:ring-primary focus:ring-offset-1 shadow-sm border-l-4 touch-manipulation ${
-                            statusColors[booking.status]
+                            statusColors[displayStatus]
                           } ${
                             isBeingDragged ? 'booking-drag-preview z-50' : 'z-30 booking-draggable'
                           } ${
@@ -1649,16 +1694,23 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                               </div>
                             )}
                             
-                            {/* Status Badge - Compact Design */}
-                            <div className={`inline-flex items-center justify-center w-2 h-2 rounded-full ${
-                              booking.status === 'pending' ? 'bg-yellow-400 border border-yellow-600' :
-                              booking.status === 'confirmed' ? 'bg-green-400 border border-green-600' :
-                              booking.status === 'completed' ? 'bg-blue-400 border border-blue-600' :
-                              'bg-red-400 border border-red-600'
-                            }`} 
-                            title={`Status: ${booking.status.toUpperCase()}`}
-                            aria-label={`Booking status: ${booking.status}`}>
-                            </div>
+                            {/* Status Badge with Label */}
+                            <Badge 
+                              variant="secondary" 
+                              className={`text-[10px] px-1.5 py-0 h-4 font-medium ${
+                                displayStatus === 'pending' ? 'bg-yellow-200 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                                displayStatus === 'confirmed' ? 'bg-blue-200 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                                displayStatus === 'arrived' ? 'bg-amber-200 text-amber-800 dark:bg-amber-900 dark:text-amber-200' :
+                                displayStatus === 'in_service' ? 'bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                                displayStatus === 'pending_checkout' ? 'bg-orange-200 text-orange-800 dark:bg-orange-900 dark:text-orange-200' :
+                                displayStatus === 'completed' ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200' :
+                                displayStatus === 'no_show' ? 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200' :
+                                'bg-red-200 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              }`}
+                              title={`Status: ${statusLabels[displayStatus]}`}
+                            >
+                              {statusLabels[displayStatus]}
+                            </Badge>
                           </div>
                           
                           {/* Action Buttons */}
@@ -1692,17 +1744,29 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
           <Card>
             <CardContent className="py-3">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex items-center gap-1">
                     <div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300 dark:bg-yellow-900 dark:border-yellow-700"></div>
                     <span>Pending</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-green-100 border border-green-300 dark:bg-green-900 dark:border-green-700"></div>
+                    <div className="w-3 h-3 rounded bg-blue-100 border border-blue-300 dark:bg-blue-900 dark:border-blue-700"></div>
                     <span>Confirmed</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-blue-100 border border-blue-300 dark:bg-blue-900 dark:border-blue-700"></div>
+                    <div className="w-3 h-3 rounded bg-amber-100 border border-amber-300 dark:bg-amber-900 dark:border-amber-700"></div>
+                    <span>Arrived</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-green-100 border border-green-300 dark:bg-green-900 dark:border-green-700"></div>
+                    <span>In Service</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-orange-100 border border-orange-300 dark:bg-orange-900 dark:border-orange-700"></div>
+                    <span>Checkout</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-gray-100 border border-gray-300 dark:bg-gray-800 dark:border-gray-600"></div>
                     <span>Completed</span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -1710,17 +1774,17 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                     <span>Cancelled</span>
                   </div>
                   <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-slate-100 border border-slate-300 dark:bg-slate-900 dark:border-slate-700"></div>
+                    <span>No Show</span>
+                  </div>
+                  <div className="flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 text-red-500" />
                     <span>Conflict</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded bg-orange-100 border border-orange-300 dark:bg-orange-900 dark:border-orange-700"></div>
-                    <span>Unassigned</span>
-                  </div>
                 </div>
-                <div className="hidden lg:block text-right">
-                  💡 Timeline shows exact appointment durations<br/>
-                  <span className="text-xs">Click for details • Drag confirmed/pending to reschedule</span>
+                <div className="hidden xl:block text-right">
+                  Timeline shows exact appointment durations<br/>
+                  <span className="text-xs">Click for details - Drag confirmed/pending to reschedule</span>
                 </div>
               </div>
             </CardContent>
@@ -1779,8 +1843,9 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                 </CardHeader>
                 <CardContent className="p-2 space-y-1">
                   {dayBookings.slice(0, 3).map((booking) => {
-                    const StatusIcon = statusIcons[booking.status];
-                    const isDraggable = ['pending', 'confirmed'].includes(booking.status);
+                    const displayStatus = getDisplayStatus(booking);
+                    const StatusIcon = statusIcons[displayStatus];
+                    const isDraggable = ['pending', 'confirmed'].includes(booking.status) && !booking.jobCardId;
                     const isBeingDragged = draggedBooking?.id === booking.id;
                     
                     return (
@@ -1789,8 +1854,8 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                         draggable={isDraggable}
                         tabIndex={0}
                         role="button"
-                        aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
-                        className={`p-2 rounded-sm cursor-pointer hover:opacity-80 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[booking.status]} ${
+                        aria-label={`${booking.customerName}'s appointment at ${booking.bookingTime}. Status: ${statusLabels[displayStatus]}${isDraggable ? '. Press Enter to view details or Space to move appointment' : '. Press Enter to view details'}`}
+                        className={`p-2 rounded-sm cursor-pointer hover:opacity-80 focus:ring-2 focus:ring-primary focus:ring-offset-1 ${statusColors[displayStatus]} ${
                           isBeingDragged ? 'opacity-50 scale-95 shadow-lg' : ''
                         } ${isDraggable ? 'cursor-move' : ''} transition-all duration-200`}
                         onClick={() => setSelectedBooking(booking)}
@@ -1857,11 +1922,13 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
             </DialogTitle>
           </DialogHeader>
           
-          {selectedBooking && (
+          {selectedBooking && (() => {
+            const displayStatus = getDisplayStatus(selectedBooking);
+            return (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Badge className={statusColors[selectedBooking.status]}>
-                  {selectedBooking.status.charAt(0).toUpperCase() + selectedBooking.status.slice(1)}
+                <Badge className={statusColors[displayStatus]}>
+                  {statusLabels[displayStatus]}
                 </Badge>
                 <span className="text-sm text-muted-foreground">#{selectedBooking.id.slice(0, 8)}</span>
               </div>
@@ -1961,7 +2028,8 @@ export default function BookingCalendarView({ salonId }: BookingCalendarViewProp
                 </div>
               )}
             </div>
-          )}
+          );
+          })()}
         </DialogContent>
       </Dialog>
 
