@@ -57,10 +57,16 @@ import { rebookingService } from "./services/rebooking.service";
 import { rbacService } from "./services/rbacService";
 import shopAdminRoutes from "./routes/shopAdminRoutes";
 import jobCardRoutes, { registerJobCardRoutes } from "./routes/job-cards.routes";
+import { registerCommissionPayoutRoutes } from "./routes/commission-payout.routes";
 import { registerCustomerImportRoutes } from "./routes/customer-import.routes";
 import { registerCampaignRoutes } from "./routes/campaign.routes";
 import { registerWelcomeOfferRoutes } from "./routes/welcome-offer.routes";
 import { registerOnboardingAnalyticsRoutes } from "./routes/onboarding-analytics.routes";
+import phoneVerificationRoutes from "./routes/phone-verification.routes";
+import subscriptionRoutes from "./routes/subscription.routes";
+import metaRoutes from "./routes/meta.routes";
+import settingsRoutes from "./routes/settings.routes";
+import { subscriptionService } from "./services/subscriptionService";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -1949,7 +1955,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        await storage.updateSalon(salonId, validationResult.data);
+        // SECURITY: Strip isActive and approvalStatus from salon owner updates
+        // Only super admin can change these fields
+        const { isActive, approvalStatus, approvedAt, approvedBy, rejectionReason, ...safeData } = validationResult.data;
+        
+        if (isActive !== undefined || approvalStatus !== undefined) {
+          console.log(`Blocked attempt to update protected fields by salon owner for salon ${salonId}`);
+        }
+
+        await storage.updateSalon(salonId, safeData);
 
         // Return updated salon
         const updatedSalon = await storage.getSalon(salonId);
@@ -15592,6 +15606,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // Toggle salon active status (enable/disable)
+  app.post(
+    "/api/admin/salons/:salonId/toggle-status",
+    populateUserFromSession,
+    requireSuperAdmin(),
+    async (req: AuthenticatedRequest, res) => {
+      try {
+        const { salonId } = req.params;
+        const { isActive } = req.body;
+        
+        if (typeof isActive !== 'boolean') {
+          return res.status(400).json({ error: "isActive must be a boolean" });
+        }
+        
+        await storage.toggleSalonStatus(salonId, isActive);
+        res.json({ 
+          success: true, 
+          message: isActive ? "Salon enabled successfully" : "Salon disabled successfully",
+          isActive
+        });
+      } catch (error: any) {
+        console.error("Error toggling salon status:", error);
+        res.status(500).json({ error: error.message });
+      }
+    },
+  );
+
   // User management - get all users with filters
   app.get(
     "/api/admin/users",
@@ -17105,6 +17146,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Client Notes & Preferences (Formula Tracking) routes
   app.use('/api/business', isAuthenticated, clientProfileRoutes);
   console.log('✅ Client Profile routes registered');
+
+  // Phone verification routes (public - no auth required for OTP)
+  app.use('/api/phone-verification', phoneVerificationRoutes);
+  console.log('✅ Phone verification routes registered');
   
   app.use('/api/business', isAuthenticated, depositsRoutes);
   console.log('✅ Deposits routes registered');
@@ -17112,6 +17157,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Job Card System routes (Front Desk visit workflow)
   registerJobCardRoutes(app);
   console.log('✅ Job Card routes registered');
+  
+  // Commission & Payout Management routes
+  registerCommissionPayoutRoutes(app);
+  console.log('✅ Commission & Payout routes registered');
   
   app.use('/api/deposits', publicDepositsRouter);
   console.log('✅ Public Deposits routes registered');
@@ -17144,6 +17193,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Onboarding Analytics routes (import, campaign, conversion, offer metrics)
   registerOnboardingAnalyticsRoutes(app);
   console.log('✅ Onboarding Analytics routes registered');
+
+  // Subscription tier management routes (Free, Growth, Elite)
+  app.use('/api/subscriptions', subscriptionRoutes);
+  console.log('✅ Subscription tier routes registered');
+
+  // Meta (Facebook/Instagram) integration routes
+  app.use('/api/meta', metaRoutes);
+  console.log('✅ Meta (Facebook/Instagram) integration routes registered');
+
+  // Platform Settings routes (super admin only)
+  app.use('/api/settings', settingsRoutes);
+  console.log('✅ Platform Settings routes registered');
+
+  // Initialize subscription tiers on startup
+  try {
+    await subscriptionService.initializeTiers();
+  } catch (error) {
+    console.error('Failed to initialize subscription tiers:', error);
+  }
 
   // User search for shop admin assignment (authenticated, business owners only)
   app.get('/api/users/search', isAuthenticated, async (req: AuthenticatedRequest, res) => {

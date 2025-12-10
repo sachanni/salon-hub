@@ -89,6 +89,27 @@ export const profileUpdateSchema = createInsertSchema(users).pick({
   phone: true
 });
 
+// Phone verification tokens table for OTP verification
+export const phoneVerificationTokens = pgTable("phone_verification_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  codeHash: varchar("code_hash", { length: 255 }).notNull(), // SHA-256 hashed OTP code
+  context: varchar("context", { length: 20 }).notNull().default('booking'), // 'booking', 'walk_in', 'registration'
+  attempts: integer("attempts").notNull().default(0), // Number of verification attempts
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  expiresAt: timestamp("expires_at").notNull(), // OTP expiry time
+  verifiedAt: timestamp("verified_at"), // When the OTP was verified
+  verificationSessionId: varchar("verification_session_id"), // Session ID issued after successful verification
+  sessionExpiresAt: timestamp("session_expires_at"), // Session expiry time
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("phone_verification_tokens_phone_idx").on(table.phone),
+  index("phone_verification_tokens_session_idx").on(table.verificationSessionId),
+]);
+
+export type PhoneVerificationToken = typeof phoneVerificationTokens.$inferSelect;
+export type InsertPhoneVerificationToken = typeof phoneVerificationTokens.$inferInsert;
+
 // Preferences schema for customer preferences
 export const preferencesSchema = z.object({
   emailNotifications: z.boolean().default(true),
@@ -1514,17 +1535,19 @@ export const expenses = pgTable("expenses", {
   check("recurring_frequency_valid", sql`recurring_frequency IS NULL OR recurring_frequency IN ('monthly', 'quarterly', 'yearly')`),
 ]);
 
-// Commission rate configurations for staff
+// Commission rate configurations for staff (services and products)
 export const commissionRates = pgTable("commission_rates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
   staffId: varchar("staff_id").references(() => staff.id, { onDelete: "cascade" }),
   serviceId: varchar("service_id").references(() => services.id, { onDelete: "cascade" }),
-  rateType: varchar("rate_type", { length: 20 }).notNull(), // percentage, fixed_amount, tiered
-  rateValue: decimal("rate_value", { precision: 10, scale: 4 }).notNull(), // % or fixed amount
-  minAmount: integer("min_amount_paisa"), // Minimum earning threshold
-  maxAmount: integer("max_amount_paisa"), // Maximum earning cap
-  isDefault: integer("is_default").notNull().default(0), // Default rate for new staff/services
+  productId: varchar("product_id").references(() => products.id, { onDelete: "cascade" }),
+  appliesTo: varchar("applies_to", { length: 20 }).notNull().default('service'),
+  rateType: varchar("rate_type", { length: 20 }).notNull(),
+  rateValue: decimal("rate_value", { precision: 10, scale: 4 }).notNull(),
+  minAmount: integer("min_amount_paisa"),
+  maxAmount: integer("max_amount_paisa"),
+  isDefault: integer("is_default").notNull().default(0),
   isActive: integer("is_active").notNull().default(1),
   effectiveFrom: timestamp("effective_from").notNull().defaultNow(),
   effectiveTo: timestamp("effective_to"),
@@ -1533,10 +1556,13 @@ export const commissionRates = pgTable("commission_rates", {
   index("commission_rates_salon_idx").on(table.salonId),
   index("commission_rates_staff_idx").on(table.staffId),
   index("commission_rates_service_idx").on(table.serviceId),
+  index("commission_rates_product_idx").on(table.productId),
+  index("commission_rates_applies_to_idx").on(table.appliesTo),
   index("commission_rates_effective_idx").on(table.effectiveFrom, table.effectiveTo),
   check("rate_type_valid", sql`rate_type IN ('percentage', 'fixed_amount', 'tiered')`),
   check("is_default_valid", sql`is_default IN (0,1)`),
   check("is_active_valid", sql`is_active IN (0,1)`),
+  check("applies_to_valid", sql`applies_to IN ('service', 'product')`),
 ]);
 
 // Staff commission calculations and tracking
@@ -1546,14 +1572,20 @@ export const commissions = pgTable("commissions", {
   staffId: varchar("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
   bookingId: varchar("booking_id").references(() => bookings.id, { onDelete: "set null" }),
   serviceId: varchar("service_id").references(() => services.id, { onDelete: "set null" }),
+  productId: varchar("product_id").references(() => products.id, { onDelete: "set null" }),
+  jobCardId: varchar("job_card_id"),
   rateId: varchar("rate_id").references(() => commissionRates.id, { onDelete: "set null" }),
-  baseAmountPaisa: integer("base_amount_paisa").notNull(), // Service amount
-  commissionAmountPaisa: integer("commission_amount_paisa").notNull(), // Calculated commission
-  commissionRate: decimal("commission_rate", { precision: 10, scale: 4 }).notNull(), // Applied rate
+  sourceType: varchar("source_type", { length: 20 }).notNull().default('service'),
+  baseAmountPaisa: integer("base_amount_paisa").notNull(),
+  commissionAmountPaisa: integer("commission_amount_paisa").notNull(),
+  commissionRate: decimal("commission_rate", { precision: 10, scale: 4 }).notNull(),
   serviceDate: timestamp("service_date").notNull(),
   periodYear: integer("period_year").notNull(),
   periodMonth: integer("period_month").notNull(),
-  paymentStatus: varchar("payment_status", { length: 20 }).notNull().default('pending'), // pending, paid, cancelled
+  paymentStatus: varchar("payment_status", { length: 20 }).notNull().default('pending'),
+  isReversed: integer("is_reversed").notNull().default(0),
+  reversalId: varchar("reversal_id"),
+  payoutId: varchar("payout_id"),
   paidAt: timestamp("paid_at"),
   paidBy: varchar("paid_by").references(() => users.id),
   paymentMethod: varchar("payment_method", { length: 50 }),
@@ -1569,9 +1601,100 @@ export const commissions = pgTable("commissions", {
   index("commissions_period_idx").on(table.periodYear, table.periodMonth),
   index("commissions_payment_status_idx").on(table.paymentStatus),
   index("commissions_service_date_idx").on(table.serviceDate),
-  check("payment_status_valid", sql`payment_status IN ('pending', 'paid', 'cancelled')`),
+  index("commissions_job_card_idx").on(table.jobCardId),
+  index("commissions_source_type_idx").on(table.sourceType),
+  check("payment_status_valid", sql`payment_status IN ('pending', 'paid', 'cancelled', 'reversed')`),
   check("period_month_valid", sql`period_month >= 1 AND period_month <= 12`),
   check("period_year_valid", sql`period_year >= 2020`),
+  check("source_type_valid", sql`source_type IN ('service', 'product')`),
+  check("is_reversed_valid", sql`is_reversed IN (0, 1)`),
+]);
+
+// Staff payout records - permanent records of actual money paid to staff
+export const staffPayouts = pgTable("staff_payouts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
+  
+  totalAmountPaisa: integer("total_amount_paisa").notNull(),
+  commissionAmountPaisa: integer("commission_amount_paisa").notNull().default(0),
+  tipsAmountPaisa: integer("tips_amount_paisa").notNull().default(0),
+  adjustmentsAmountPaisa: integer("adjustments_amount_paisa").notNull().default(0),
+  
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  
+  paymentMethod: varchar("payment_method", { length: 30 }).notNull(),
+  paymentReference: varchar("payment_reference", { length: 100 }),
+  paymentDate: timestamp("payment_date").notNull(),
+  
+  status: varchar("status", { length: 20 }).notNull().default('completed'),
+  
+  processedBy: varchar("processed_by").references(() => users.id),
+  notes: text("notes"),
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("staff_payouts_salon_idx").on(table.salonId),
+  index("staff_payouts_staff_idx").on(table.staffId),
+  index("staff_payouts_date_idx").on(table.paymentDate),
+  index("staff_payouts_period_idx").on(table.periodStart, table.periodEnd),
+  index("staff_payouts_status_idx").on(table.status),
+  check("payout_status_valid", sql`status IN ('pending', 'completed', 'failed', 'cancelled')`),
+  check("payout_method_valid", sql`payment_method IN ('cash', 'bank_transfer', 'upi', 'cheque', 'other')`),
+]);
+
+// Staff adjustments - manual bonuses and deductions
+export const staffAdjustments = pgTable("staff_adjustments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
+  
+  adjustmentType: varchar("adjustment_type", { length: 20 }).notNull(),
+  category: varchar("category", { length: 50 }).notNull(),
+  amountPaisa: integer("amount_paisa").notNull(),
+  reason: text("reason").notNull(),
+  
+  effectiveDate: timestamp("effective_date").notNull(),
+  
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  
+  payoutId: varchar("payout_id"),
+  
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("staff_adjustments_salon_idx").on(table.salonId),
+  index("staff_adjustments_staff_idx").on(table.staffId),
+  index("staff_adjustments_status_idx").on(table.status),
+  index("staff_adjustments_date_idx").on(table.effectiveDate),
+  check("adjustment_type_valid", sql`adjustment_type IN ('bonus', 'deduction')`),
+  check("adjustment_status_valid", sql`status IN ('pending', 'applied', 'cancelled')`),
+  check("adjustment_category_valid", sql`category IN ('performance_bonus', 'festival_bonus', 'referral_bonus', 'custom_bonus', 'advance_recovery', 'damage_recovery', 'uniform_deduction', 'custom_deduction', 'commission_reversal')`),
+]);
+
+// Commission reversals - track when commissions are reversed due to refunds/cancellations
+export const commissionReversals = pgTable("commission_reversals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  
+  originalCommissionId: varchar("original_commission_id").notNull().references(() => commissions.id, { onDelete: "cascade" }),
+  
+  reversalAmountPaisa: integer("reversal_amount_paisa").notNull(),
+  reversalReason: varchar("reversal_reason", { length: 50 }).notNull(),
+  
+  alreadyPaid: integer("already_paid").notNull().default(0),
+  recoveryAdjustmentId: varchar("recovery_adjustment_id"),
+  
+  reversedBy: varchar("reversed_by").references(() => users.id),
+  reversedAt: timestamp("reversed_at").defaultNow(),
+  notes: text("notes"),
+}, (table) => [
+  index("commission_reversals_salon_idx").on(table.salonId),
+  index("commission_reversals_commission_idx").on(table.originalCommissionId),
+  check("reversal_reason_valid", sql`reversal_reason IN ('job_card_cancelled', 'service_refunded', 'product_returned', 'manual_reversal')`),
+  check("already_paid_valid", sql`already_paid IN (0, 1)`),
 ]);
 
 // Budget planning and tracking
@@ -1704,6 +1827,10 @@ export const commissionRatesRelations = relations(commissionRates, ({ one, many 
     fields: [commissionRates.serviceId],
     references: [services.id],
   }),
+  product: one(products, {
+    fields: [commissionRates.productId],
+    references: [products.id],
+  }),
   commissions: many(commissions),
 }));
 
@@ -1724,12 +1851,61 @@ export const commissionsRelations = relations(commissions, ({ one }) => ({
     fields: [commissions.serviceId],
     references: [services.id],
   }),
+  product: one(products, {
+    fields: [commissions.productId],
+    references: [products.id],
+  }),
   rate: one(commissionRates, {
     fields: [commissions.rateId],
     references: [commissionRates.id],
   }),
   paidByUser: one(users, {
     fields: [commissions.paidBy],
+    references: [users.id],
+  }),
+}));
+
+export const staffPayoutsRelations = relations(staffPayouts, ({ one }) => ({
+  salon: one(salons, {
+    fields: [staffPayouts.salonId],
+    references: [salons.id],
+  }),
+  staff: one(staff, {
+    fields: [staffPayouts.staffId],
+    references: [staff.id],
+  }),
+  processedByUser: one(users, {
+    fields: [staffPayouts.processedBy],
+    references: [users.id],
+  }),
+}));
+
+export const staffAdjustmentsRelations = relations(staffAdjustments, ({ one }) => ({
+  salon: one(salons, {
+    fields: [staffAdjustments.salonId],
+    references: [salons.id],
+  }),
+  staff: one(staff, {
+    fields: [staffAdjustments.staffId],
+    references: [staff.id],
+  }),
+  createdByUser: one(users, {
+    fields: [staffAdjustments.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const commissionReversalsRelations = relations(commissionReversals, ({ one }) => ({
+  salon: one(salons, {
+    fields: [commissionReversals.salonId],
+    references: [salons.id],
+  }),
+  originalCommission: one(commissions, {
+    fields: [commissionReversals.originalCommissionId],
+    references: [commissions.id],
+  }),
+  reversedByUser: one(users, {
+    fields: [commissionReversals.reversedBy],
     references: [users.id],
   }),
 }));
@@ -1819,6 +1995,48 @@ export const insertCommissionSchema = createInsertSchema(commissions).omit({
   }),
 });
 
+export const insertStaffPayoutSchema = createInsertSchema(staffPayouts).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  periodStart: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+  periodEnd: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+  paymentDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertStaffAdjustmentSchema = createInsertSchema(staffAdjustments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  effectiveDate: z.union([z.date(), z.string().datetime()]).transform((val) => {
+    if (typeof val === 'string') {
+      return new Date(val);
+    }
+    return val;
+  }),
+});
+
+export const insertCommissionReversalSchema = createInsertSchema(commissionReversals).omit({
+  id: true,
+  reversedAt: true,
+});
+
 export const insertBudgetSchema = createInsertSchema(budgets).omit({
   id: true,
   createdAt: true,
@@ -1890,6 +2108,15 @@ export type InsertCommissionRate = z.infer<typeof insertCommissionRateSchema>;
 
 export type Commission = typeof commissions.$inferSelect;
 export type InsertCommission = z.infer<typeof insertCommissionSchema>;
+
+export type StaffPayout = typeof staffPayouts.$inferSelect;
+export type InsertStaffPayout = z.infer<typeof insertStaffPayoutSchema>;
+
+export type StaffAdjustment = typeof staffAdjustments.$inferSelect;
+export type InsertStaffAdjustment = z.infer<typeof insertStaffAdjustmentSchema>;
+
+export type CommissionReversal = typeof commissionReversals.$inferSelect;
+export type InsertCommissionReversal = z.infer<typeof insertCommissionReversalSchema>;
 
 export type Budget = typeof budgets.$inferSelect;
 export type InsertBudget = z.infer<typeof insertBudgetSchema>;
@@ -7365,6 +7592,13 @@ export const jobCardProducts = pgTable("job_card_products", {
   inventoryDeducted: integer("inventory_deducted").notNull().default(0),
   inventoryTransactionId: varchar("inventory_transaction_id"),
   
+  // Final price after discounts
+  finalPricePaisa: integer("final_price_paisa"),
+  
+  // Commission tracking
+  commissionCalculated: integer("commission_calculated").notNull().default(0),
+  commissionId: varchar("commission_id"),
+  
   // Notes
   notes: text("notes"),
   
@@ -7665,6 +7899,7 @@ export const checkInCustomerSchema = z.object({
   serviceIds: z.array(z.string()).optional(),
   staffId: z.string().optional(),
   notes: z.string().optional(),
+  verificationSessionId: z.string().optional(),
 });
 
 export type CheckInCustomerRequest = z.infer<typeof checkInCustomerSchema>;
@@ -8120,3 +8355,229 @@ export const REDEMPTION_STATUSES = {
   REDEEMED: 'redeemed',
   EXPIRED: 'expired',
 } as const;
+
+// ============================================
+// SUBSCRIPTION TIERS & META INTEGRATION TABLES
+// ============================================
+
+// Subscription tier definitions (Free, Growth, Elite)
+export const SUBSCRIPTION_TIERS = {
+  FREE: 'free',
+  GROWTH: 'growth',
+  ELITE: 'elite',
+} as const;
+
+export const SUBSCRIPTION_STATUSES = {
+  ACTIVE: 'active',
+  TRIALING: 'trialing',
+  PAST_DUE: 'past_due',
+  CANCELLED: 'cancelled',
+  EXPIRED: 'expired',
+} as const;
+
+// Tier feature configuration
+export const subscriptionTiers = pgTable("subscription_tiers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 50 }).notNull().unique(),
+  displayName: varchar("display_name", { length: 100 }).notNull(),
+  description: text("description"),
+  monthlyPricePaisa: integer("monthly_price_paisa").notNull().default(0),
+  yearlyPricePaisa: integer("yearly_price_paisa").notNull().default(0),
+  features: jsonb("features").notNull().default('[]'),
+  limits: jsonb("limits").notNull().default('{}'),
+  isActive: integer("is_active").notNull().default(1),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Salon subscriptions (which tier each salon is on)
+export const salonSubscriptions = pgTable("salon_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  tierId: varchar("tier_id").notNull().references(() => subscriptionTiers.id),
+  status: varchar("status", { length: 20 }).notNull().default('active'),
+  billingCycle: varchar("billing_cycle", { length: 20 }).notNull().default('monthly'),
+  currentPeriodStart: timestamp("current_period_start").notNull(),
+  currentPeriodEnd: timestamp("current_period_end").notNull(),
+  trialEndsAt: timestamp("trial_ends_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelReason: text("cancel_reason"),
+  razorpaySubscriptionId: varchar("razorpay_subscription_id", { length: 100 }),
+  razorpayCustomerId: varchar("razorpay_customer_id", { length: 100 }),
+  razorpayPlanId: varchar("razorpay_plan_id", { length: 100 }),
+  lastPaymentAt: timestamp("last_payment_at"),
+  nextPaymentAt: timestamp("next_payment_at"),
+  failedPaymentCount: integer("failed_payment_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("salon_subscriptions_salon_id_idx").on(table.salonId),
+  index("salon_subscriptions_status_idx").on(table.status),
+]);
+
+// Subscription payment history
+export const subscriptionPayments = pgTable("subscription_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  subscriptionId: varchar("subscription_id").notNull().references(() => salonSubscriptions.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  amountPaisa: integer("amount_paisa").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  status: varchar("status", { length: 20 }).notNull(),
+  razorpayPaymentId: varchar("razorpay_payment_id", { length: 100 }),
+  razorpayOrderId: varchar("razorpay_order_id", { length: 100 }),
+  razorpaySignature: varchar("razorpay_signature", { length: 255 }),
+  paymentMethod: varchar("payment_method", { length: 50 }),
+  failureReason: text("failure_reason"),
+  invoiceUrl: text("invoice_url"),
+  periodStart: timestamp("period_start"),
+  periodEnd: timestamp("period_end"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("subscription_payments_subscription_id_idx").on(table.subscriptionId),
+  index("subscription_payments_salon_id_idx").on(table.salonId),
+]);
+
+// Meta (Facebook/Instagram) integration for salons
+export const metaIntegrations = pgTable("meta_integrations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  fbPageId: varchar("fb_page_id", { length: 50 }),
+  fbPageName: varchar("fb_page_name", { length: 255 }),
+  fbPageAccessToken: text("fb_page_access_token"),
+  fbPageTokenExpiresAt: timestamp("fb_page_token_expires_at"),
+  igAccountId: varchar("ig_account_id", { length: 50 }),
+  igUsername: varchar("ig_username", { length: 100 }),
+  igAccessToken: text("ig_access_token"),
+  igTokenExpiresAt: timestamp("ig_token_expires_at"),
+  metaUserId: varchar("meta_user_id", { length: 50 }),
+  metaUserAccessToken: text("meta_user_access_token"),
+  metaUserTokenExpiresAt: timestamp("meta_user_token_expires_at"),
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  lastSyncAt: timestamp("last_sync_at"),
+  syncError: text("sync_error"),
+  bookingLeadTimeHours: integer("booking_lead_time_hours").notNull().default(2),
+  cancellationPolicy: text("cancellation_policy"),
+  autoConfirmBookings: integer("auto_confirm_bookings").notNull().default(1),
+  sendDmReminders: integer("send_dm_reminders").notNull().default(1),
+  webhookVerifyToken: varchar("webhook_verify_token", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("meta_integrations_salon_id_idx").on(table.salonId),
+  unique("meta_integrations_fb_page_unique").on(table.fbPageId),
+  unique("meta_integrations_ig_account_unique").on(table.igAccountId),
+]);
+
+// Track bookings originating from Meta platforms
+export const metaBookingRefs = pgTable("meta_booking_refs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  metaIntegrationId: varchar("meta_integration_id").notNull().references(() => metaIntegrations.id, { onDelete: "cascade" }),
+  source: varchar("source", { length: 20 }).notNull(),
+  metaAppointmentId: varchar("meta_appointment_id", { length: 100 }),
+  metaUserId: varchar("meta_user_id", { length: 50 }),
+  confirmationDmSent: integer("confirmation_dm_sent").notNull().default(0),
+  confirmationDmId: varchar("confirmation_dm_id", { length: 100 }),
+  reminder24hSent: integer("reminder_24h_sent").notNull().default(0),
+  reminder2hSent: integer("reminder_2h_sent").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("meta_booking_refs_booking_id_idx").on(table.bookingId),
+  index("meta_booking_refs_meta_integration_id_idx").on(table.metaIntegrationId),
+]);
+
+// Webhook event log for debugging and replay
+export const metaWebhookEvents = pgTable("meta_webhook_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventType: varchar("event_type", { length: 50 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  signature: varchar("signature", { length: 255 }),
+  processed: integer("processed").notNull().default(0),
+  processedAt: timestamp("processed_at"),
+  error: text("error"),
+  receivedAt: timestamp("received_at").defaultNow(),
+}, (table) => [
+  index("meta_webhook_events_event_type_idx").on(table.eventType),
+  index("meta_webhook_events_processed_idx").on(table.processed),
+]);
+
+// Social booking analytics
+export const socialBookingAnalytics = pgTable("social_booking_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  date: timestamp("date").notNull(),
+  source: varchar("source", { length: 20 }).notNull(),
+  buttonClicks: integer("button_clicks").notNull().default(0),
+  bookingStarted: integer("booking_started").notNull().default(0),
+  bookingsCompleted: integer("bookings_completed").notNull().default(0),
+  bookingsCancelled: integer("bookings_cancelled").notNull().default(0),
+  revenuePaisa: integer("revenue_paisa").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("social_booking_analytics_salon_id_idx").on(table.salonId),
+  index("social_booking_analytics_date_idx").on(table.date),
+]);
+
+// Type exports for new tables
+export type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
+export type InsertSubscriptionTier = typeof subscriptionTiers.$inferInsert;
+export type SalonSubscription = typeof salonSubscriptions.$inferSelect;
+export type InsertSalonSubscription = typeof salonSubscriptions.$inferInsert;
+export type SubscriptionPayment = typeof subscriptionPayments.$inferSelect;
+export type InsertSubscriptionPayment = typeof subscriptionPayments.$inferInsert;
+export type MetaIntegration = typeof metaIntegrations.$inferSelect;
+export type InsertMetaIntegration = typeof metaIntegrations.$inferInsert;
+export type MetaBookingRef = typeof metaBookingRefs.$inferSelect;
+export type InsertMetaBookingRef = typeof metaBookingRefs.$inferInsert;
+export type MetaWebhookEvent = typeof metaWebhookEvents.$inferSelect;
+export type InsertMetaWebhookEvent = typeof metaWebhookEvents.$inferInsert;
+export type SocialBookingAnalytic = typeof socialBookingAnalytics.$inferSelect;
+export type InsertSocialBookingAnalytic = typeof socialBookingAnalytics.$inferInsert;
+
+// Relations for subscription tables
+export const subscriptionTiersRelations = relations(subscriptionTiers, ({ many }) => ({
+  subscriptions: many(salonSubscriptions),
+}));
+
+export const salonSubscriptionsRelations = relations(salonSubscriptions, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [salonSubscriptions.salonId],
+    references: [salons.id],
+  }),
+  tier: one(subscriptionTiers, {
+    fields: [salonSubscriptions.tierId],
+    references: [subscriptionTiers.id],
+  }),
+  payments: many(subscriptionPayments),
+}));
+
+export const subscriptionPaymentsRelations = relations(subscriptionPayments, ({ one }) => ({
+  subscription: one(salonSubscriptions, {
+    fields: [subscriptionPayments.subscriptionId],
+    references: [salonSubscriptions.id],
+  }),
+  salon: one(salons, {
+    fields: [subscriptionPayments.salonId],
+    references: [salons.id],
+  }),
+}));
+
+export const metaIntegrationsRelations = relations(metaIntegrations, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [metaIntegrations.salonId],
+    references: [salons.id],
+  }),
+  bookingRefs: many(metaBookingRefs),
+}));
+
+export const metaBookingRefsRelations = relations(metaBookingRefs, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [metaBookingRefs.bookingId],
+    references: [bookings.id],
+  }),
+  metaIntegration: one(metaIntegrations, {
+    fields: [metaBookingRefs.metaIntegrationId],
+    references: [metaIntegrations.id],
+  }),
+}));

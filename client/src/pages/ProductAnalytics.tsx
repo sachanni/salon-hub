@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useLocation } from 'wouter';
+import { useLocation, Link } from 'wouter';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFeatureAccess } from '@/hooks/useSubscription';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,7 +21,9 @@ import {
   Download,
   Eye,
   Users,
-  Percent
+  Percent,
+  Crown,
+  Lock
 } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 
@@ -69,6 +72,7 @@ export default function ProductAnalytics() {
   const [period, setPeriod] = useState<'today' | '7days' | '30days' | '90days'>('30days');
   
   const salonId = userSalons?.[0]?.id;
+  const featureAccess = useFeatureAccess(salonId || null);
 
   // Auth/salon loading state
   if (authLoading) {
@@ -114,6 +118,55 @@ export default function ProductAnalytics() {
                   Go to Home
                 </Button>
               )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Premium feature gating - show upgrade prompt for non-premium users
+  if (!featureAccess.isLoading && !featureAccess.canAccessAdvancedAnalytics) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="max-w-lg w-full border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
+          <CardHeader className="text-center pb-2">
+            <div className="mx-auto mb-4 p-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 w-fit">
+              <Lock className="h-8 w-8 text-white" />
+            </div>
+            <CardTitle className="text-2xl">Advanced Analytics</CardTitle>
+            <CardDescription className="text-base">
+              Unlock powerful insights to grow your business
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Crown className="h-5 w-5 text-amber-600" />
+                <span className="text-sm">Deep revenue and booking insights</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <TrendingUp className="h-5 w-5 text-amber-600" />
+                <span className="text-sm">Service performance tracking</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Users className="h-5 w-5 text-amber-600" />
+                <span className="text-sm">Customer behavior analytics</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Download className="h-5 w-5 text-amber-600" />
+                <span className="text-sm">Export reports to Excel & PDF</span>
+              </div>
+            </div>
+            <div className="pt-4 space-y-3">
+              <Link href={`/salon/${salonId}/settings?tab=subscription`}>
+                <Button className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white">
+                  Upgrade to Growth Plan - ₹999/month
+                </Button>
+              </Link>
+              <Button variant="outline" className="w-full" onClick={() => navigate('/business/dashboard')}>
+                Back to Dashboard
+              </Button>
             </div>
           </CardContent>
         </Card>

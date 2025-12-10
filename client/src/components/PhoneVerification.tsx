@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult, Auth } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Phone, ShieldCheck, Loader2, CheckCircle2 } from 'lucide-react';
+import { PhoneInput } from '@/components/ui/phone-input';
 import {
   InputOTP,
   InputOTPGroup,
@@ -16,10 +16,14 @@ interface PhoneVerificationProps {
   onVerified: (phoneNumber: string, verificationId?: string) => void;
   initialPhone?: string;
   required?: boolean;
+  customerName?: string;
+  customerEmail?: string;
 }
 
-export function PhoneVerification({ onVerified, initialPhone = '', required = true }: PhoneVerificationProps) {
-  const [phoneNumber, setPhoneNumber] = useState(initialPhone);
+export function PhoneVerification({ onVerified, initialPhone = '', required = true, customerName: providedName = '', customerEmail: providedEmail = '' }: PhoneVerificationProps) {
+  const [nationalNumber, setNationalNumber] = useState('');
+  const [e164Phone, setE164Phone] = useState('');
+  const [isPhoneValid, setIsPhoneValid] = useState(false);
   const [otp, setOtp] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [isOtpSent, setIsOtpSent] = useState(false);
@@ -28,6 +32,16 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [isReturningCustomer, setIsReturningCustomer] = useState(false);
+  const [customerName, setCustomerName] = useState<string | null>(null);
+  const [identitySessionId, setIdentitySessionId] = useState<string | null>(null);
+  
+  const handlePhoneChange = (number: string, valid: boolean, e164: string) => {
+    setNationalNumber(number);
+    setE164Phone(e164);
+    setIsPhoneValid(valid);
+  };
   
   const { toast } = useToast();
   const recaptchaContainerRef = useRef<HTMLDivElement>(null);
@@ -114,35 +128,121 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
     }
   }, [resendCooldown]);
 
-  // Format phone number to E.164 format (international)
-  const formatPhoneNumber = (phone: string): string => {
-    // Remove all non-numeric characters
-    const cleaned = phone.replace(/\D/g, '');
-    
-    // If starts with 91 (India), add +
-    if (cleaned.startsWith('91') && cleaned.length === 12) {
-      return '+' + cleaned;
+  // Check phone status when user enters a valid phone number
+  useEffect(() => {
+    // Only check status when we have a valid E.164 phone (minimum 11 chars: +XX NNNNNNNN)
+    if (isPhoneValid && e164Phone && e164Phone.length >= 11 && !isVerified && !isOtpSent) {
+      const checkStatus = async () => {
+        setIsCheckingStatus(true);
+        try {
+          const response = await fetch(`/api/phone-verification/status?phone=${encodeURIComponent(e164Phone)}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.exists && data.phoneVerified) {
+              // Phone is verified in system - but we need to verify identity before allowing bypass
+              setCustomerName(data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : null);
+              // Don't auto-set isReturningCustomer - identity check will determine this
+              setIsReturningCustomer(false);
+            } else {
+              setIsReturningCustomer(false);
+              setCustomerName(null);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking phone status:', error);
+        } finally {
+          setIsCheckingStatus(false);
+        }
+      };
+      checkStatus();
+    } else if (!isPhoneValid) {
+      setIsReturningCustomer(false);
+      setCustomerName(null);
     }
-    
-    // If doesn't start with country code, assume India (+91)
-    if (cleaned.length === 10) {
-      return '+91' + cleaned;
+  }, [e164Phone, isPhoneValid, isVerified, isOtpSent]);
+
+  // Track last checked values to avoid redundant checks
+  const lastCheckedRef = useRef<{ phone: string; name: string; email: string } | null>(null);
+
+  // Perform identity check when name/email is provided with valid phone
+  useEffect(() => {
+    if (isPhoneValid && e164Phone && e164Phone.length >= 11 && !isVerified && !isOtpSent && (providedName || providedEmail)) {
+      // Skip if we already have a valid session for the same inputs
+      const currentInputs = { phone: e164Phone, name: providedName, email: providedEmail };
+      if (identitySessionId && lastCheckedRef.current &&
+          lastCheckedRef.current.phone === currentInputs.phone &&
+          lastCheckedRef.current.name === currentInputs.name &&
+          lastCheckedRef.current.email === currentInputs.email) {
+        return; // Already have a valid session for these inputs
+      }
+
+      const performIdentityCheck = async () => {
+        setIsCheckingStatus(true);
+        try {
+          const response = await fetch('/api/phone-verification/identity-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone: e164Phone,
+              providedName: providedName,
+              providedEmail: providedEmail,
+            }),
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            lastCheckedRef.current = currentInputs;
+            
+            if (data.identityMatched && !data.requiresOtp && data.verificationSessionId) {
+              // Identity verified - allow bypass with session ID
+              setIsReturningCustomer(true);
+              setCustomerName(data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : providedName);
+              setIdentitySessionId(data.verificationSessionId);
+            } else {
+              // Identity mismatch or no verified user - require OTP
+              setIsReturningCustomer(false);
+              setIdentitySessionId(null);
+            }
+          }
+        } catch (error) {
+          console.error('Error performing identity check:', error);
+          // Don't clear existing session on network errors
+        } finally {
+          setIsCheckingStatus(false);
+        }
+      };
+      
+      // Debounce to avoid too many calls while user is typing
+      const timer = setTimeout(performIdentityCheck, 500);
+      return () => clearTimeout(timer);
     }
-    
-    // If already has +, return as is
-    if (phone.startsWith('+')) {
-      return phone;
+  }, [e164Phone, isPhoneValid, providedName, providedEmail, isVerified, isOtpSent, identitySessionId]);
+
+  // Handle returning customer verification (skip OTP)
+  const handleReturningCustomer = () => {
+    if (!identitySessionId) {
+      // No valid session - require OTP
+      toast({
+        title: "Verification required",
+        description: "Please verify with OTP to continue.",
+        variant: "destructive",
+      });
+      return;
     }
-    
-    // Default: add + if not present
-    return '+' + cleaned;
+    setIsVerified(true);
+    toast({
+      title: "Welcome back!",
+      description: customerName ? `Phone verified for ${customerName}` : "Your phone number is already verified.",
+      duration: 3000,
+    });
+    onVerified(e164Phone, identitySessionId);
   };
 
   const sendOTP = async () => {
-    if (!phoneNumber || phoneNumber.length < 10) {
+    if (!isPhoneValid) {
       toast({
         title: "Invalid phone number",
-        description: "Please enter a valid 10-digit phone number",
+        description: "Please enter a valid phone number",
         variant: "destructive",
       });
       return;
@@ -160,17 +260,16 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
     setIsSending(true);
 
     try {
-      const formattedPhone = formatPhoneNumber(phoneNumber);
-      console.log('Sending OTP to:', formattedPhone);
+      console.log('Sending OTP to:', e164Phone);
 
-      const confirmation = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifier);
+      const confirmation = await signInWithPhoneNumber(auth, e164Phone, recaptchaVerifier);
       setConfirmationResult(confirmation);
       setIsOtpSent(true);
       setResendCooldown(30); // 30 second cooldown
 
       toast({
         title: "OTP sent successfully!",
-        description: `A 6-digit code has been sent to ${formattedPhone}`,
+        description: `A 6-digit code has been sent to ${e164Phone}`,
         duration: 5000,
       });
     } catch (error: any) {
@@ -274,7 +373,7 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
       const idToken = await result.user.getIdToken();
       
       // Call parent callback with verified phone and token
-      onVerified(formatPhoneNumber(phoneNumber), idToken);
+      onVerified(e164Phone, idToken);
 
     } catch (error: any) {
       console.error('Error verifying OTP:', error);
@@ -315,51 +414,73 @@ export function PhoneVerification({ onVerified, initialPhone = '', required = tr
           <Phone className="w-4 h-4" />
           Phone Number {required && <span className="text-red-500">*</span>}
         </Label>
-        <div className="flex gap-2">
-          <Input
-            id="phone-verify"
-            type="tel"
-            placeholder="+91 9XXXXXXXXX"
-            value={phoneNumber}
-            onChange={(e) => setPhoneNumber(e.target.value)}
-            disabled={isOtpSent || isVerified}
-            className="flex-1"
-            maxLength={13}
-          />
-          {!isOtpSent && !isVerified && (
-            <Button
-              type="button"
-              onClick={sendOTP}
-              disabled={isSending || !phoneNumber || phoneNumber.length < 10}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {isSending ? (
-                <>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <PhoneInput
+              id="phone-verify"
+              onChange={handlePhoneChange}
+              disabled={isOtpSent || isVerified}
+              defaultCountry="IN"
+              value={initialPhone}
+            />
+            {!isOtpSent && !isVerified && (
+              isCheckingStatus ? (
+                <Button
+                  type="button"
+                  disabled
+                  className="bg-purple-600 hover:bg-purple-700 shrink-0"
+                >
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Sending...
-                </>
+                  Checking...
+                </Button>
+              ) : isReturningCustomer ? (
+                <Button
+                  type="button"
+                  onClick={handleReturningCustomer}
+                  disabled={!isPhoneValid}
+                  className="bg-green-600 hover:bg-green-700 shrink-0"
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Continue
+                </Button>
               ) : (
-                <>
-                  <ShieldCheck className="w-4 h-4 mr-2" />
-                  Send OTP
-                </>
-              )}
-            </Button>
-          )}
-          {isVerified && (
-            <Button
-              type="button"
-              disabled
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-              Verified
-            </Button>
-          )}
+                <Button
+                  type="button"
+                  onClick={sendOTP}
+                  disabled={isSending || !isPhoneValid}
+                  className="bg-purple-600 hover:bg-purple-700 shrink-0"
+                >
+                  {isSending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4 mr-2" />
+                      Send OTP
+                    </>
+                  )}
+                </Button>
+              )
+            )}
+            {isVerified && (
+              <Button
+                type="button"
+                disabled
+                className="bg-green-600 hover:bg-green-700 shrink-0"
+              >
+                <CheckCircle2 className="w-4 h-4 mr-2" />
+                Verified
+              </Button>
+            )}
+          </div>
         </div>
-        {!isOtpSent && (
+        {!isOtpSent && !isVerified && (
           <p className="text-xs text-gray-500">
-            Enter your phone number to receive a verification code
+            {isReturningCustomer 
+              ? (customerName ? `Welcome back, ${customerName}! Click Continue to proceed.` : 'Welcome back! Your phone is already verified.')
+              : 'Select your country and enter your phone number'}
           </p>
         )}
       </div>

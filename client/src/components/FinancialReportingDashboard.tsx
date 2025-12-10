@@ -90,6 +90,50 @@ interface FinancialKPIs {
   };
 }
 
+const DEFAULT_KPIS: FinancialKPIs = {
+  revenue: {
+    totalRevenue: 0,
+    averageBookingValue: 0,
+    revenuePerCustomer: 0,
+    revenueGrowthRate: 0
+  },
+  expenses: {
+    totalExpenses: 0,
+    expenseRatio: 0,
+    costPerService: 0,
+    expenseGrowthRate: 0
+  },
+  profitability: {
+    grossProfitMargin: 0,
+    netProfitMargin: 0,
+    breakEvenPoint: 0,
+    returnOnInvestment: 0
+  },
+  efficiency: {
+    revenuePerStaff: 0,
+    serviceUtilizationRate: 0,
+    averageServiceTime: 0,
+    staffProductivity: 0
+  }
+};
+
+const safeNumber = (value: unknown, fallback: number = 0): number => {
+  if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+};
+
+const safeToFixed = (value: unknown, digits: number = 0, fallback: number = 0): string => {
+  return safeNumber(value, fallback).toFixed(digits);
+};
+
 interface ProfitLossStatement {
   period: { startDate: string; endDate: string };
   revenue: {
@@ -161,6 +205,76 @@ interface Budget {
   alertThreshold: number;
 }
 
+interface ExpenseAnalytics {
+  totalExpenses: number;
+  pendingApprovals: number;
+  taxDeductibleAmount: number;
+  expensesByCategory: Array<{
+    categoryId: string;
+    categoryName: string;
+    amount: number;
+    color: string;
+  }>;
+  monthlyTrend: Array<{
+    month: string;
+    amount: number;
+  }>;
+}
+
+interface CommissionAnalytics {
+  totalCommissions: number;
+  paidCommissions: number;
+  pendingCommissions: number;
+  averageCommissionRate: number;
+  commissionsByStaff: Array<{
+    staffId: string;
+    staffName: string;
+    amount: number;
+  }>;
+  monthlyTrend: Array<{
+    month: string;
+    amount: number;
+  }>;
+}
+
+interface BudgetAnalytics {
+  totalBudget: number;
+  totalSpent: number;
+  budgetUtilization: number;
+  budgetsByCategory: Array<{
+    categoryId: string;
+    categoryName: string;
+    budget: number;
+    spent: number;
+    utilization: number;
+  }>;
+  alertingBudgets: Array<{
+    budgetId: string;
+    name: string;
+    utilization: number;
+  }>;
+}
+
+interface FinancialForecast {
+  forecast: Array<{
+    month: string;
+    projectedRevenue: number;
+    projectedExpenses: number;
+    projectedProfit: number;
+    confidence: number;
+  }>;
+  assumptions: {
+    revenueGrowthRate: number;
+    seasonalFactors: Array<{ month: number; factor: number }>;
+    costInflationRate: number;
+  };
+  scenarios: {
+    optimistic: { totalRevenue: number; totalProfit: number };
+    realistic: { totalRevenue: number; totalProfit: number };
+    pessimistic: { totalRevenue: number; totalProfit: number };
+  };
+}
+
 // Form validation schemas
 const expenseFormSchema = z.object({
   categoryId: z.string().min(1, "Category is required"),
@@ -212,70 +326,97 @@ export default function FinancialReportingDashboard({
   };
 
   // Fetch financial KPIs
-  const { data: kpis, isLoading: kpisLoading } = useQuery({
+  const { data: kpisData, isLoading: kpisLoading } = useQuery<FinancialKPIs>({
     queryKey: ['/api/salons', salonId, 'financial-analytics/kpis', selectedPeriod],
     enabled: !!salonId,
     staleTime: 30000
   });
 
+  const kpis: FinancialKPIs = {
+    revenue: {
+      totalRevenue: safeNumber(kpisData?.revenue?.totalRevenue),
+      averageBookingValue: safeNumber(kpisData?.revenue?.averageBookingValue),
+      revenuePerCustomer: safeNumber(kpisData?.revenue?.revenuePerCustomer),
+      revenueGrowthRate: safeNumber(kpisData?.revenue?.revenueGrowthRate)
+    },
+    expenses: {
+      totalExpenses: safeNumber(kpisData?.expenses?.totalExpenses),
+      expenseRatio: safeNumber(kpisData?.expenses?.expenseRatio),
+      costPerService: safeNumber(kpisData?.expenses?.costPerService),
+      expenseGrowthRate: safeNumber(kpisData?.expenses?.expenseGrowthRate)
+    },
+    profitability: {
+      grossProfitMargin: safeNumber(kpisData?.profitability?.grossProfitMargin),
+      netProfitMargin: safeNumber(kpisData?.profitability?.netProfitMargin),
+      breakEvenPoint: safeNumber(kpisData?.profitability?.breakEvenPoint),
+      returnOnInvestment: safeNumber(kpisData?.profitability?.returnOnInvestment)
+    },
+    efficiency: {
+      revenuePerStaff: safeNumber(kpisData?.efficiency?.revenuePerStaff),
+      serviceUtilizationRate: safeNumber(kpisData?.efficiency?.serviceUtilizationRate),
+      averageServiceTime: safeNumber(kpisData?.efficiency?.averageServiceTime),
+      staffProductivity: safeNumber(kpisData?.efficiency?.staffProductivity)
+    }
+  };
+
   // Fetch P&L statement
-  const { data: plStatement, isLoading: plLoading } = useQuery({
+  const { data: plStatement, isLoading: plLoading } = useQuery<ProfitLossStatement>({
     queryKey: ['/api/salons', salonId, 'financial-reports/profit-loss', dateRange.startDate, dateRange.endDate],
     enabled: !!salonId && !!dateRange.startDate && !!dateRange.endDate,
     staleTime: 30000
   });
 
   // Fetch expense categories
-  const { data: expenseCategories } = useQuery({
+  const { data: expenseCategories } = useQuery<ExpenseCategory[]>({
     queryKey: ['/api/salons', salonId, 'expense-categories'],
     enabled: !!salonId,
     staleTime: 60000
   });
 
   // Fetch expenses
-  const { data: expenses } = useQuery({
+  const { data: expenses } = useQuery<Expense[]>({
     queryKey: ['/api/salons', salonId, 'expenses'],
     enabled: !!salonId,
     staleTime: 30000
   });
 
   // Fetch commissions
-  const { data: commissions } = useQuery({
+  const { data: commissions } = useQuery<Commission[]>({
     queryKey: ['/api/salons', salonId, 'commissions'],
     enabled: !!salonId,
     staleTime: 30000
   });
 
   // Fetch budgets
-  const { data: budgets } = useQuery({
+  const { data: budgets } = useQuery<Budget[]>({
     queryKey: ['/api/salons', salonId, 'budgets'],
     enabled: !!salonId,
     staleTime: 30000
   });
 
   // Fetch expense analytics
-  const { data: expenseAnalytics } = useQuery({
+  const { data: expenseAnalytics } = useQuery<ExpenseAnalytics>({
     queryKey: ['/api/salons', salonId, 'expenses/analytics', selectedPeriod],
     enabled: !!salonId,
     staleTime: 30000
   });
 
   // Fetch commission analytics
-  const { data: commissionAnalytics } = useQuery({
+  const { data: commissionAnalytics } = useQuery<CommissionAnalytics>({
     queryKey: ['/api/salons', salonId, 'commissions/analytics', selectedPeriod],
     enabled: !!salonId,
     staleTime: 30000
   });
 
   // Fetch budget analytics
-  const { data: budgetAnalytics } = useQuery({
+  const { data: budgetAnalytics } = useQuery<BudgetAnalytics>({
     queryKey: ['/api/salons', salonId, 'budgets/analytics', selectedPeriod],
     enabled: !!salonId,
     staleTime: 30000
   });
 
   // Fetch financial forecast
-  const { data: forecast } = useQuery({
+  const { data: forecast } = useQuery<FinancialForecast>({
     queryKey: ['/api/salons', salonId, 'financial-analytics/forecast', 12],
     enabled: !!salonId,
     staleTime: 300000 // 5 minutes cache for forecast
@@ -284,9 +425,7 @@ export default function FinancialReportingDashboard({
   // Create default expense categories mutation
   const createDefaultCategoriesMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest(`/api/salons/${salonId}/expense-categories/default`, {
-        method: 'POST'
-      });
+      return await apiRequest('POST', `/api/salons/${salonId}/expense-categories/default`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'expense-categories'] });
@@ -304,10 +443,7 @@ export default function FinancialReportingDashboard({
   // Create expense mutation
   const createExpenseMutation = useMutation({
     mutationFn: async (data: any) => {
-      return await apiRequest(`/api/salons/${salonId}/expenses`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-      });
+      return await apiRequest('POST', `/api/salons/${salonId}/expenses`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'expenses'] });
@@ -326,10 +462,7 @@ export default function FinancialReportingDashboard({
   // Create budget mutation
   const createBudgetMutation = useMutation({
     mutationFn: async (data: any) => {
-      return await apiRequest(`/api/salons/${salonId}/budgets`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-      });
+      return await apiRequest('POST', `/api/salons/${salonId}/budgets`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'budgets'] });
@@ -1428,13 +1561,13 @@ export default function FinancialReportingDashboard({
           )}
 
           {/* Budget Alerts */}
-          {budgetAnalytics?.alertingBudgets?.length > 0 && (
+          {(budgetAnalytics?.alertingBudgets?.length ?? 0) > 0 && (
             <Alert>
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
                 <div className="space-y-1">
                   <p className="font-medium">Budget Alerts</p>
-                  {budgetAnalytics.alertingBudgets.map((alert: any) => (
+                  {budgetAnalytics?.alertingBudgets?.map((alert: any) => (
                     <p key={alert.budgetId} className="text-sm">
                       {alert.name} is at {alert.utilization.toFixed(0)}% utilization
                     </p>

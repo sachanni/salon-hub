@@ -68,11 +68,16 @@ import {
   Shield,
   Send,
   Upload,
-  Wallet
+  Wallet,
+  Instagram,
+  AlertTriangle,
+  Ban,
+  Clock
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSalonPermissions } from "@/hooks/useSalonPermissions";
 import { Link, useLocation } from "wouter";
+import { useFeatureAccess } from "@/hooks/useSubscription";
 import type { Salon } from "@/../../shared/schema";
 import ShopAdminManagement from "@/components/business-dashboard/ShopAdminManagement";
 import AdvancedAnalyticsDashboard from "@/components/AdvancedAnalyticsDashboard";
@@ -233,6 +238,9 @@ export default function BusinessDashboard() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [salonToDelete, setSalonToDelete] = useState<Salon | null>(null);
   const isMobile = useIsMobile();
+  
+  // Subscription feature access
+  const featureAccess = useFeatureAccess(salonId);
 
   // Fetch user's permissions for the selected salon
   const {
@@ -452,8 +460,9 @@ export default function BusinessDashboard() {
                                      salonData?.phone && salonData?.email;
 
   // Helper functions for formatting and trends
-  const formatCurrency = (paisa: number) => {
-    const rupees = paisa / 100;
+  const formatCurrency = (paisa: number | undefined | null) => {
+    const safePaisa = typeof paisa === 'number' && !isNaN(paisa) ? paisa : 0;
+    const rupees = safePaisa / 100;
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
@@ -854,31 +863,118 @@ export default function BusinessDashboard() {
                 ))}
               </Accordion>
 
-              {/* Premium Features Teaser - Compact */}
+              {/* Premium Features Section - Dynamic based on subscription */}
               <div className="mt-3 group-data-[collapsible=icon]:hidden">
-                <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-pink-50 rounded-lg p-2 border border-amber-100">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <Crown className="h-3.5 w-3.5 text-amber-600" />
-                    <span className="text-[10px] font-semibold text-amber-900">Premium Features</span>
+                {featureAccess.isPremium ? (
+                  <div className="bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 rounded-xl p-3 border border-emerald-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500">
+                          <Crown className="h-3.5 w-3.5 text-white" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold text-emerald-900">
+                            {featureAccess.isElite ? 'Elite' : 'Growth'} Plan
+                          </span>
+                          {featureAccess.isTrial && (
+                            <span className="text-[9px] text-amber-600 font-medium">14-day trial active</span>
+                          )}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-auto border-emerald-300 text-emerald-700 bg-emerald-50">
+                        Active
+                      </Badge>
+                    </div>
+                    <div className="space-y-1.5 mb-2.5">
+                      <Link href="/business/analytics">
+                        <div className="flex items-center gap-2 text-xs text-emerald-800 hover:bg-emerald-100/70 rounded-md p-1.5 cursor-pointer transition-colors">
+                          <div className="p-0.5 rounded bg-emerald-100">
+                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                          </div>
+                          <span className="font-medium">Advanced Analytics</span>
+                          <ChevronRight className="h-3 w-3 ml-auto text-emerald-400" />
+                        </div>
+                      </Link>
+                      <div 
+                        onClick={() => setActiveTab('loyalty-rewards')}
+                        className="flex items-center gap-2 text-xs text-emerald-800 hover:bg-emerald-100/70 rounded-md p-1.5 cursor-pointer transition-colors"
+                      >
+                        <div className="p-0.5 rounded bg-emerald-100">
+                          <CheckCircle className="h-3 w-3 text-emerald-600" />
+                        </div>
+                        <span className="font-medium">Loyalty Programs</span>
+                        <ChevronRight className="h-3 w-3 ml-auto text-emerald-400" />
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-emerald-800 p-1.5">
+                        <div className="p-0.5 rounded bg-emerald-100">
+                          <CheckCircle className="h-3 w-3 text-emerald-600" />
+                        </div>
+                        <span className="font-medium">AI Recommendations</span>
+                      </div>
+                      <Link href={`/salon/${salonId}/settings?tab=integrations`}>
+                        <div className="flex items-center gap-2 text-xs text-emerald-800 hover:bg-emerald-100/70 rounded-md p-1.5 cursor-pointer transition-colors">
+                          <div className="p-0.5 rounded bg-emerald-100">
+                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                          </div>
+                          <span className="font-medium">Social Booking</span>
+                          <ChevronRight className="h-3 w-3 ml-auto text-emerald-400" />
+                        </div>
+                      </Link>
+                      {featureAccess.isElite && (
+                        <div className="flex items-center gap-2 text-xs text-emerald-800 p-1.5">
+                          <div className="p-0.5 rounded bg-emerald-100">
+                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                          </div>
+                          <span className="font-medium">Reserve with Google</span>
+                        </div>
+                      )}
+                    </div>
+                    <Link href={`/salon/${salonId}/settings?tab=subscription`}>
+                      <Button size="sm" variant="outline" className="w-full border-emerald-300 text-emerald-700 hover:bg-emerald-100 h-7 text-xs font-medium">
+                        Manage Subscription
+                      </Button>
+                    </Link>
                   </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-800">
-                      <Star className="h-2.5 w-2.5 text-amber-500" />
-                      <span>Advanced Analytics</span>
+                ) : (
+                  <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50 rounded-xl p-3 border border-amber-200 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <div className="p-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500">
+                        <Crown className="h-3.5 w-3.5 text-white" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-amber-900">Unlock Premium</span>
+                        <span className="text-[9px] text-amber-600">Starting at ₹999/month</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-800">
-                      <Gift className="h-2.5 w-2.5 text-amber-500" />
-                      <span>Loyalty Programs</span>
+                    <div className="space-y-1.5 mb-3">
+                      <div className="flex items-center gap-2 text-xs text-amber-800">
+                        <Star className="h-3 w-3 text-amber-500" />
+                        <span>Advanced Analytics & Reports</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-amber-800">
+                        <Gift className="h-3 w-3 text-amber-500" />
+                        <span>Loyalty & Rewards Programs</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-amber-800">
+                        <Sparkles className="h-3 w-3 text-amber-500" />
+                        <span>AI-Powered Recommendations</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-amber-800">
+                        <Instagram className="h-3 w-3 text-amber-500" />
+                        <span>Instagram & Facebook Booking</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-800">
-                      <Sparkles className="h-2.5 w-2.5 text-amber-500" />
-                      <span>AI Recommendations</span>
-                    </div>
-                    <Button size="sm" variant="default" className="w-full mt-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-sm h-6 text-[10px]">
-                      Upgrade Now
-                    </Button>
+                    <Link href={`/salon/${salonId}/settings?tab=subscription`}>
+                      <Button size="sm" className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-md h-8 text-xs font-semibold">
+                        <Sparkles className="h-3 w-3 mr-1.5" />
+                        Upgrade Now
+                      </Button>
+                    </Link>
+                    <p className="text-[9px] text-center text-amber-600 mt-2">
+                      14-day free trial available
+                    </p>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </ScrollArea>
@@ -1674,7 +1770,7 @@ export default function BusinessDashboard() {
                           <p className="text-sm text-muted-foreground">{service.bookingCount} bookings</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-medium">{formatCurrency(service.totalRevenuePaisa)}</p>
+                          <p className="font-medium">{formatCurrency(service.realizedRevenuePaisa)}</p>
                         </div>
                       </div>
                     ))}
@@ -1720,7 +1816,7 @@ export default function BusinessDashboard() {
                           <p className="text-sm text-muted-foreground">{staff.bookingCount} bookings</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-medium">{formatCurrency(staff.totalRevenuePaisa)}</p>
+                          <p className="font-medium">{formatCurrency(staff.realizedRevenuePaisa)}</p>
                           <p className="text-sm text-muted-foreground">{staff.utilization}% utilization</p>
                         </div>
                       </div>
@@ -2035,6 +2131,41 @@ export default function BusinessDashboard() {
               </Link>
             </div>
           </header>
+
+          {/* Disabled Salon Warning Banner */}
+          {salonData?.isActive === 0 && (
+            <div className="bg-red-600 text-white px-4 py-3 flex items-center justify-center gap-3">
+              <AlertTriangle className="h-5 w-5" />
+              <div className="text-center">
+                <span className="font-semibold">Your salon has been disabled by the platform administrator.</span>
+                <span className="ml-2 text-red-100">Your salon is hidden from customers and cannot receive new bookings. Please contact support for more information.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Pending Approval Warning Banner */}
+          {salonData?.approvalStatus === 'pending' && (
+            <div className="bg-amber-500 text-white px-4 py-3 flex items-center justify-center gap-3">
+              <Clock className="h-5 w-5" />
+              <div className="text-center">
+                <span className="font-semibold">Your salon is pending approval.</span>
+                <span className="ml-2 text-amber-100">Your salon is not yet visible to customers. We'll notify you once it's approved.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Rejected Salon Warning Banner */}
+          {salonData?.approvalStatus === 'rejected' && (
+            <div className="bg-red-700 text-white px-4 py-3 flex items-center justify-center gap-3">
+              <Ban className="h-5 w-5" />
+              <div className="text-center">
+                <span className="font-semibold">Your salon registration was rejected.</span>
+                <span className="ml-2 text-red-100">
+                  {salonData?.rejectionReason || 'Please contact support for more information.'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Content */}
           <main className="flex-1 overflow-auto">

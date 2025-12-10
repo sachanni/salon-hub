@@ -108,6 +108,9 @@ function Router() {
         <Route path="/business/settings/:salonId">
           {(params) => <BusinessSettings key={params.salonId} salonId={params.salonId!} />}
         </Route>
+        <Route path="/salon/:salonId/settings">
+          {(params) => <BusinessSettings key={params.salonId} salonId={params.salonId!} />}
+        </Route>
         <Route path="/customer/dashboard" component={CustomerDashboard} />
         <Route path="/wallet" component={CustomerWallet} />
         <Route path="/customer/wallet" component={CustomerWallet} />

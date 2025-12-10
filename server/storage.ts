@@ -122,7 +122,7 @@ import {
   // Smart Rebooking tables
   serviceRebookingCycles, customerRebookingStats, rebookingReminders, rebookingSettings,
   // Job Card tables
-  jobCards
+  jobCards, jobCardServices
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, isNull, gte, lte, desc, asc, sql, inArray, ne, like, isNotNull, lt, gt } from "drizzle-orm";
@@ -2563,12 +2563,13 @@ export class DatabaseStorage implements IStorage {
           eq(staff.isActive, 1)
         ));
 
-      // Get popular services
-      const popularServices = await db
+      // Get popular services (from bookings)
+      const popularServicesFromBookings = await db
         .select({
+          serviceId: services.id,
           serviceName: services.name,
           bookingCount: sql<number>`count(*)`,
-          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
+          bookingRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
         })
         .from(bookings)
         .innerJoin(services, eq(bookings.serviceId, services.id))
@@ -2577,12 +2578,88 @@ export class DatabaseStorage implements IStorage {
           gte(bookings.bookingDate, startDateStr),
           lte(bookings.bookingDate, endDateStr)
         ))
-        .groupBy(services.id, services.name)
-        .orderBy(desc(sql`count(*)`))
-        .limit(5);
+        .groupBy(services.id, services.name);
 
-      // Get booking trends by day
-      const bookingTrends = await db
+      // Get popular services (from job cards - completed & paid only)
+      const popularServicesFromJobCards = await db
+        .select({
+          serviceId: jobCardServices.serviceId,
+          jobCardCount: sql<number>`count(distinct ${jobCardServices.jobCardId})`,
+          jobCardRevenue: sql<number>`sum(case when ${jobCardServices.status} = 'completed' then ${jobCardServices.finalPricePaisa} else 0 end)`
+        })
+        .from(jobCardServices)
+        .innerJoin(jobCards, and(
+          eq(jobCardServices.jobCardId, jobCards.id),
+          eq(jobCards.status, 'completed'),
+          eq(jobCards.paymentStatus, 'paid'),
+          gte(jobCards.checkInAt, startDate),
+          lte(jobCards.checkInAt, endDate)
+        ))
+        .where(eq(jobCardServices.salonId, salonId))
+        .groupBy(jobCardServices.serviceId);
+
+      // Combine popular services data
+      // NOTE: Job cards are the source of truth for realized revenue
+      // Bookings represent reservations, job cards represent actual service delivery
+      const serviceMap = new Map<string, { serviceId: string; serviceName: string; bookingCount: number; jobCardCount: number; realizedRevenue: number }>();
+      
+      // First add booking data (for service counts only, not revenue)
+      popularServicesFromBookings.forEach(s => {
+        serviceMap.set(s.serviceId, {
+          serviceId: s.serviceId,
+          serviceName: s.serviceName,
+          bookingCount: parseFloat(String(s.bookingCount)) || 0,
+          jobCardCount: 0,
+          realizedRevenue: 0 // Revenue comes from job cards only
+        });
+      });
+      
+      // Then add job card data (counts and revenue)
+      // Also fetch service names for job-card-only services
+      const serviceNameLookup = new Map<string, string>();
+      popularServicesFromBookings.forEach(s => serviceNameLookup.set(s.serviceId, s.serviceName));
+      
+      // Get service names for any job-card-only services
+      const jobCardServiceIds = popularServicesFromJobCards.map(jc => jc.serviceId);
+      const missingServiceIds = jobCardServiceIds.filter(id => !serviceNameLookup.has(id));
+      if (missingServiceIds.length > 0) {
+        const additionalServices = await db
+          .select({ id: services.id, name: services.name })
+          .from(services)
+          .where(inArray(services.id, missingServiceIds));
+        additionalServices.forEach(s => serviceNameLookup.set(s.id, s.name));
+      }
+      
+      popularServicesFromJobCards.forEach(jc => {
+        const existing = serviceMap.get(jc.serviceId);
+        const jcCount = parseFloat(String(jc.jobCardCount)) || 0;
+        const jcRevenue = parseFloat(String(jc.jobCardRevenue)) || 0;
+        
+        if (existing) {
+          existing.jobCardCount = jcCount;
+          existing.realizedRevenue = jcRevenue;
+        } else {
+          // Service only appears in job cards (walk-in only service)
+          serviceMap.set(jc.serviceId, {
+            serviceId: jc.serviceId,
+            serviceName: serviceNameLookup.get(jc.serviceId) || 'Unknown Service',
+            bookingCount: 0,
+            jobCardCount: jcCount,
+            realizedRevenue: jcRevenue
+          });
+        }
+      });
+      
+      const popularServices = Array.from(serviceMap.values())
+        .map(s => ({
+          ...s,
+          totalCount: s.bookingCount + s.jobCardCount
+        }))
+        .sort((a, b) => b.totalCount - a.totalCount)
+        .slice(0, 5);
+
+      // Get revenue trends by day (from bookings)
+      const bookingTrendsByDay = await db
         .select({
           date: bookings.bookingDate,
           bookingCount: sql<number>`count(*)`,
@@ -2597,12 +2674,62 @@ export class DatabaseStorage implements IStorage {
         .groupBy(bookings.bookingDate)
         .orderBy(asc(bookings.bookingDate));
 
-      // Get staff performance
-      const staffPerformance = await db
+      // Get revenue trends by day (from job cards - completed & paid only)
+      const jobCardTrendsByDay = await db
         .select({
+          date: sql<string>`DATE(${jobCards.checkInAt})`,
+          jobCardCount: sql<number>`count(*)`,
+          revenue: sql<number>`sum(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`
+        })
+        .from(jobCards)
+        .where(and(
+          eq(jobCards.salonId, salonId),
+          gte(jobCards.checkInAt, startDate),
+          lte(jobCards.checkInAt, endDate)
+        ))
+        .groupBy(sql`DATE(${jobCards.checkInAt})`)
+        .orderBy(asc(sql`DATE(${jobCards.checkInAt})`));
+
+      // Combine trends data
+      // NOTE: Realized revenue comes ONLY from completed & paid job cards
+      // Booking revenue is "expected" revenue, not realized
+      const trendsMap = new Map<string, { bookingCount: number; jobCardCount: number; realizedRevenue: number; expectedRevenue: number }>();
+      bookingTrendsByDay.forEach(t => {
+        trendsMap.set(t.date, {
+          bookingCount: parseFloat(String(t.bookingCount)) || 0,
+          jobCardCount: 0,
+          realizedRevenue: 0, // Will come from job cards
+          expectedRevenue: parseFloat(String(t.revenue)) || 0 // Booking revenue is expected, not realized
+        });
+      });
+      jobCardTrendsByDay.forEach(t => {
+        const dateKey = t.date;
+        const jcCount = parseFloat(String(t.jobCardCount)) || 0;
+        const jcRevenue = parseFloat(String(t.revenue)) || 0;
+        const existing = trendsMap.get(dateKey);
+        if (existing) {
+          existing.jobCardCount = jcCount;
+          existing.realizedRevenue = jcRevenue;
+        } else {
+          trendsMap.set(dateKey, {
+            bookingCount: 0,
+            jobCardCount: jcCount,
+            realizedRevenue: jcRevenue,
+            expectedRevenue: 0
+          });
+        }
+      });
+      const revenueTrends = Array.from(trendsMap.entries())
+        .map(([date, data]) => ({ date, ...data }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      // Get staff performance (from bookings)
+      const staffPerformanceFromBookings = await db
+        .select({
+          staffId: staff.id,
           staffName: staff.name,
           bookingCount: sql<number>`count(*)`,
-          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
+          bookingRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
         })
         .from(bookings)
         .leftJoin(staff, eq(bookings.staffId, staff.id))
@@ -2611,8 +2738,84 @@ export class DatabaseStorage implements IStorage {
           gte(bookings.bookingDate, startDateStr),
           lte(bookings.bookingDate, endDateStr)
         ))
-        .groupBy(staff.id, staff.name)
-        .orderBy(desc(sql`count(*)`));
+        .groupBy(staff.id, staff.name);
+
+      // Get staff performance (from job cards - completed & paid only)
+      const staffPerformanceFromJobCards = await db
+        .select({
+          staffId: jobCardServices.staffId,
+          jobCardCount: sql<number>`count(distinct ${jobCardServices.jobCardId})`,
+          jobCardRevenue: sql<number>`sum(case when ${jobCardServices.status} = 'completed' then ${jobCardServices.finalPricePaisa} else 0 end)`
+        })
+        .from(jobCardServices)
+        .innerJoin(jobCards, and(
+          eq(jobCardServices.jobCardId, jobCards.id),
+          eq(jobCards.status, 'completed'),
+          eq(jobCards.paymentStatus, 'paid'),
+          gte(jobCards.checkInAt, startDate),
+          lte(jobCards.checkInAt, endDate)
+        ))
+        .where(and(
+          eq(jobCardServices.salonId, salonId),
+          isNotNull(jobCardServices.staffId)
+        ))
+        .groupBy(jobCardServices.staffId);
+
+      // Combine staff performance data
+      // NOTE: Revenue comes ONLY from completed & paid job cards
+      const staffMap = new Map<string, { staffId: string; staffName: string; bookingCount: number; jobCardCount: number; realizedRevenue: number }>();
+      
+      // First add booking data (counts only, not revenue)
+      staffPerformanceFromBookings.forEach(s => {
+        const staffIdKey = s.staffId || 'unassigned';
+        staffMap.set(staffIdKey, {
+          staffId: staffIdKey,
+          staffName: s.staffName || 'Unassigned',
+          bookingCount: parseFloat(String(s.bookingCount)) || 0,
+          jobCardCount: 0,
+          realizedRevenue: 0 // Revenue comes from job cards only
+        });
+      });
+      
+      // Get staff names for job-card-only staff
+      const staffIdsFromJobCards = staffPerformanceFromJobCards.map(jc => jc.staffId).filter((id): id is string => id != null);
+      const missingStaffIds = staffIdsFromJobCards.filter(id => !staffMap.has(id));
+      if (missingStaffIds.length > 0) {
+        const additionalStaff = await db
+          .select({ id: staff.id, name: staff.name })
+          .from(staff)
+          .where(inArray(staff.id, missingStaffIds));
+        additionalStaff.forEach(s => {
+          if (!staffMap.has(s.id)) {
+            staffMap.set(s.id, {
+              staffId: s.id,
+              staffName: s.name,
+              bookingCount: 0,
+              jobCardCount: 0,
+              realizedRevenue: 0
+            });
+          }
+        });
+      }
+      
+      // Add job card data (counts and revenue)
+      staffPerformanceFromJobCards.forEach(jc => {
+        const staffIdKey = jc.staffId || 'unassigned';
+        const jcCount = parseFloat(String(jc.jobCardCount)) || 0;
+        const jcRevenue = parseFloat(String(jc.jobCardRevenue)) || 0;
+        const existing = staffMap.get(staffIdKey);
+        if (existing) {
+          existing.jobCardCount = jcCount;
+          existing.realizedRevenue = jcRevenue;
+        }
+      });
+      
+      const staffPerformance = Array.from(staffMap.values())
+        .map(s => ({
+          ...s,
+          totalCount: s.bookingCount + s.jobCardCount
+        }))
+        .sort((a, b) => b.totalCount - a.totalCount);
 
       // Process booking stats
       const bookingData = bookingStats[0] || {
@@ -2806,21 +3009,28 @@ export class DatabaseStorage implements IStorage {
         },
         popularServices: popularServices.map(service => ({
           serviceName: service.serviceName,
-          bookingCount: Number(service.bookingCount) || 0,
-          totalRevenuePaisa: Number(service.totalRevenue) || 0
+          bookingCount: service.bookingCount,
+          jobCardCount: service.jobCardCount,
+          serviceCount: service.totalCount,
+          realizedRevenuePaisa: service.realizedRevenue
         })),
-        bookingTrends: bookingTrends.map(trend => ({
+        revenueTrends: revenueTrends.map(trend => ({
           date: trend.date,
-          bookingCount: Number(trend.bookingCount) || 0,
-          revenuePaisa: Number(trend.revenue) || 0
+          bookingCount: trend.bookingCount,
+          jobCardCount: trend.jobCardCount,
+          totalTransactions: trend.bookingCount + trend.jobCardCount,
+          realizedRevenuePaisa: trend.realizedRevenue,
+          expectedRevenuePaisa: trend.expectedRevenue
         })),
         staffPerformance: staffPerformance
-          .filter(performer => performer.staffName) // Filter out null staff names
+          .filter(performer => performer.staffName && performer.staffName !== 'Unassigned')
           .map(performer => ({
             staffName: performer.staffName,
-            bookingCount: Number(performer.bookingCount) || 0,
-            totalRevenuePaisa: Number(performer.totalRevenue) || 0,
-            utilization: totalCustomers > 0 ? ((Number(performer.bookingCount) || 0) / totalCustomers * 100).toFixed(1) : '0.0'
+            bookingCount: performer.bookingCount,
+            jobCardCount: performer.jobCardCount,
+            transactionCount: performer.totalCount,
+            realizedRevenuePaisa: performer.realizedRevenue,
+            utilization: totalCustomers > 0 ? (performer.totalCount / totalCustomers * 100).toFixed(1) : '0.0'
           }))
       };
     } catch (error) {
@@ -2829,28 +3039,23 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Advanced Staff Analytics
+  // Advanced Staff Analytics (includes both bookings and job cards/walk-ins)
   async getAdvancedStaffAnalytics(salonId: string, period: string): Promise<any> {
     try {
       const { startDate, endDate, previousStartDate, previousEndDate } = this.calculateDateRange(period);
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
-      const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
-      const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
 
-      // Get detailed staff performance metrics
-      const staffMetrics = await db
+      // Get staff performance from traditional bookings
+      const bookingMetrics = await db
         .select({
           staffId: staff.id,
           staffName: staff.name,
           totalBookings: sql<number>`count(${bookings.id})`,
           completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
           cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
-          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
-          averageBookingValue: sql<number>`avg(${bookings.totalAmountPaisa})`,
-          workingDays: sql<number>`count(distinct ${bookings.bookingDate})`,
-          firstBookingDate: sql<string>`min(${bookings.bookingDate})`,
-          lastBookingDate: sql<string>`max(${bookings.bookingDate})`
+          bookingRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          workingDays: sql<number>`count(distinct ${bookings.bookingDate})`
         })
         .from(staff)
         .leftJoin(bookings, and(
@@ -2864,34 +3069,80 @@ export class DatabaseStorage implements IStorage {
         ))
         .groupBy(staff.id, staff.name);
 
-      // Calculate utilization and efficiency metrics
-      const staffAnalytics = staffMetrics.map(staff => {
-        const totalBookings = Number(staff.totalBookings) || 0;
-        const completedBookings = Number(staff.completedBookings) || 0;
-        const cancelledBookings = Number(staff.cancelledBookings) || 0;
-        const totalRevenue = Number(staff.totalRevenue) || 0;
-        const workingDays = Number(staff.workingDays) || 0;
-        const averageBookingValue = Number(staff.averageBookingValue) || 0;
+      // Get staff performance from job cards (walk-ins)
+      const jobCardMetrics = await db
+        .select({
+          staffId: staff.id,
+          totalJobCards: sql<number>`count(${jobCards.id})`,
+          completedJobCards: sql<number>`count(case when ${jobCards.status} = 'completed' then 1 end)`,
+          jobCardRevenue: sql<number>`sum(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`,
+          walkInCount: sql<number>`count(case when ${jobCards.isWalkIn} = 1 then 1 end)`,
+          jobCardWorkingDays: sql<number>`count(distinct DATE(${jobCards.checkInAt}))`
+        })
+        .from(staff)
+        .leftJoin(jobCards, and(
+          eq(jobCards.assignedStaffId, staff.id),
+          gte(jobCards.checkInAt, startDate),
+          lte(jobCards.checkInAt, endDate)
+        ))
+        .where(and(
+          eq(staff.salonId, salonId),
+          eq(staff.isActive, 1)
+        ))
+        .groupBy(staff.id);
 
-        const completionRate = totalBookings > 0 ? (completedBookings / totalBookings * 100) : 0;
-        const cancellationRate = totalBookings > 0 ? (cancelledBookings / totalBookings * 100) : 0;
-        const bookingsPerDay = workingDays > 0 ? (totalBookings / workingDays) : 0;
+      // Create lookup for job card metrics
+      const jobCardMap = new Map();
+      jobCardMetrics.forEach(m => {
+        jobCardMap.set(m.staffId, {
+          totalJobCards: parseFloat(String(m.totalJobCards)) || 0,
+          completedJobCards: parseFloat(String(m.completedJobCards)) || 0,
+          jobCardRevenue: parseFloat(String(m.jobCardRevenue)) || 0,
+          walkInCount: parseFloat(String(m.walkInCount)) || 0,
+          jobCardWorkingDays: parseFloat(String(m.jobCardWorkingDays)) || 0
+        });
+      });
+
+      // Combine booking and job card metrics for each staff
+      const staffAnalytics = bookingMetrics.map(s => {
+        const bookingCount = parseFloat(String(s.totalBookings)) || 0;
+        const completedBookings = parseFloat(String(s.completedBookings)) || 0;
+        const cancelledBookings = parseFloat(String(s.cancelledBookings)) || 0;
+        const bookingRevenue = parseFloat(String(s.bookingRevenue)) || 0;
+        const bookingWorkingDays = parseFloat(String(s.workingDays)) || 0;
+
+        const jc = jobCardMap.get(s.staffId) || { totalJobCards: 0, completedJobCards: 0, jobCardRevenue: 0, walkInCount: 0, jobCardWorkingDays: 0 };
+
+        // Combined metrics
+        const totalServices = bookingCount + jc.totalJobCards;
+        const totalCompleted = completedBookings + jc.completedJobCards;
+        const totalRevenue = bookingRevenue + jc.jobCardRevenue;
+        const workingDays = Math.max(bookingWorkingDays, jc.jobCardWorkingDays);
+
+        const completionRate = totalServices > 0 ? (totalCompleted / totalServices * 100) : 0;
+        const cancellationRate = totalServices > 0 ? (cancelledBookings / totalServices * 100) : 0;
+        const servicesPerDay = workingDays > 0 ? (totalServices / workingDays) : 0;
         const revenuePerDay = workingDays > 0 ? (totalRevenue / workingDays) : 0;
 
         return {
-          staffId: staff.staffId,
-          staffName: staff.staffName,
-          totalBookings,
-          completedBookings,
+          staffId: s.staffId,
+          staffName: s.staffName,
+          totalBookings: bookingCount,
+          totalJobCards: jc.totalJobCards,
+          totalServices, // Combined count
+          completedServices: totalCompleted,
+          walkInCount: jc.walkInCount,
           completionRate: Number(completionRate.toFixed(1)),
           cancellationRate: Number(cancellationRate.toFixed(1)),
           totalRevenuePaisa: totalRevenue,
-          averageBookingValuePaisa: Math.round(averageBookingValue),
+          bookingRevenuePaisa: bookingRevenue,
+          walkInRevenuePaisa: jc.jobCardRevenue,
+          averageServiceValuePaisa: totalServices > 0 ? Math.round(totalRevenue / totalServices) : 0,
           workingDays,
-          bookingsPerDay: Number(bookingsPerDay.toFixed(1)),
+          servicesPerDay: Number(servicesPerDay.toFixed(1)),
           revenuePerDay: Math.round(revenuePerDay),
-          utilizationScore: Number((completionRate * 0.6 + bookingsPerDay * 10).toFixed(1)),
-          efficiency: Number((totalRevenue / Math.max(totalBookings, 1)).toFixed(0))
+          utilizationScore: Number((completionRate * 0.6 + servicesPerDay * 10).toFixed(1)),
+          efficiency: Number((totalRevenue / Math.max(totalServices, 1)).toFixed(0))
         };
       });
 
@@ -2904,7 +3155,9 @@ export class DatabaseStorage implements IStorage {
             ? Number((staffAnalytics.reduce((sum, s) => sum + s.utilizationScore, 0) / staffAnalytics.length).toFixed(1))
             : 0,
           topPerformer: staffAnalytics.length > 0 ? staffAnalytics[0].staffName : null,
-          totalStaffRevenue: staffAnalytics.reduce((sum, s) => sum + s.totalRevenuePaisa, 0)
+          totalStaffRevenue: staffAnalytics.reduce((sum, s) => sum + s.totalRevenuePaisa, 0),
+          totalWalkInRevenue: staffAnalytics.reduce((sum, s) => sum + s.walkInRevenuePaisa, 0),
+          totalBookingRevenue: staffAnalytics.reduce((sum, s) => sum + s.bookingRevenuePaisa, 0)
         }
       };
     } catch (error) {
@@ -2913,24 +3166,25 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Client Retention Analytics
+  // Client Retention Analytics (includes both bookings and walk-in customers)
   async getClientRetentionAnalytics(salonId: string, period: string): Promise<any> {
     try {
       const { startDate, endDate } = this.calculateDateRange(period);
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
 
-      // Get customer behavior data
-      const customerMetrics = await db
+      // Get customer behavior data from bookings
+      const bookingCustomerMetrics = await db
         .select({
           customerEmail: bookings.customerEmail,
           customerName: bookings.customerName,
-          totalBookings: sql<number>`count(*)`,
+          totalVisits: sql<number>`count(*)`,
           totalSpent: sql<number>`sum(${bookings.totalAmountPaisa})`,
-          firstBooking: sql<string>`min(${bookings.bookingDate})`,
-          lastBooking: sql<string>`max(${bookings.bookingDate})`,
-          completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
-          cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`
+          firstVisit: sql<string>`min(${bookings.bookingDate})`,
+          lastVisit: sql<string>`max(${bookings.bookingDate})`,
+          completedVisits: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
+          cancelledVisits: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
+          source: sql<string>`'booking'`
         })
         .from(bookings)
         .where(and(
@@ -2940,24 +3194,101 @@ export class DatabaseStorage implements IStorage {
         ))
         .groupBy(bookings.customerEmail, bookings.customerName);
 
+      // Get walk-in customer data from job cards
+      const jobCardCustomerMetrics = await db
+        .select({
+          customerPhone: jobCards.customerPhone,
+          customerName: jobCards.customerName,
+          totalVisits: sql<number>`count(*)`,
+          totalSpent: sql<number>`sum(case when ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' then ${jobCards.paidAmountPaisa} else 0 end)`,
+          firstVisit: sql<string>`min(DATE(${jobCards.checkInAt}))`,
+          lastVisit: sql<string>`max(DATE(${jobCards.checkInAt}))`,
+          completedVisits: sql<number>`count(case when ${jobCards.status} = 'completed' then 1 end)`,
+          isWalkIn: sql<number>`max(case when ${jobCards.isWalkIn} = 1 then 1 else 0 end)`
+        })
+        .from(jobCards)
+        .where(and(
+          eq(jobCards.salonId, salonId),
+          gte(jobCards.checkInAt, startDate),
+          lte(jobCards.checkInAt, endDate)
+        ))
+        .groupBy(jobCards.customerPhone, jobCards.customerName);
+
+      // Combine customer data - use a map to merge by phone/email
+      const customerMap = new Map<string, any>();
+      
+      // Add booking customers
+      bookingCustomerMetrics.forEach(c => {
+        const key = c.customerEmail || c.customerName;
+        customerMap.set(key, {
+          customerIdentifier: c.customerEmail,
+          customerName: c.customerName,
+          totalVisits: parseFloat(String(c.totalVisits)) || 0,
+          totalSpent: parseFloat(String(c.totalSpent)) || 0,
+          firstVisit: c.firstVisit,
+          lastVisit: c.lastVisit,
+          completedVisits: parseFloat(String(c.completedVisits)) || 0,
+          cancelledVisits: parseFloat(String(c.cancelledVisits)) || 0,
+          isWalkIn: false,
+          source: 'booking'
+        });
+      });
+
+      // Add/merge job card customers
+      jobCardCustomerMetrics.forEach(c => {
+        const key = c.customerPhone || c.customerName;
+        const existing = customerMap.get(key);
+        const visits = parseFloat(String(c.totalVisits)) || 0;
+        const spent = parseFloat(String(c.totalSpent)) || 0;
+        const completed = parseFloat(String(c.completedVisits)) || 0;
+        const isWalkIn = parseFloat(String(c.isWalkIn)) === 1;
+        
+        if (existing) {
+          // Merge with existing customer
+          existing.totalVisits += visits;
+          existing.totalSpent += spent;
+          existing.completedVisits += completed;
+          if (c.firstVisit && (!existing.firstVisit || c.firstVisit < existing.firstVisit)) {
+            existing.firstVisit = c.firstVisit;
+          }
+          if (c.lastVisit && (!existing.lastVisit || c.lastVisit > existing.lastVisit)) {
+            existing.lastVisit = c.lastVisit;
+          }
+          existing.source = 'both';
+        } else {
+          customerMap.set(key, {
+            customerIdentifier: c.customerPhone,
+            customerName: c.customerName,
+            totalVisits: visits,
+            totalSpent: spent,
+            firstVisit: c.firstVisit,
+            lastVisit: c.lastVisit,
+            completedVisits: completed,
+            cancelledVisits: 0,
+            isWalkIn: isWalkIn,
+            source: isWalkIn ? 'walk_in' : 'job_card'
+          });
+        }
+      });
+
       // Calculate retention metrics
       const now = new Date();
-      const retentionAnalytics = customerMetrics.map(customer => {
-        const totalBookings = Number(customer.totalBookings) || 0;
-        const totalSpent = Number(customer.totalSpent) || 0;
-        const completedBookings = Number(customer.completedBookings) || 0;
-        const firstBookingDate = new Date(customer.firstBooking);
-        const lastBookingDate = new Date(customer.lastBooking);
+      const retentionAnalytics = Array.from(customerMap.values()).map(customer => {
+        const totalVisits = customer.totalVisits;
+        const totalSpent = customer.totalSpent;
+        const completedVisits = customer.completedVisits;
+        const firstVisitDate = customer.firstVisit ? new Date(customer.firstVisit) : now;
+        const lastVisitDate = customer.lastVisit ? new Date(customer.lastVisit) : now;
         
-        const daysSinceFirst = Math.floor((now.getTime() - firstBookingDate.getTime()) / (1000 * 60 * 60 * 24));
-        const daysSinceLast = Math.floor((now.getTime() - lastBookingDate.getTime()) / (1000 * 60 * 60 * 24));
-        const customerLifespan = Math.floor((lastBookingDate.getTime() - firstBookingDate.getTime()) / (1000 * 60 * 60 * 24));
-        const averageDaysBetweenBookings = totalBookings > 1 ? customerLifespan / (totalBookings - 1) : 0;
+        const daysSinceFirst = Math.floor((now.getTime() - firstVisitDate.getTime()) / (1000 * 60 * 60 * 24));
+        const daysSinceLast = Math.floor((now.getTime() - lastVisitDate.getTime()) / (1000 * 60 * 60 * 24));
+        const customerLifespan = Math.floor((lastVisitDate.getTime() - firstVisitDate.getTime()) / (1000 * 60 * 60 * 24));
+        const averageDaysBetweenVisits = totalVisits > 1 ? customerLifespan / (totalVisits - 1) : 0;
 
         // Customer lifecycle stage
         let lifecycleStage = 'new';
-        if (totalBookings >= 5) lifecycleStage = 'loyal';
-        else if (totalBookings >= 2) lifecycleStage = 'returning';
+        if (totalVisits >= 5) lifecycleStage = 'loyal';
+        else if (totalVisits >= 2) lifecycleStage = 'returning';
         
         // Churn risk assessment
         let churnRisk = 'low';
@@ -2965,24 +3296,28 @@ export class DatabaseStorage implements IStorage {
         else if (daysSinceLast > 45) churnRisk = 'medium';
 
         return {
-          customerEmail: customer.customerEmail,
+          customerIdentifier: customer.customerIdentifier,
           customerName: customer.customerName,
-          totalBookings,
-          completedBookings,
+          totalVisits,
+          completedVisits,
           totalSpentPaisa: totalSpent,
-          averageBookingValuePaisa: totalBookings > 0 ? Math.round(totalSpent / totalBookings) : 0,
+          averageVisitValuePaisa: totalVisits > 0 ? Math.round(totalSpent / totalVisits) : 0,
           daysSinceFirst,
           daysSinceLast,
-          averageDaysBetweenBookings: Math.round(averageDaysBetweenBookings),
+          averageDaysBetweenVisits: Math.round(averageDaysBetweenVisits),
           lifecycleStage,
           churnRisk,
-          lifetimeValue: totalSpent
+          lifetimeValue: totalSpent,
+          isWalkIn: customer.isWalkIn,
+          source: customer.source
         };
       });
 
       // Calculate aggregate retention metrics
       const totalCustomers = retentionAnalytics.length;
-      const returningCustomers = retentionAnalytics.filter(c => c.totalBookings > 1).length;
+      const walkInCustomers = retentionAnalytics.filter(c => c.source === 'walk_in').length;
+      const bookingCustomers = retentionAnalytics.filter(c => c.source === 'booking').length;
+      const returningCustomers = retentionAnalytics.filter(c => c.totalVisits > 1).length;
       const loyalCustomers = retentionAnalytics.filter(c => c.lifecycleStage === 'loyal').length;
       const highRiskCustomers = retentionAnalytics.filter(c => c.churnRisk === 'high').length;
 
@@ -2995,6 +3330,8 @@ export class DatabaseStorage implements IStorage {
         customerAnalytics: retentionAnalytics.sort((a, b) => b.lifetimeValue - a.lifetimeValue),
         retentionMetrics: {
           totalCustomers,
+          walkInCustomers,
+          bookingCustomers,
           newCustomers: retentionAnalytics.filter(c => c.lifecycleStage === 'new').length,
           returningCustomers,
           loyalCustomers,
@@ -3006,8 +3343,8 @@ export class DatabaseStorage implements IStorage {
             low: retentionAnalytics.filter(c => c.churnRisk === 'low').length
           },
           averageLifetimeValuePaisa: Math.round(averageLifetimeValue),
-          averageBookingsPerCustomer: totalCustomers > 0 
-            ? Number((retentionAnalytics.reduce((sum, c) => sum + c.totalBookings, 0) / totalCustomers).toFixed(1))
+          averageVisitsPerCustomer: totalCustomers > 0 
+            ? Number((retentionAnalytics.reduce((sum, c) => sum + c.totalVisits, 0) / totalCustomers).toFixed(1))
             : 0
         }
       };
@@ -3017,7 +3354,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Service Popularity Analytics
+  // Service Popularity Analytics (includes both bookings and job card services)
   async getServicePopularityAnalytics(salonId: string, period: string): Promise<any> {
     try {
       const { startDate, endDate, previousStartDate, previousEndDate } = this.calculateDateRange(period);
@@ -3026,20 +3363,19 @@ export class DatabaseStorage implements IStorage {
       const previousStartDateStr = previousStartDate.toISOString().split('T')[0];
       const previousEndDateStr = previousEndDate.toISOString().split('T')[0];
 
-      // Current period service performance
-      const currentServiceMetrics = await db
+      // Current period service performance from bookings
+      const bookingServiceMetrics = await db
         .select({
           serviceId: services.id,
           serviceName: services.name,
           serviceCategory: services.category,
           servicePricePaisa: services.priceInPaisa,
           serviceDuration: services.durationMinutes,
-          totalBookings: sql<number>`count(*)`,
+          bookingCount: sql<number>`count(${bookings.id})`,
           completedBookings: sql<number>`count(case when ${bookings.status} = 'completed' then 1 end)`,
           cancelledBookings: sql<number>`count(case when ${bookings.status} = 'cancelled' then 1 end)`,
-          totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
-          averageBookingValue: sql<number>`avg(${bookings.totalAmountPaisa})`,
-          uniqueCustomers: sql<number>`count(distinct ${bookings.customerEmail})`
+          bookingRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`,
+          uniqueBookingCustomers: sql<number>`count(distinct ${bookings.customerEmail})`
         })
         .from(services)
         .leftJoin(bookings, and(
@@ -3050,11 +3386,38 @@ export class DatabaseStorage implements IStorage {
         .where(eq(services.salonId, salonId))
         .groupBy(services.id, services.name, services.category, services.priceInPaisa, services.durationMinutes);
 
-      // Previous period for comparison
-      const previousServiceMetrics = await db
+      // Current period service performance from job cards
+      const jobCardServiceMetrics = await db
+        .select({
+          serviceId: jobCardServices.serviceId,
+          jobCardCount: sql<number>`count(distinct ${jobCardServices.jobCardId})`,
+          completedJobCards: sql<number>`count(case when ${jobCardServices.status} = 'completed' then 1 end)`,
+          jobCardRevenue: sql<number>`sum(case when ${jobCardServices.status} = 'completed' then ${jobCardServices.finalPricePaisa} else 0 end)`
+        })
+        .from(jobCardServices)
+        .innerJoin(jobCards, and(
+          eq(jobCardServices.jobCardId, jobCards.id),
+          gte(jobCards.checkInAt, startDate),
+          lte(jobCards.checkInAt, endDate)
+        ))
+        .where(eq(jobCardServices.salonId, salonId))
+        .groupBy(jobCardServices.serviceId);
+
+      // Create lookup for job card metrics
+      const jobCardMap = new Map();
+      jobCardServiceMetrics.forEach(m => {
+        jobCardMap.set(m.serviceId, {
+          jobCardCount: parseFloat(String(m.jobCardCount)) || 0,
+          completedJobCards: parseFloat(String(m.completedJobCards)) || 0,
+          jobCardRevenue: parseFloat(String(m.jobCardRevenue)) || 0
+        });
+      });
+
+      // Previous period from bookings
+      const previousBookingMetrics = await db
         .select({
           serviceId: services.id,
-          totalBookings: sql<number>`count(*)`,
+          totalBookings: sql<number>`count(${bookings.id})`,
           totalRevenue: sql<number>`sum(${bookings.totalAmountPaisa})`
         })
         .from(services)
@@ -3066,30 +3429,61 @@ export class DatabaseStorage implements IStorage {
         .where(eq(services.salonId, salonId))
         .groupBy(services.id);
 
-      // Create lookup for previous period data
+      // Previous period from job cards
+      const previousJobCardMetrics = await db
+        .select({
+          serviceId: jobCardServices.serviceId,
+          jobCardCount: sql<number>`count(distinct ${jobCardServices.jobCardId})`,
+          jobCardRevenue: sql<number>`sum(case when ${jobCardServices.status} = 'completed' then ${jobCardServices.finalPricePaisa} else 0 end)`
+        })
+        .from(jobCardServices)
+        .innerJoin(jobCards, and(
+          eq(jobCardServices.jobCardId, jobCards.id),
+          gte(jobCards.checkInAt, previousStartDate),
+          lte(jobCards.checkInAt, previousEndDate)
+        ))
+        .where(eq(jobCardServices.salonId, salonId))
+        .groupBy(jobCardServices.serviceId);
+
+      // Create lookup for previous period data (combined)
       const previousMetricsMap = new Map();
-      previousServiceMetrics.forEach(metric => {
+      previousBookingMetrics.forEach(metric => {
         previousMetricsMap.set(metric.serviceId, {
-          totalBookings: Number(metric.totalBookings) || 0,
-          totalRevenue: Number(metric.totalRevenue) || 0
+          totalServices: parseFloat(String(metric.totalBookings)) || 0,
+          totalRevenue: parseFloat(String(metric.totalRevenue)) || 0
         });
       });
+      previousJobCardMetrics.forEach(m => {
+        const existing = previousMetricsMap.get(m.serviceId) || { totalServices: 0, totalRevenue: 0 };
+        existing.totalServices += parseFloat(String(m.jobCardCount)) || 0;
+        existing.totalRevenue += parseFloat(String(m.jobCardRevenue)) || 0;
+        previousMetricsMap.set(m.serviceId, existing);
+      });
 
-      // Calculate service analytics with trends
-      const serviceAnalytics = currentServiceMetrics.map(service => {
-        const totalBookings = Number(service.totalBookings) || 0;
-        const completedBookings = Number(service.completedBookings) || 0;
-        const totalRevenue = Number(service.totalRevenue) || 0;
-        const uniqueCustomers = Number(service.uniqueCustomers) || 0;
+      // Calculate service analytics with trends (combining bookings + job cards)
+      const serviceAnalytics = bookingServiceMetrics.map(service => {
+        const bookingCount = parseFloat(String(service.bookingCount)) || 0;
+        const completedBookings = parseFloat(String(service.completedBookings)) || 0;
+        const cancelledBookings = parseFloat(String(service.cancelledBookings)) || 0;
+        const bookingRevenue = parseFloat(String(service.bookingRevenue)) || 0;
+        const uniqueBookingCustomers = parseFloat(String(service.uniqueBookingCustomers)) || 0;
+
+        const jc = jobCardMap.get(service.serviceId) || { jobCardCount: 0, completedJobCards: 0, jobCardRevenue: 0 };
+
+        // Combined metrics
+        const totalServices = bookingCount + jc.jobCardCount;
+        const totalCompleted = completedBookings + jc.completedJobCards;
+        const totalRevenue = bookingRevenue + jc.jobCardRevenue;
+        const uniqueCustomers = uniqueBookingCustomers; // Job card customers tracked separately
         
-        const previousData = previousMetricsMap.get(service.serviceId) || { totalBookings: 0, totalRevenue: 0 };
+        const previousData = previousMetricsMap.get(service.serviceId) || { totalServices: 0, totalRevenue: 0 };
         
-        const completionRate = totalBookings > 0 ? (completedBookings / totalBookings * 100) : 0;
-        const cancellationRate = totalBookings > 0 ? (Number(service.cancelledBookings) / totalBookings * 100) : 0;
-        const revenuePerBooking = totalBookings > 0 ? (totalRevenue / totalBookings) : 0;
+        const completionRate = totalServices > 0 ? (totalCompleted / totalServices * 100) : 0;
+        const cancellationRate = totalServices > 0 ? (cancelledBookings / totalServices * 100) : 0;
+        const revenuePerService = totalServices > 0 ? (totalRevenue / totalServices) : 0;
         
         // Trend calculations
-        const bookingsTrend = this.calculateTrendMetric(totalBookings, previousData.totalBookings);
+        const servicesTrend = this.calculateTrendMetric(totalServices, previousData.totalServices);
         const revenueTrend = this.calculateTrendMetric(totalRevenue, previousData.totalRevenue);
 
         return {
@@ -3098,24 +3492,28 @@ export class DatabaseStorage implements IStorage {
           category: service.serviceCategory,
           standardPricePaisa: Number(service.servicePricePaisa) || 0,
           durationMinutes: Number(service.serviceDuration) || 0,
-          totalBookings,
-          completedBookings,
+          totalBookings: bookingCount,
+          totalJobCards: jc.jobCardCount,
+          totalServices, // Combined count
+          completedServices: totalCompleted,
           completionRate: Number(completionRate.toFixed(1)),
           cancellationRate: Number(cancellationRate.toFixed(1)),
           totalRevenuePaisa: totalRevenue,
-          averageRevenuePerBookingPaisa: Math.round(revenuePerBooking),
+          bookingRevenuePaisa: bookingRevenue,
+          jobCardRevenuePaisa: jc.jobCardRevenue,
+          averageRevenuePerServicePaisa: Math.round(revenuePerService),
           uniqueCustomers,
-          customerReturnRate: uniqueCustomers > 0 ? Number(((totalBookings - uniqueCustomers) / uniqueCustomers * 100).toFixed(1)) : 0,
-          bookingsTrend,
+          customerReturnRate: uniqueCustomers > 0 ? Number(((totalServices - uniqueCustomers) / uniqueCustomers * 100).toFixed(1)) : 0,
+          servicesTrend,
           revenueTrend,
-          popularityScore: totalBookings * 0.4 + completionRate * 0.3 + (uniqueCustomers / Math.max(totalBookings, 1)) * 100 * 0.3
+          popularityScore: totalServices * 0.4 + completionRate * 0.3 + (uniqueCustomers / Math.max(totalServices, 1)) * 100 * 0.3
         };
       });
 
       // Service category analysis
       const categoryAnalysis: Record<string, {
         serviceCount: number;
-        totalBookings: number;
+        totalServices: number;
         totalRevenue: number;
         averageCompletionRate: number;
       }> = {};
@@ -3124,13 +3522,13 @@ export class DatabaseStorage implements IStorage {
         if (!categoryAnalysis[category]) {
           categoryAnalysis[category] = {
             serviceCount: 0,
-            totalBookings: 0,
+            totalServices: 0,
             totalRevenue: 0,
             averageCompletionRate: 0
           };
         }
         categoryAnalysis[category].serviceCount++;
-        categoryAnalysis[category].totalBookings += service.totalBookings;
+        categoryAnalysis[category].totalServices += service.totalServices;
         categoryAnalysis[category].totalRevenue += service.totalRevenuePaisa;
         categoryAnalysis[category].averageCompletionRate += service.completionRate;
       });
@@ -5247,19 +5645,42 @@ export class DatabaseStorage implements IStorage {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    // Get service revenue from completed bookings
-    const revenueResult = await db.select({
-      serviceRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
+    // Revenue Calculation Strategy (avoiding double-counting):
+    // Job Cards are the SOURCE OF TRUTH for actual revenue
+    // - Count all job card revenue (includes bookings that were checked-in)
+    // - Only count bookings WITHOUT linked job cards (legacy/unprocessed)
+
+    // 1. Revenue from ALL completed job cards (primary source)
+    const jobCardRevenueResult = await db.select({
+      jobCardRevenue: sql<number>`COALESCE(SUM(${jobCards.totalAmountPaisa}), 0)`
+    }).from(jobCards)
+      .where(and(
+        eq(jobCards.salonId, salonId),
+        eq(jobCards.status, 'completed'),
+        gte(jobCards.createdAt, start),
+        lte(jobCards.createdAt, end)
+      ));
+
+    const jobCardRevenue = parseFloat(String(jobCardRevenueResult[0]?.jobCardRevenue)) || 0;
+
+    // 2. Revenue from completed bookings WITHOUT job cards (legacy/unprocessed)
+    const orphanBookingResult = await db.select({
+      bookingRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
     }).from(bookings)
       .innerJoin(services, eq(bookings.serviceId, services.id))
+      .leftJoin(jobCards, eq(jobCards.bookingId, bookings.id))
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
         gte(bookings.createdAt, start),
-        lte(bookings.createdAt, end)
+        lte(bookings.createdAt, end),
+        sql`${jobCards.id} IS NULL` // No job card linked
       ));
 
-    const serviceRevenue = revenueResult[0]?.serviceRevenue || 0;
+    const orphanBookingRevenue = parseFloat(String(orphanBookingResult[0]?.bookingRevenue)) || 0;
+
+    // Combined service revenue (no double-counting)
+    const serviceRevenue = jobCardRevenue + orphanBookingRevenue;
     const otherRevenue = 0; // For future expansion
     const totalRevenue = serviceRevenue + otherRevenue;
 
@@ -5278,7 +5699,7 @@ export class DatabaseStorage implements IStorage {
       ))
       .groupBy(expenses.categoryId, expenseCategories.name);
 
-    const totalOperatingExpenses = expenseResults.reduce((sum, exp) => sum + exp.amount, 0);
+    const totalOperatingExpenses = expenseResults.reduce((sum, exp) => sum + parseFloat(String(exp.amount)) || 0, 0);
 
     // Get commission expenses
     const commissionResult = await db.select({
@@ -5290,7 +5711,7 @@ export class DatabaseStorage implements IStorage {
         lte(commissions.serviceDate, end)
       ));
 
-    const commissionsExpense = commissionResult[0]?.commissions || 0;
+    const commissionsExpense = parseFloat(String(commissionResult[0]?.commissions)) || 0;
 
     // Get tax expenses
     const taxResult = await db.select({
@@ -5303,7 +5724,7 @@ export class DatabaseStorage implements IStorage {
         lte(expenses.expenseDate, end)
       ));
 
-    const taxes = taxResult[0]?.taxes || 0;
+    const taxes = parseFloat(String(taxResult[0]?.taxes)) || 0;
     const totalExpenses = totalOperatingExpenses + commissionsExpense + taxes;
 
     // Calculate profit metrics
@@ -5568,36 +5989,80 @@ export class DatabaseStorage implements IStorage {
         break;
     }
 
-    // Revenue KPIs
-    const revenueResults = await db.select({
+    // Revenue Calculation Strategy:
+    // Job Cards are the SOURCE OF TRUTH for actual revenue collected
+    // - Job cards linked to bookings: Count job card amount (actual payment, may include add-ons)
+    // - Walk-in job cards: Count job card amount
+    // - Bookings WITHOUT job cards: Count booking service price (legacy/unprocessed)
+    
+    // 1. Revenue from ALL completed job cards (primary source)
+    const jobCardRevenueResults = await db.select({
+      totalRevenue: sql<number>`COALESCE(SUM(${jobCards.totalAmountPaisa}), 0)`,
+      jobCardCount: sql<number>`COUNT(*)`,
+      uniqueCustomers: sql<number>`COUNT(DISTINCT COALESCE(${jobCards.customerId}, ${jobCards.customerPhone}))`
+    }).from(jobCards)
+      .where(and(
+        eq(jobCards.salonId, salonId),
+        eq(jobCards.status, 'completed'),
+        gte(jobCards.createdAt, startDate)
+      ));
+
+    const jobCardRevenue = parseFloat(String(jobCardRevenueResults[0]?.totalRevenue)) || 0;
+    const jobCardCount = parseFloat(String(jobCardRevenueResults[0]?.jobCardCount)) || 0;
+    const jobCardCustomers = parseFloat(String(jobCardRevenueResults[0]?.uniqueCustomers)) || 0;
+
+    // 2. Revenue from completed bookings that DON'T have job cards (legacy/unprocessed)
+    const orphanBookingResults = await db.select({
       totalRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`,
       bookingCount: sql<number>`COUNT(*)`,
       uniqueCustomers: sql<number>`COUNT(DISTINCT ${bookings.customerEmail})`
     }).from(bookings)
       .innerJoin(services, eq(bookings.serviceId, services.id))
+      .leftJoin(jobCards, eq(jobCards.bookingId, bookings.id))
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
-        gte(bookings.createdAt, startDate)
+        gte(bookings.createdAt, startDate),
+        sql`${jobCards.id} IS NULL` // No job card linked
       ));
 
-    const currentRevenue = revenueResults[0]?.totalRevenue || 0;
-    const bookingCount = revenueResults[0]?.bookingCount || 0;
-    const uniqueCustomers = revenueResults[0]?.uniqueCustomers || 0;
+    const orphanBookingRevenue = parseFloat(String(orphanBookingResults[0]?.totalRevenue)) || 0;
+    const orphanBookingCount = parseFloat(String(orphanBookingResults[0]?.bookingCount)) || 0;
+    const orphanBookingCustomers = parseFloat(String(orphanBookingResults[0]?.uniqueCustomers)) || 0;
 
-    // Previous period revenue for growth calculation
-    const prevRevenueResults = await db.select({
+    // Combined totals (no double-counting)
+    const currentRevenue = jobCardRevenue + orphanBookingRevenue;
+    const totalTransactionCount = jobCardCount + orphanBookingCount;
+    const uniqueCustomers = jobCardCustomers + orphanBookingCustomers;
+
+    // Previous period - Job Cards
+    const prevJobCardResults = await db.select({
+      prevRevenue: sql<number>`COALESCE(SUM(${jobCards.totalAmountPaisa}), 0)`
+    }).from(jobCards)
+      .where(and(
+        eq(jobCards.salonId, salonId),
+        eq(jobCards.status, 'completed'),
+        gte(jobCards.createdAt, prevStartDate),
+        lte(jobCards.createdAt, startDate)
+      ));
+
+    // Previous period - Orphan Bookings (without job cards)
+    const prevOrphanBookingResults = await db.select({
       prevRevenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
     }).from(bookings)
       .innerJoin(services, eq(bookings.serviceId, services.id))
+      .leftJoin(jobCards, eq(jobCards.bookingId, bookings.id))
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
         gte(bookings.createdAt, prevStartDate),
-        lte(bookings.createdAt, startDate)
+        lte(bookings.createdAt, startDate),
+        sql`${jobCards.id} IS NULL`
       ));
 
-    const prevRevenue = prevRevenueResults[0]?.prevRevenue || 0;
+    const prevJobCardRevenue = parseFloat(String(prevJobCardResults[0]?.prevRevenue)) || 0;
+    const prevOrphanRevenue = parseFloat(String(prevOrphanBookingResults[0]?.prevRevenue)) || 0;
+    const prevRevenue = prevJobCardRevenue + prevOrphanRevenue;
     const revenueGrowthRate = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / prevRevenue) * 100 : 0;
 
     // Expense KPIs
@@ -5642,18 +6107,18 @@ export class DatabaseStorage implements IStorage {
 
     const averageServiceTime = avgServiceResults[0]?.avgDuration || 0;
 
-    // Calculate KPIs
-    const averageBookingValue = bookingCount > 0 ? currentRevenue / bookingCount : 0;
+    // Calculate KPIs (using combined bookings + job cards)
+    const averageBookingValue = totalTransactionCount > 0 ? currentRevenue / totalTransactionCount : 0;
     const revenuePerCustomer = uniqueCustomers > 0 ? currentRevenue / uniqueCustomers : 0;
     const expenseRatio = currentRevenue > 0 ? (totalExpenses / currentRevenue) * 100 : 0;
-    const costPerService = bookingCount > 0 ? totalExpenses / bookingCount : 0;
+    const costPerService = totalTransactionCount > 0 ? totalExpenses / totalTransactionCount : 0;
     const grossProfitMargin = currentRevenue > 0 ? ((currentRevenue - totalExpenses) / currentRevenue) * 100 : 0;
     const netProfitMargin = grossProfitMargin; // Simplified
     const breakEvenPoint = averageBookingValue > 0 ? totalExpenses / averageBookingValue : 0;
     const returnOnInvestment = totalExpenses > 0 ? ((currentRevenue - totalExpenses) / totalExpenses) * 100 : 0;
     const revenuePerStaff = staffCount > 0 ? currentRevenue / staffCount : 0;
     const serviceUtilizationRate = 80; // Would need time slot analysis
-    const staffProductivity = staffCount > 0 ? bookingCount / staffCount : 0;
+    const staffProductivity = staffCount > 0 ? totalTransactionCount / staffCount : 0;
 
     return {
       revenue: {
@@ -5702,8 +6167,10 @@ export class DatabaseStorage implements IStorage {
       pessimistic: { totalRevenue: number; totalProfit: number };
     };
   }> {
-    // Get historical data for trend analysis (last 12 months)
-    const historicalResults = await db.select({
+    const oneYearAgo = new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1);
+
+    // Get historical data from bookings (last 12 months)
+    const bookingHistoricalResults = await db.select({
       month: sql<string>`TO_CHAR(${bookings.createdAt}, 'YYYY-MM')`,
       revenue: sql<number>`COALESCE(SUM(${services.priceInPaisa}), 0)`
     }).from(bookings)
@@ -5711,10 +6178,38 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(bookings.salonId, salonId),
         eq(bookings.status, 'completed'),
-        gte(bookings.createdAt, new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1))
+        gte(bookings.createdAt, oneYearAgo)
       ))
       .groupBy(sql`TO_CHAR(${bookings.createdAt}, 'YYYY-MM')`)
       .orderBy(sql`TO_CHAR(${bookings.createdAt}, 'YYYY-MM')`);
+
+    // Get historical data from job cards (last 12 months - completed & paid only)
+    const jobCardHistoricalResults = await db.select({
+      month: sql<string>`TO_CHAR(${jobCards.checkInAt}, 'YYYY-MM')`,
+      revenue: sql<number>`COALESCE(SUM(${jobCards.paidAmountPaisa}), 0)`
+    }).from(jobCards)
+      .where(and(
+        eq(jobCards.salonId, salonId),
+        eq(jobCards.status, 'completed'),
+        eq(jobCards.paymentStatus, 'paid'),
+        gte(jobCards.checkInAt, oneYearAgo)
+      ))
+      .groupBy(sql`TO_CHAR(${jobCards.checkInAt}, 'YYYY-MM')`)
+      .orderBy(sql`TO_CHAR(${jobCards.checkInAt}, 'YYYY-MM')`);
+
+    // Combine historical results from both sources
+    const combinedHistoryMap = new Map<string, number>();
+    bookingHistoricalResults.forEach(r => {
+      combinedHistoryMap.set(r.month, parseFloat(String(r.revenue)) || 0);
+    });
+    jobCardHistoricalResults.forEach(r => {
+      const existing = combinedHistoryMap.get(r.month) || 0;
+      combinedHistoryMap.set(r.month, existing + (parseFloat(String(r.revenue)) || 0));
+    });
+
+    const historicalResults = Array.from(combinedHistoryMap.entries())
+      .map(([month, revenue]) => ({ month, revenue }))
+      .sort((a, b) => a.month.localeCompare(b.month));
 
     // Calculate growth rate from historical data
     const revenues = historicalResults.map(r => r.revenue);
@@ -7824,6 +8319,8 @@ export class DatabaseStorage implements IStorage {
   async getPlatformStats(period?: string): Promise<{
     totalBookings: number;
     totalRevenue: number;
+    totalCommission: number;
+    totalJobCards: number;
     totalUsers: number;
     totalSalons: number;
     pendingApprovals: number;
@@ -7835,11 +8332,53 @@ export class DatabaseStorage implements IStorage {
     const totalBookingsResult = await db.select({ count: sql<number>`count(*)::int` }).from(bookings);
     const totalBookings = totalBookingsResult[0]?.count || 0;
 
-    // Get total revenue
-    const totalRevenueResult = await db.select({ 
-      sum: sql<number>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)::int` 
-    }).from(bookings).where(eq(bookings.status, 'completed'));
-    const totalRevenue = totalRevenueResult[0]?.sum || 0;
+    // Get total job cards (including walk-ins)
+    const totalJobCardsResult = await db.select({ count: sql<number>`count(*)::int` }).from(jobCards);
+    const totalJobCards = totalJobCardsResult[0]?.count || 0;
+
+    // Get REALIZED revenue from completed & paid job cards (source of truth for revenue)
+    const jobCardRevenueResult = await db.select({ 
+      sum: sql<string>`COALESCE(SUM(${jobCards.totalAmountPaisa}), 0)` 
+    }).from(jobCards).where(
+      and(
+        eq(jobCards.status, 'completed'),
+        eq(jobCards.paymentStatus, 'paid')
+      )
+    );
+    const jobCardRevenue = parseFloat(String(jobCardRevenueResult[0]?.sum || 0));
+
+    // Also get revenue from completed bookings that don't have job cards (legacy/direct payments)
+    const bookingRevenueResult = await db.select({ 
+      sum: sql<string>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)` 
+    }).from(bookings).where(
+      and(
+        eq(bookings.status, 'completed'),
+        sql`NOT EXISTS (SELECT 1 FROM job_cards WHERE job_cards.booking_id = ${bookings.id})`
+      )
+    );
+    const bookingRevenue = parseFloat(String(bookingRevenueResult[0]?.sum || 0));
+
+    // Total realized revenue = job card revenue + legacy booking revenue
+    const totalRevenue = Math.round(jobCardRevenue + bookingRevenue);
+
+    // Calculate platform commission (default 10% - can be configured in settings)
+    const configResult = await db.select()
+      .from(platformConfig)
+      .where(eq(platformConfig.configKey, 'payment_settings'))
+      .limit(1);
+    
+    let commissionPercent = 10; // Default 10%
+    if (configResult[0]?.configValue) {
+      try {
+        const paymentSettings = configResult[0].configValue as any;
+        if (paymentSettings.defaultCommissionPercent) {
+          commissionPercent = paymentSettings.defaultCommissionPercent;
+        }
+      } catch (e) {
+        // Use default
+      }
+    }
+    const totalCommission = Math.round(totalRevenue * (commissionPercent / 100));
 
     // Get total users
     const totalUsersResult = await db.select({ count: sql<number>`count(*)::int` }).from(users);
@@ -7874,27 +8413,33 @@ export class DatabaseStorage implements IStorage {
       );
     const activeOffers = activeOffersResult[0]?.count || 0;
 
-    // Get booking trends (last 7 days)
+    // Get combined trends from both bookings and job cards (last 7 days)
     const bookingTrends = await db
       .select({
-        date: sql<string>`DATE(${bookings.createdAt})`,
+        date: sql<string>`DATE(${jobCards.checkInAt})`,
         count: sql<number>`count(*)::int`,
-        revenue: sql<number>`COALESCE(SUM(${bookings.totalAmountPaisa}), 0)::int`
+        revenue: sql<string>`COALESCE(SUM(CASE WHEN ${jobCards.status} = 'completed' AND ${jobCards.paymentStatus} = 'paid' THEN ${jobCards.totalAmountPaisa} ELSE 0 END), 0)`
       })
-      .from(bookings)
-      .where(gte(bookings.createdAt, sql`NOW() - INTERVAL '7 days'`))
-      .groupBy(sql`DATE(${bookings.createdAt})`)
-      .orderBy(sql`DATE(${bookings.createdAt})`);
+      .from(jobCards)
+      .where(gte(jobCards.checkInAt, sql`NOW() - INTERVAL '7 days'`))
+      .groupBy(sql`DATE(${jobCards.checkInAt})`)
+      .orderBy(sql`DATE(${jobCards.checkInAt})`);
 
     return {
       totalBookings,
       totalRevenue,
+      totalCommission,
+      totalJobCards,
       totalUsers,
       totalSalons,
       pendingApprovals,
       activeUsers,
       activeOffers,
-      bookingTrends
+      bookingTrends: bookingTrends.map(t => ({
+        date: t.date,
+        count: t.count,
+        revenue: parseFloat(String(t.revenue))
+      }))
     };
   }
 
@@ -7954,6 +8499,12 @@ export class DatabaseStorage implements IStorage {
       rejectionReason: reason,
       approvedBy: rejectedBy,
       approvedAt: new Date()
+    }).where(eq(salons.id, salonId));
+  }
+
+  async toggleSalonStatus(salonId: string, isActive: boolean): Promise<void> {
+    await db.update(salons).set({
+      isActive: isActive ? 1 : 0
     }).where(eq(salons.id, salonId));
   }
 

@@ -976,6 +976,8 @@ export default function SalonBookingPage() {
                         onVerified={handlePhoneVerified}
                         initialPhone={customerPhone}
                         required={true}
+                        customerName={customerName}
+                        customerEmail={customerEmail}
                       />
                     )}
                     

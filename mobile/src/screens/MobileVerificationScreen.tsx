@@ -9,39 +9,55 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { authAPI } from '../services/api';
+
+const COUNTRIES = [
+  { code: 'IN', name: 'India', dialCode: '+91', flag: '🇮🇳', minLength: 10, maxLength: 10 },
+  { code: 'US', name: 'United States', dialCode: '+1', flag: '🇺🇸', minLength: 10, maxLength: 10 },
+  { code: 'GB', name: 'United Kingdom', dialCode: '+44', flag: '🇬🇧', minLength: 10, maxLength: 10 },
+  { code: 'AE', name: 'UAE', dialCode: '+971', flag: '🇦🇪', minLength: 9, maxLength: 9 },
+  { code: 'SG', name: 'Singapore', dialCode: '+65', flag: '🇸🇬', minLength: 8, maxLength: 8 },
+  { code: 'AU', name: 'Australia', dialCode: '+61', flag: '🇦🇺', minLength: 9, maxLength: 9 },
+  { code: 'CA', name: 'Canada', dialCode: '+1', flag: '🇨🇦', minLength: 10, maxLength: 10 },
+  { code: 'DE', name: 'Germany', dialCode: '+49', flag: '🇩🇪', minLength: 10, maxLength: 11 },
+];
 
 export default function MobileVerificationScreen() {
   const router = useRouter();
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<string | null>(null);
 
   const validatePhoneNumber = (number: string): boolean => {
-    const phoneRegex = /^[6-9]\d{9}$/;
-    return phoneRegex.test(number);
+    const len = number.length;
+    return len >= selectedCountry.minLength && len <= selectedCountry.maxLength;
   };
 
   const handleRequestOTP = async () => {
     setErrors(null);
 
     if (!validatePhoneNumber(phoneNumber)) {
-      setErrors('Please enter a valid 10-digit mobile number');
+      setErrors(`Please enter a valid ${selectedCountry.minLength}-digit mobile number`);
       return;
     }
 
     setIsLoading(true);
+    const fullPhone = `${selectedCountry.dialCode}${phoneNumber}`;
 
     try {
-      await authAPI.requestOTP(phoneNumber);
+      await authAPI.requestOTP(fullPhone);
       
-      // Navigate to OTP screen
       router.push({
         pathname: '/onboarding/otp-verification',
-        params: { phoneNumber },
+        params: { phoneNumber: fullPhone },
       });
     } catch (error: any) {
       console.error('OTP request failed:', error);
@@ -97,14 +113,22 @@ export default function MobileVerificationScreen() {
           {/* Form */}
           <View style={styles.form}>
             <Text style={styles.label}>Mobile Number</Text>
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputIcon}>📱</Text>
+            <View style={styles.phoneInputRow}>
+              <TouchableOpacity 
+                style={styles.countrySelector}
+                onPress={() => setShowCountryPicker(true)}
+                disabled={isLoading}
+              >
+                <Text style={styles.countryFlag}>{selectedCountry.flag}</Text>
+                <Text style={styles.countryDialCode}>{selectedCountry.dialCode}</Text>
+                <Ionicons name="chevron-down" size={16} color="#6B7280" />
+              </TouchableOpacity>
               <TextInput
-                style={[styles.input, errors && styles.inputError]}
-                placeholder="10 Digit Mobile Number"
+                style={[styles.phoneInput, errors && styles.inputError]}
+                placeholder={`${selectedCountry.minLength} Digit Number`}
                 placeholderTextColor="#9CA3AF"
                 keyboardType="phone-pad"
-                maxLength={10}
+                maxLength={selectedCountry.maxLength}
                 value={phoneNumber}
                 onChangeText={(text) => {
                   setPhoneNumber(text.replace(/[^0-9]/g, ''));
@@ -147,6 +171,45 @@ export default function MobileVerificationScreen() {
           </View>
         </View>
       </View>
+      {/* Country Picker Modal */}
+      <Modal
+        visible={showCountryPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCountryPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Country</Text>
+              <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
+                <Ionicons name="close" size={24} color="#111827" />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={COUNTRIES}
+              keyExtractor={(item) => item.code}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.countryItem,
+                    selectedCountry.code === item.code && styles.countryItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedCountry(item);
+                    setPhoneNumber('');
+                    setShowCountryPicker(false);
+                  }}
+                >
+                  <Text style={styles.countryItemFlag}>{item.flag}</Text>
+                  <Text style={styles.countryItemName}>{item.name}</Text>
+                  <Text style={styles.countryItemDialCode}>{item.dialCode}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -324,5 +387,89 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '600',
     textDecorationLine: 'underline',
+  },
+  phoneInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  countrySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    gap: 6,
+  },
+  countryFlag: {
+    fontSize: 18,
+  },
+  countryDialCode: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  phoneInput: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111827',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '60%',
+    paddingBottom: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  countryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  countryItemSelected: {
+    backgroundColor: '#F3E8FF',
+  },
+  countryItemFlag: {
+    fontSize: 24,
+  },
+  countryItemName: {
+    flex: 1,
+    fontSize: 16,
+    color: '#111827',
+  },
+  countryItemDialCode: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
   },
 });

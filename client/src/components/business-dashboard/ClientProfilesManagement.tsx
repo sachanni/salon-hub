@@ -230,6 +230,7 @@ export default function ClientProfilesManagement({ salonId }: ClientProfilesMana
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddNoteOpen, setIsAddNoteOpen] = useState(false);
   const [isAddFormulaOpen, setIsAddFormulaOpen] = useState(false);
+  const [isAddPhotoOpen, setIsAddPhotoOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [photoViewerIndex, setPhotoViewerIndex] = useState<number | null>(null);
 
@@ -349,6 +350,48 @@ export default function ClientProfilesManagement({ salonId }: ClientProfilesMana
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to delete note", variant: "destructive" });
+    }
+  });
+
+  const uploadPhotoMutation = useMutation({
+    mutationFn: async (formData: FormData) => {
+      if (!selectedProfile?.id) {
+        throw new Error('No client profile selected');
+      }
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+      
+      try {
+        const response = await fetch(`/api/business/${salonId}/clients/${selectedProfile.id}/photos`, {
+          method: 'POST',
+          credentials: 'include',
+          body: formData,
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+          throw new Error(error.error || 'Failed to upload photo');
+        }
+        return response.json();
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          throw new Error('Upload timed out. Please try again with a smaller image.');
+        }
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'clients', selectedProfile?.customerId] });
+      toast({ title: "Success", description: "Photo uploaded successfully" });
+      setIsAddPhotoOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   });
 
@@ -872,7 +915,7 @@ export default function ClientProfilesManagement({ salonId }: ClientProfilesMana
                 <TabsContent value="photos" className="mt-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold">Before/After Photos</h3>
-                    <Button size="sm" disabled>
+                    <Button size="sm" onClick={() => setIsAddPhotoOpen(true)}>
                       <Upload className="h-4 w-4 mr-1" />
                       Upload Photo
                     </Button>
@@ -933,6 +976,22 @@ export default function ClientProfilesManagement({ salonId }: ClientProfilesMana
             settings={visibilitySettings}
             onSave={(data) => updateVisibilityMutation.mutate(data)}
             isSaving={updateVisibilityMutation.isPending}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddPhotoOpen} onOpenChange={setIsAddPhotoOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload Before/After Photo</DialogTitle>
+            <DialogDescription>
+              Upload a photo to track this client's transformation
+            </DialogDescription>
+          </DialogHeader>
+          <AddPhotoForm
+            onSubmit={(formData) => uploadPhotoMutation.mutate(formData)}
+            onCancel={() => setIsAddPhotoOpen(false)}
+            isSubmitting={uploadPhotoMutation.isPending}
           />
         </DialogContent>
       </Dialog>
@@ -1729,6 +1788,126 @@ function AddFormulaForm({
           disabled={!formData.formulaName.trim() || isSubmitting}
         >
           {isSubmitting ? 'Adding...' : 'Add Formula'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddPhotoForm({ 
+  onSubmit, 
+  onCancel,
+  isSubmitting 
+}: { 
+  onSubmit: (formData: FormData) => void; 
+  onCancel: () => void;
+  isSubmitting: boolean;
+}) {
+  const [photoType, setPhotoType] = useState<'before' | 'after' | 'result' | 'reference'>('after');
+  const [caption, setCaption] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        alert('File too large. Maximum size is 10MB');
+        return;
+      }
+      setSelectedFile(file);
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!selectedFile) return;
+    
+    const formData = new FormData();
+    formData.append('photo', selectedFile);
+    formData.append('photoType', photoType);
+    if (caption) formData.append('caption', caption);
+    
+    onSubmit(formData);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Photo Type *</Label>
+        <Select 
+          value={photoType}
+          onValueChange={(v: any) => setPhotoType(v)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="before">Before</SelectItem>
+            <SelectItem value="after">After</SelectItem>
+            <SelectItem value="result">Result</SelectItem>
+            <SelectItem value="reference">Reference/Inspiration</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Photo *</Label>
+        <div className="border-2 border-dashed rounded-lg p-4 text-center">
+          {previewUrl ? (
+            <div className="relative">
+              <img 
+                src={previewUrl} 
+                alt="Preview" 
+                className="max-h-48 mx-auto rounded-lg object-contain"
+              />
+              <Button 
+                variant="destructive" 
+                size="sm" 
+                className="absolute top-2 right-2"
+                onClick={() => {
+                  setSelectedFile(null);
+                  setPreviewUrl(null);
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <label className="cursor-pointer block py-8">
+              <Camera className="h-12 w-12 mx-auto text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">Click to select a photo</p>
+              <p className="text-xs text-muted-foreground mt-1">JPEG, PNG, WebP (max 10MB)</p>
+              <input 
+                type="file" 
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </label>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Caption (optional)</Label>
+        <Input 
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          placeholder="e.g., After balayage treatment"
+        />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4">
+        <Button variant="outline" onClick={onCancel} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <Button 
+          onClick={handleSubmit} 
+          disabled={!selectedFile || isSubmitting}
+        >
+          {isSubmitting ? 'Uploading...' : 'Upload Photo'}
         </Button>
       </div>
     </div>

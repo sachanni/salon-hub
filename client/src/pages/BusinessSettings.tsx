@@ -83,7 +83,17 @@ interface BusinessSettingsProps {
 export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const [activeTab, setActiveTab] = useState("business");
+  
+  // Read tab from URL query parameter
+  const getInitialTab = () => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') || 'business';
+    }
+    return 'business';
+  };
+  
+  const [activeTab, setActiveTab] = useState(getInitialTab);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [salonToDelete, setSalonToDelete] = useState<Salon | null>(null);
 
@@ -151,6 +161,8 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
     { id: "deposits", label: "Deposits & Protection", icon: Wallet, badge: null },
     { id: "giftcards", label: "Gift Cards", icon: Gift, badge: "NEW" },
     { id: "rebooking", label: "Smart Rebooking", icon: RefreshCw, badge: "NEW" },
+    { id: "subscription", label: "Subscription & Billing", icon: CreditCard, badge: "NEW" },
+    { id: "integrations", label: "Social Integrations", icon: Globe, badge: "NEW" },
     { id: "team", label: "Team & Permissions", icon: Users, badge: "NEW" },
     { id: "salons", label: "Salon Management", icon: Building, badge: null },
     { id: "security", label: "Account & Security", icon: Shield, badge: null },
@@ -281,6 +293,14 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
                   {/* Account & Security */}
                   {activeTab === "security" && (
                     <AccountSecuritySettings salonData={salonData} salonId={salonId} />
+                  )}
+
+                  {activeTab === "subscription" && (
+                    <SubscriptionSettings salonId={salonId} />
+                  )}
+
+                  {activeTab === "integrations" && (
+                    <SocialIntegrationsSettings salonId={salonId} />
                   )}
                 </CardContent>
               </ScrollArea>
@@ -5324,6 +5344,642 @@ function ServiceCycleForm({
           {isLoading ? 'Saving...' : cycle ? 'Update' : 'Create'}
         </Button>
       </div>
+    </div>
+  );
+}
+
+function SubscriptionSettings({ salonId }: { salonId: string }) {
+  const { toast } = useToast();
+  const [selectedTier, setSelectedTier] = useState<string | null>(null);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+
+  const { data: tiersData, isLoading: tiersLoading } = useQuery({
+    queryKey: ['/api/subscriptions/tiers'],
+  });
+
+  const { data: subscriptionData, isLoading: subLoading, refetch: refetchSubscription } = useQuery({
+    queryKey: ['/api/subscriptions/salon', salonId],
+    queryFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}`);
+      if (!res.ok) throw new Error('Failed to fetch subscription');
+      return res.json();
+    },
+  });
+
+  const { data: paymentHistory } = useQuery({
+    queryKey: ['/api/subscriptions/salon', salonId, 'payment-history'],
+    queryFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/payment-history`);
+      if (!res.ok) throw new Error('Failed to fetch payment history');
+      return res.json();
+    },
+  });
+
+  const startTrialMutation = useMutation({
+    mutationFn: async (tierName: string) => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/start-trial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tierName, trialDays: 14 }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to start trial');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Trial Started', description: '14-day free trial activated!' });
+      refetchSubscription();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const createOrderMutation = useMutation({
+    mutationFn: async ({ tierName, cycle }: { tierName: string; cycle: 'monthly' | 'yearly' }) => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/create-upgrade-order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tierName, billingCycle: cycle }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to create order');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.order && typeof window !== 'undefined' && (window as any).Razorpay) {
+        const options = {
+          key: data.order.keyId,
+          amount: data.order.amount,
+          currency: data.order.currency,
+          name: 'SalonHub',
+          description: `Subscription Upgrade`,
+          order_id: data.order.orderId,
+          handler: async (response: any) => {
+            try {
+              const verifyRes = await fetch(`/api/subscriptions/salon/${salonId}/verify-upgrade`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  tierName: selectedTier,
+                  billingCycle,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                }),
+              });
+              if (verifyRes.ok) {
+                toast({ title: 'Upgrade Successful', description: 'Your subscription has been upgraded!' });
+                refetchSubscription();
+              }
+            } catch (e) {
+              toast({ title: 'Error', description: 'Payment verification failed', variant: 'destructive' });
+            }
+          },
+        };
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
+      }
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const tiers = tiersData?.tiers || [];
+  const currentTier = subscriptionData?.tier;
+  const subscription = subscriptionData?.subscription;
+
+  const tierFeatureList: Record<string, string[]> = {
+    free: [
+      'Basic salon listing',
+      'Standard booking via SalonHub',
+      'Up to 3 staff members',
+      'Up to 10 services',
+    ],
+    growth: [
+      'Everything in Free, plus:',
+      'Instagram "Book Now" button',
+      'Facebook "Book Now" button',
+      'Social booking analytics',
+      'Priority customer support',
+      'Up to 10 staff members',
+      'Up to 50 services',
+    ],
+    elite: [
+      'Everything in Growth, plus:',
+      'Reserve with Google',
+      'Messenger chatbot booking',
+      'Custom branding on booking widget',
+      'API access for integrations',
+      'Unlimited staff & services',
+      'Dedicated account manager',
+    ],
+  };
+
+  if (tiersLoading || subLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+          Subscription & Billing
+        </h2>
+        <p className="text-muted-foreground mt-1">
+          Manage your subscription tier and unlock premium features
+        </p>
+      </div>
+
+      {currentTier && (
+        <Card className="border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg">Current Plan</CardTitle>
+                <CardDescription>Your active subscription</CardDescription>
+              </div>
+              <Badge variant={currentTier.name === 'free' ? 'secondary' : 'default'} className="text-sm">
+                {currentTier.displayName}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <span>Status: {subscription?.status}</span>
+              </div>
+              {subscription?.trialEndsAt && (
+                <div className="flex items-center gap-2 text-amber-600">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>Trial ends: {new Date(subscription.trialEndsAt).toLocaleDateString()}</span>
+                </div>
+              )}
+              {subscription?.currentPeriodEnd && currentTier.name !== 'free' && (
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-violet-600" />
+                  <span>Renews: {new Date(subscription.currentPeriodEnd).toLocaleDateString()}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="flex items-center justify-center gap-4 mb-4">
+        <span className={billingCycle === 'monthly' ? 'font-semibold text-violet-600' : 'text-muted-foreground'}>
+          Monthly
+        </span>
+        <Switch
+          checked={billingCycle === 'yearly'}
+          onCheckedChange={(checked) => setBillingCycle(checked ? 'yearly' : 'monthly')}
+        />
+        <span className={billingCycle === 'yearly' ? 'font-semibold text-violet-600' : 'text-muted-foreground'}>
+          Yearly
+          <Badge variant="secondary" className="ml-2 text-xs">Save 17%</Badge>
+        </span>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        {tiers.map((tier: any) => {
+          const isCurrentTier = currentTier?.name === tier.name;
+          const price = billingCycle === 'monthly' ? tier.monthlyPrice : tier.yearlyPrice / 12;
+          const features = tierFeatureList[tier.name] || [];
+
+          return (
+            <Card
+              key={tier.id}
+              className={`relative transition-all ${
+                isCurrentTier
+                  ? 'border-violet-400 shadow-lg ring-2 ring-violet-200'
+                  : 'hover:border-violet-200 hover:shadow-md'
+              }`}
+            >
+              {tier.name === 'growth' && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <Badge className="bg-gradient-to-r from-violet-500 to-purple-500">Most Popular</Badge>
+                </div>
+              )}
+              <CardHeader className="text-center pb-2">
+                <CardTitle className="text-xl">{tier.displayName}</CardTitle>
+                <div className="mt-2">
+                  <span className="text-3xl font-bold">
+                    {price === 0 ? 'Free' : `₹${price.toLocaleString()}`}
+                  </span>
+                  {price > 0 && <span className="text-muted-foreground">/month</span>}
+                </div>
+                {billingCycle === 'yearly' && tier.yearlyPrice > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Billed ₹{tier.yearlyPrice.toLocaleString()}/year
+                  </p>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <ul className="space-y-2 text-sm">
+                  {features.map((feature, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                {isCurrentTier ? (
+                  <Button disabled className="w-full" variant="secondary">
+                    Current Plan
+                  </Button>
+                ) : tier.name === 'free' ? (
+                  <Button variant="outline" className="w-full" disabled>
+                    Downgrade
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    {currentTier?.name === 'free' && (
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => startTrialMutation.mutate(tier.name)}
+                        disabled={startTrialMutation.isPending}
+                      >
+                        Start 14-Day Free Trial
+                      </Button>
+                    )}
+                    <Button
+                      className="w-full bg-gradient-to-r from-violet-500 to-purple-500"
+                      onClick={() => {
+                        setSelectedTier(tier.name);
+                        createOrderMutation.mutate({ tierName: tier.name, cycle: billingCycle });
+                      }}
+                      disabled={createOrderMutation.isPending}
+                    >
+                      {createOrderMutation.isPending ? 'Processing...' : 'Upgrade Now'}
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {paymentHistory?.payments?.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Payment History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {paymentHistory.payments.map((payment: any) => (
+                <div key={payment.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                  <div>
+                    <p className="font-medium">₹{payment.amount}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(payment.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <Badge variant={payment.status === 'paid' ? 'default' : 'secondary'}>
+                    {payment.status}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function SocialIntegrationsSettings({ salonId }: { salonId: string }) {
+  const { toast } = useToast();
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  const { data: subscriptionData } = useQuery({
+    queryKey: ['/api/subscriptions/salon', salonId],
+    queryFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+
+  const { data: metaStatus, isLoading, refetch: refetchMeta } = useQuery({
+    queryKey: ['/api/meta/status', salonId],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/status/${salonId}`);
+      if (!res.ok) return { connected: false };
+      return res.json();
+    },
+  });
+
+  const { data: analytics } = useQuery({
+    queryKey: ['/api/meta/analytics', salonId],
+    queryFn: async () => {
+      const res = await fetch(`/api/meta/analytics/${salonId}?days=30`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: metaStatus?.connected,
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/meta/disconnect/${salonId}`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to disconnect');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Disconnected', description: 'Facebook/Instagram integration removed' });
+      refetchMeta();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (settings: any) => {
+      const res = await fetch(`/api/meta/settings/${salonId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to update settings');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Settings Updated' });
+      refetchMeta();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const handleConnect = async () => {
+    setIsConnecting(true);
+    try {
+      const res = await fetch(`/api/meta/connect/${salonId}`);
+      const data = await res.json();
+      if (data.upgradeRequired) {
+        toast({
+          title: 'Upgrade Required',
+          description: 'Please upgrade to Growth or Elite plan to use social booking',
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (data.oauthUrl) {
+        window.location.href = data.oauthUrl;
+      }
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const currentTier = subscriptionData?.tier?.name;
+  const hasAccess = currentTier === 'growth' || currentTier === 'elite';
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+          Social Integrations
+        </h2>
+        <p className="text-muted-foreground mt-1">
+          Connect your Instagram and Facebook to enable direct booking
+        </p>
+      </div>
+
+      {!hasAccess && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
+              <div>
+                <p className="font-medium text-amber-800">Upgrade Required</p>
+                <p className="text-sm text-amber-700">
+                  Social booking buttons require a Growth or Elite subscription.
+                </p>
+              </div>
+              <Button size="sm" className="ml-auto bg-gradient-to-r from-violet-500 to-purple-500">
+                Upgrade Now
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className={!hasAccess ? 'opacity-60' : ''}>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-pink-500 via-red-500 to-yellow-500 flex items-center justify-center">
+                  <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                  </svg>
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Instagram</CardTitle>
+                  <CardDescription>Book Now button on your profile</CardDescription>
+                </div>
+              </div>
+              {metaStatus?.instagram && (
+                <Badge variant="default" className="bg-green-500">Connected</Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {metaStatus?.instagram ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>@{metaStatus.instagram.username}</span>
+                </div>
+                {analytics?.totals?.instagram && (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="p-2 bg-violet-50 rounded">
+                      <p className="text-lg font-bold">{analytics.totals.instagram.buttonClicks}</p>
+                      <p className="text-xs text-muted-foreground">Clicks</p>
+                    </div>
+                    <div className="p-2 bg-violet-50 rounded">
+                      <p className="text-lg font-bold">{analytics.totals.instagram.bookingsCompleted}</p>
+                      <p className="text-xs text-muted-foreground">Bookings</p>
+                    </div>
+                    <div className="p-2 bg-violet-50 rounded">
+                      <p className="text-lg font-bold">₹{analytics.totals.instagram.revenue}</p>
+                      <p className="text-xs text-muted-foreground">Revenue</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Enable customers to book directly from your Instagram profile.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className={!hasAccess ? 'opacity-60' : ''}>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center">
+                  <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Facebook</CardTitle>
+                  <CardDescription>Book Now button on your Page</CardDescription>
+                </div>
+              </div>
+              {metaStatus?.facebook && (
+                <Badge variant="default" className="bg-green-500">Connected</Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {metaStatus?.facebook ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>{metaStatus.facebook.pageName}</span>
+                </div>
+                {analytics?.totals?.facebook && (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="p-2 bg-blue-50 rounded">
+                      <p className="text-lg font-bold">{analytics.totals.facebook.buttonClicks}</p>
+                      <p className="text-xs text-muted-foreground">Clicks</p>
+                    </div>
+                    <div className="p-2 bg-blue-50 rounded">
+                      <p className="text-lg font-bold">{analytics.totals.facebook.bookingsCompleted}</p>
+                      <p className="text-xs text-muted-foreground">Bookings</p>
+                    </div>
+                    <div className="p-2 bg-blue-50 rounded">
+                      <p className="text-lg font-bold">₹{analytics.totals.facebook.revenue}</p>
+                      <p className="text-xs text-muted-foreground">Revenue</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Add a Book Now button to your Facebook Business Page.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {hasAccess && (
+        <div className="flex gap-4">
+          {!metaStatus?.connected ? (
+            <Button
+              className="bg-gradient-to-r from-violet-500 to-purple-500"
+              onClick={handleConnect}
+              disabled={isConnecting}
+            >
+              {isConnecting ? 'Connecting...' : 'Connect Facebook & Instagram'}
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => refetchMeta()}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh Status
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => disconnectMutation.mutate()}
+                disabled={disconnectMutation.isPending}
+              >
+                Disconnect
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {metaStatus?.connected && metaStatus.settings && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Booking Settings</CardTitle>
+            <CardDescription>Configure how social bookings work</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Lead Time (hours before booking)</Label>
+                <Select
+                  value={String(metaStatus.settings.bookingLeadTimeHours)}
+                  onValueChange={(value) =>
+                    updateSettingsMutation.mutate({ bookingLeadTimeHours: parseInt(value) })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 hour</SelectItem>
+                    <SelectItem value="2">2 hours</SelectItem>
+                    <SelectItem value="4">4 hours</SelectItem>
+                    <SelectItem value="12">12 hours</SelectItem>
+                    <SelectItem value="24">24 hours</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Auto-confirm bookings</Label>
+                <p className="text-xs text-muted-foreground">Automatically confirm new bookings</p>
+              </div>
+              <Switch
+                checked={metaStatus.settings.autoConfirmBookings}
+                onCheckedChange={(checked) =>
+                  updateSettingsMutation.mutate({ autoConfirmBookings: checked })
+                }
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Send DM reminders</Label>
+                <p className="text-xs text-muted-foreground">Send booking reminders via Instagram/Messenger</p>
+              </div>
+              <Switch
+                checked={metaStatus.settings.sendDmReminders}
+                onCheckedChange={(checked) =>
+                  updateSettingsMutation.mutate({ sendDmReminders: checked })
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

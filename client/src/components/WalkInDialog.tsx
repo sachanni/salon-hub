@@ -25,6 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { UserPlus, X, Scissors, IndianRupee } from "lucide-react";
+import { WalkInPhoneVerification } from "./WalkInPhoneVerification";
 
 interface Service {
   id: string;
@@ -53,6 +54,8 @@ export default function WalkInDialog({ salonId, open, onOpenChange, onSuccess }:
   
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [verificationSessionId, setVerificationSessionId] = useState<string | null>(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
 
@@ -98,24 +101,31 @@ export default function WalkInDialog({ salonId, open, onOpenChange, onSuccess }:
           checkInMethod: 'walk_in',
           serviceIds: selectedServiceIds.length > 0 ? selectedServiceIds : undefined,
           staffId: selectedStaffId || undefined,
+          verificationSessionId: verificationSessionId || undefined,
         }),
       });
       if (!response.ok) {
         let errorMessage = 'Failed to check in walk-in customer';
+        let sessionExpired = false;
         try {
           const error = await response.json();
           errorMessage = error.message || error.error || errorMessage;
+          sessionExpired = error.sessionExpired === true;
         } catch (e) {
           // Response was not JSON (e.g., HTML error page)
           errorMessage = `Server error: ${response.status} ${response.statusText}`;
         }
-        throw new Error(errorMessage);
+        const err = new Error(errorMessage);
+        (err as any).sessionExpired = sessionExpired;
+        throw err;
       }
       return response.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'job-cards'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'bookings'] });
+      // Invalidate all client profile queries (list and detail)
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'clients'], exact: false });
       toast({
         title: "Walk-in Checked In",
         description: `Job card ${data.jobCard.jobCardNumber} created successfully`
@@ -126,20 +136,40 @@ export default function WalkInDialog({ salonId, open, onOpenChange, onSuccess }:
         onSuccess(data.jobCard.id);
       }
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Check-in Failed",
-        description: error.message,
-        variant: "destructive"
-      });
+    onError: (error: Error & { sessionExpired?: boolean }) => {
+      // Handle session expiry by resetting phone verification
+      if (error.sessionExpired) {
+        setPhoneVerified(false);
+        setVerificationSessionId(null);
+        toast({
+          title: "Verification Expired",
+          description: "Please verify the phone number again.",
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Check-in Failed",
+          description: error.message,
+          variant: "destructive"
+        });
+      }
     }
   });
 
   const resetForm = () => {
     setCustomerName("");
     setCustomerPhone("");
+    setPhoneVerified(false);
+    setVerificationSessionId(null);
     setSelectedServiceIds([]);
     setSelectedStaffId("");
+  };
+
+  const handlePhoneVerified = (data: { phone: string; verificationSessionId: string; userId?: number; alreadyVerified?: boolean }) => {
+    setCustomerPhone(data.phone);
+    setPhoneVerified(true);
+    // Both new and returning customers now have a valid verificationSessionId
+    setVerificationSessionId(data.verificationSessionId);
   };
 
   const handleClose = (isOpen: boolean) => {
@@ -184,7 +214,7 @@ export default function WalkInDialog({ salonId, open, onOpenChange, onSuccess }:
     return acc;
   }, {} as Record<string, Service[]>);
 
-  const isValid = customerName.trim().length > 0;
+  const isValid = customerName.trim().length > 0 && phoneVerified;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -211,16 +241,11 @@ export default function WalkInDialog({ salonId, open, onOpenChange, onSuccess }:
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="customerPhone">Phone Number</Label>
-            <Input
-              id="customerPhone"
-              placeholder="Enter phone number (optional)"
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
-              data-testid="walkin-customer-phone"
-            />
-          </div>
+          <WalkInPhoneVerification
+            onVerified={handlePhoneVerified}
+            initialPhone=""
+            customerName={customerName}
+          />
 
           <div className="space-y-2">
             <Label>Assign Staff (Optional)</Label>

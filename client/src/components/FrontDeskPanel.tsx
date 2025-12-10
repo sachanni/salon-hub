@@ -210,6 +210,8 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'job-cards'] });
       queryClient.invalidateQueries({ queryKey: ['/api/salons', salonId, 'bookings'] });
+      // Invalidate all client profile queries (list and detail)
+      queryClient.invalidateQueries({ queryKey: ['/api/business', salonId, 'clients'], exact: false });
       toast({
         title: "Checked In",
         description: `Job card ${data.jobCard.jobCardNumber} created successfully`

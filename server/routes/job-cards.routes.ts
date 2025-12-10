@@ -18,6 +18,7 @@ import {
   commissions,
   commissionRates,
   clientProfiles,
+  phoneVerificationTokens,
   checkInCustomerSchema,
   addJobCardServiceSchema,
   addJobCardProductSchema,
@@ -32,7 +33,7 @@ import {
   BOOKING_STATUSES,
   validateJobCardStatusTransition,
 } from '@shared/schema';
-import { eq, and, desc, sql, gte, lte, inArray, or } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, lte, inArray, or, gt } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireSalonAccess, populateUserFromSession, type AuthenticatedRequest } from '../middleware/auth';
 
@@ -222,7 +223,7 @@ router.post('/:salonId/check-in', requireSalonAccess(), async (req: Authenticate
       return res.status(400).json({ error: 'Invalid request body', details: parsed.error.errors });
     }
     
-    const { bookingId, customerName, customerEmail, customerPhone, assignedStaffId, checkInMethod, isWalkIn, notes, serviceIds, staffId } = parsed.data;
+    const { bookingId, customerName, customerEmail, customerPhone, assignedStaffId, checkInMethod, isWalkIn, notes, serviceIds, staffId, verificationSessionId } = parsed.data;
     
     let booking = null;
     let customerId: string | null = null;
@@ -230,12 +231,63 @@ router.post('/:salonId/check-in', requireSalonAccess(), async (req: Authenticate
     let servicesFromWalkIn: any[] = [];
     let newUserCreated = false;
     
-    // For walk-in customers with phone number, find or create user account
-    if (!bookingId && customerPhone) {
-      // Check if user with this phone already exists
-      const existingUser = await db.query.users.findFirst({
-        where: eq(users.phone, customerPhone),
+    // For walk-in customers, require phone verification
+    if (checkInMethod === 'walk_in' && !bookingId) {
+      if (!customerPhone || !verificationSessionId) {
+        return res.status(400).json({ 
+          error: 'Phone verification is required for walk-in customers',
+          requiresVerification: true 
+        });
+      }
+      
+      // Validate the verification session (works for both new and returning customers)
+      const now = new Date();
+      const verificationToken = await db.query.phoneVerificationTokens.findFirst({
+        where: and(
+          eq(phoneVerificationTokens.verificationSessionId, verificationSessionId),
+          gt(phoneVerificationTokens.sessionExpiresAt, now)
+        ),
       });
+      
+      if (!verificationToken || !verificationToken.verifiedAt) {
+        return res.status(400).json({ 
+          error: 'Invalid or expired phone verification. Please verify your phone again.',
+          sessionExpired: true 
+        });
+      }
+      
+      // Normalize phone for comparison
+      const normalizedInputPhone = customerPhone.replace(/\D/g, '').slice(-10);
+      const normalizedVerifiedPhone = verificationToken.phone.replace(/\D/g, '').slice(-10);
+      
+      if (normalizedInputPhone !== normalizedVerifiedPhone) {
+        return res.status(400).json({ 
+          error: 'Phone number does not match verified number',
+          phoneMismatch: true 
+        });
+      }
+      
+      const isReturningCustomer = verificationToken.context === 'walk-in-returning';
+      console.log(`✅ Walk-in phone verified: ${customerPhone} (session: ${verificationSessionId.substring(0, 8)}..., returning: ${isReturningCustomer})`);
+    }
+    
+    // For walk-in customers with phone number, find or create user account
+    // Normalize phone: strip country code and non-digits, keep last 10 digits
+    const normalizedCustomerPhone = customerPhone ? customerPhone.replace(/\D/g, '').slice(-10) : null;
+    
+    if (!bookingId && normalizedCustomerPhone) {
+      // Check if user with this phone already exists (try both formats)
+      const phoneWithPrefixWalkin = '+91' + normalizedCustomerPhone;
+      let existingUser = await db.query.users.findFirst({
+        where: eq(users.phone, phoneWithPrefixWalkin),
+      });
+      
+      // Fallback: check without prefix
+      if (!existingUser) {
+        existingUser = await db.query.users.findFirst({
+          where: eq(users.phone, normalizedCustomerPhone),
+        });
+      }
       
       if (existingUser) {
         customerId = existingUser.id;
@@ -246,18 +298,18 @@ router.post('/:salonId/check-in', requireSalonAccess(), async (req: Authenticate
         const lastName = nameParts.slice(1).join(' ') || null;
         
         const [newUser] = await db.insert(users).values({
-          phone: customerPhone,
+          phone: normalizedCustomerPhone,
           email: customerEmail || null,
           firstName,
           lastName,
           emailVerified: 0,
-          phoneVerified: 0,
+          phoneVerified: 1, // Phone was verified via OTP
           isActive: 1,
         }).returning();
         
         customerId = newUser.id;
         newUserCreated = true;
-        console.log(`Created new user account for walk-in customer: ${newUser.id} (${customerPhone})`);
+        console.log(`Created new user account for walk-in customer: ${newUser.id} (${normalizedCustomerPhone})`);
       }
     }
     
@@ -285,6 +337,55 @@ router.post('/:salonId/check-in', requireSalonAccess(), async (req: Authenticate
       }
       
       customerId = booking.userId;
+      
+      // If booking has no user_id but has customer phone, create/link user account
+      if (!customerId && booking.customerPhone) {
+        // Normalize phone: remove country codes (+91, +1, etc) and non-digits, keep last 10 digits for India
+        const cleanPhone = booking.customerPhone.replace(/\D/g, '');
+        const normalizedPhone = cleanPhone.length > 10 ? cleanPhone.slice(-10) : cleanPhone;
+        
+        // Check if user with this phone already exists (try both formats)
+        const phoneWithPrefix = '+91' + normalizedPhone;
+        let existingUser = await db.query.users.findFirst({
+          where: eq(users.phone, phoneWithPrefix),
+        });
+        
+        // Fallback: check without prefix
+        if (!existingUser) {
+          existingUser = await db.query.users.findFirst({
+            where: eq(users.phone, normalizedPhone),
+          });
+        }
+        
+        if (existingUser) {
+          customerId = existingUser.id;
+          console.log(`Linked booking to existing user: ${existingUser.id} (${normalizedPhone})`);
+        } else {
+          // Create new user account for booking customer
+          const nameParts = (booking.customerName || '').trim().split(' ');
+          const firstName = nameParts[0] || 'Guest';
+          const lastName = nameParts.slice(1).join(' ') || null;
+          
+          const [newUser] = await db.insert(users).values({
+            phone: normalizedPhone,
+            email: booking.customerEmail || null,
+            firstName,
+            lastName,
+            emailVerified: 0,
+            phoneVerified: 0,
+            isActive: 1,
+          }).returning();
+          
+          customerId = newUser.id;
+          console.log(`Created new user account for booking customer: ${newUser.id} (${normalizedPhone})`);
+        }
+        
+        // Update the booking with the user_id for future reference
+        await db.update(bookings)
+          .set({ userId: customerId })
+          .where(eq(bookings.id, bookingId));
+        console.log(`Updated booking ${bookingId} with userId ${customerId}`);
+      }
       
       // First try to get services from booking_services table (multi-service bookings)
       servicesFromBooking = await db.select({
@@ -1713,6 +1814,110 @@ router.post('/:salonId/job-cards/:jobCardId/complete', requireSalonAccess(), asy
           }
         }
         
+        // === PRODUCT COMMISSION CALCULATION ===
+        // Calculate commissions for product sales
+        const cardProductsForCommission = await tx.select().from(jobCardProducts)
+          .where(and(
+            eq(jobCardProducts.jobCardId, jobCardId),
+            sql`${jobCardProducts.commissionCalculated} = 0 OR ${jobCardProducts.commissionCalculated} IS NULL`
+          ));
+        
+        for (const productItem of cardProductsForCommission) {
+          if (productItem.staffId) {
+            // Look for specific rate for this staff + product combination
+            const [specificProductRate] = await tx.select().from(commissionRates)
+              .where(and(
+                eq(commissionRates.salonId, salonId),
+                eq(commissionRates.staffId, productItem.staffId),
+                eq(commissionRates.productId, productItem.productId),
+                eq(commissionRates.appliesTo, 'product'),
+                eq(commissionRates.isActive, 1)
+              ))
+              .limit(1);
+            
+            let productCommissionRateRecord = specificProductRate;
+            
+            // Fallback to staff default product rate
+            if (!productCommissionRateRecord) {
+              const [staffDefaultProductRate] = await tx.select().from(commissionRates)
+                .where(and(
+                  eq(commissionRates.salonId, salonId),
+                  eq(commissionRates.staffId, productItem.staffId),
+                  sql`${commissionRates.productId} IS NULL`,
+                  eq(commissionRates.appliesTo, 'product'),
+                  eq(commissionRates.isActive, 1)
+                ))
+                .limit(1);
+              productCommissionRateRecord = staffDefaultProductRate;
+            }
+            
+            // Fallback to salon default product rate
+            if (!productCommissionRateRecord) {
+              const [salonDefaultProductRate] = await tx.select().from(commissionRates)
+                .where(and(
+                  eq(commissionRates.salonId, salonId),
+                  sql`${commissionRates.staffId} IS NULL`,
+                  sql`${commissionRates.productId} IS NULL`,
+                  eq(commissionRates.appliesTo, 'product'),
+                  eq(commissionRates.isActive, 1)
+                ))
+                .limit(1);
+              productCommissionRateRecord = salonDefaultProductRate;
+            }
+            
+            // Only create commission if a product rate is configured
+            if (productCommissionRateRecord) {
+              const productRatePercent = Number(productCommissionRateRecord.rateValue);
+              const productRateId = productCommissionRateRecord.id;
+              
+              let productCommissionAmount = 0;
+              const productSaleAmount = productItem.finalPricePaisa || productItem.totalPricePaisa || (productItem.unitPricePaisa * productItem.quantity);
+              
+              if (productCommissionRateRecord.rateType === 'fixed_amount') {
+                productCommissionAmount = Math.round(Number(productCommissionRateRecord.rateValue) * 100) * productItem.quantity;
+              } else {
+                productCommissionAmount = Math.round(productSaleAmount * (productRatePercent / 100));
+              }
+              
+              // Apply min/max caps
+              if (productCommissionRateRecord.minAmount && productCommissionAmount < productCommissionRateRecord.minAmount) {
+                productCommissionAmount = productCommissionRateRecord.minAmount;
+              }
+              if (productCommissionRateRecord.maxAmount && productCommissionAmount > productCommissionRateRecord.maxAmount) {
+                productCommissionAmount = productCommissionRateRecord.maxAmount;
+              }
+              
+              const productCommissionDate = new Date();
+              
+              const [newProductCommission] = await tx.insert(commissions).values({
+                salonId,
+                staffId: productItem.staffId,
+                productId: productItem.productId,
+                bookingId: jobCard.bookingId || null,
+                jobCardId: jobCardId,
+                rateId: productRateId,
+                sourceType: 'product',
+                baseAmountPaisa: productSaleAmount,
+                commissionAmountPaisa: productCommissionAmount,
+                commissionRate: String(productRatePercent),
+                serviceDate: productCommissionDate,
+                periodYear: productCommissionDate.getFullYear(),
+                periodMonth: productCommissionDate.getMonth() + 1,
+                paymentStatus: 'pending',
+              }).returning();
+              
+              await tx.update(jobCardProducts)
+                .set({
+                  commissionCalculated: 1,
+                  commissionId: newProductCommission.id,
+                })
+                .where(eq(jobCardProducts.id, productItem.id));
+              
+              commissionsCalculated.push(newProductCommission.id);
+            }
+          }
+        }
+        
         // === INVENTORY UPDATE FOR PRODUCTS USED ===
         const cardProducts = await tx.select().from(jobCardProducts)
           .where(eq(jobCardProducts.jobCardId, jobCardId));
@@ -1880,7 +2085,7 @@ router.post('/:salonId/job-cards/:jobCardId/complete', requireSalonAccess(), asy
       }
       
       res.json({
-        ...updatedJobCard,
+        ...(updatedJobCard || {}),
         message: 'Job card completed successfully',
         receiptNumber,
         commissionsCalculated: commissionsCalculated.length,
