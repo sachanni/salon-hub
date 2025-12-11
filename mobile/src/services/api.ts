@@ -198,12 +198,12 @@ export const bookingAPI = {
     giftCardId?: string;
     giftCardAmountPaisa?: number;
   }) => {
-    const response = await api.post('/api/bookings', bookingData);
+    const response = await api.post('/api/mobile/bookings', bookingData);
     return response.data;
   },
 
   getBookingById: async (bookingId: string) => {
-    const response = await api.get(`/api/bookings/${bookingId}`);
+    const response = await api.get(`/api/mobile/bookings/${bookingId}`);
     return response.data;
   },
 
@@ -212,12 +212,12 @@ export const bookingAPI = {
     limit?: number;
     offset?: number;
   }) => {
-    const response = await api.get('/api/bookings/my-bookings', { params });
+    const response = await api.get('/api/mobile/bookings/my-bookings', { params });
     return response.data;
   },
 
   cancelBooking: async (bookingId: string, reason?: string) => {
-    const response = await api.post(`/api/bookings/${bookingId}/cancel`, { reason });
+    const response = await api.post(`/api/mobile/bookings/${bookingId}/cancel`, { reason });
     return response.data;
   },
 };
@@ -297,6 +297,16 @@ export const notificationAPI = {
 
   deleteNotification: async (notificationId: string) => {
     const response = await api.delete(`/api/mobile/notifications/${notificationId}`);
+    return response.data;
+  },
+
+  registerPushToken: async (data: { token: string; platform: string; deviceId?: string }) => {
+    const response = await api.post('/api/mobile/notifications/register-token', data);
+    return response.data;
+  },
+
+  unregisterPushToken: async (token: string) => {
+    const response = await api.post('/api/mobile/notifications/unregister-token', { token });
     return response.data;
   },
 };
@@ -761,7 +771,7 @@ export const appointmentsAPI = {
 
   getAppointmentById: async (appointmentId: string) => {
     try {
-      const response = await api.get(`/api/bookings/${appointmentId}`);
+      const response = await api.get(`/api/mobile/bookings/${appointmentId}`);
       return response.data;
     } catch (error) {
       return null;
@@ -778,7 +788,7 @@ export const appointmentsAPI = {
     address?: string;
     notes?: string;
   }) => {
-    const response = await api.post('/api/bookings', data);
+    const response = await api.post('/api/mobile/bookings', data);
     return response.data;
   },
 
@@ -786,14 +796,14 @@ export const appointmentsAPI = {
     date: string;
     time: string;
   }) => {
-    const response = await api.patch(`/api/bookings/${appointmentId}/reschedule`, data);
+    const response = await api.patch(`/api/mobile/bookings/${appointmentId}/reschedule`, data);
     return response.data;
   },
 
   cancelAppointment: async (appointmentId: string, data: {
     reason: string;
   }) => {
-    const response = await api.post(`/api/bookings/${appointmentId}/cancel`, data);
+    const response = await api.post(`/api/mobile/bookings/${appointmentId}/cancel`, data);
     return response.data;
   },
 
@@ -801,7 +811,7 @@ export const appointmentsAPI = {
     rating: number;
     comment?: string;
   }) => {
-    const response = await api.post(`/api/bookings/${appointmentId}/review`, data);
+    const response = await api.post(`/api/mobile/bookings/${appointmentId}/review`, data);
     return response.data;
   },
 };
@@ -891,7 +901,7 @@ export const depositAPI = {
     customerId?: string;
   }): Promise<DepositCheckResult> => {
     try {
-      const response = await api.post('/api/deposits/check-booking-deposit', data);
+      const response = await api.post('/api/mobile/deposits/check-booking-deposit', data);
       return response.data;
     } catch (error) {
       console.warn('Deposit check failed, assuming no deposit required');
@@ -907,7 +917,7 @@ export const depositAPI = {
 
   getCancellationPolicy: async (salonId: string) => {
     try {
-      const response = await api.get(`/api/deposits/cancellation-policy/${salonId}`);
+      const response = await api.get(`/api/mobile/deposits/cancellation-policy/${salonId}`);
       return response.data;
     } catch (error) {
       return null;

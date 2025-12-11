@@ -11,7 +11,9 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { bookingAPI } from '../services/api';
+import { bookingAPI, beautyProfileAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import StylistPreferencesBadge from '../components/StylistPreferencesBadge';
 
 interface BookingDetails {
   id: string;
@@ -34,6 +36,7 @@ interface BookingDetails {
 export default function BookingConfirmationScreen() {
   const params = useLocalSearchParams<{ bookingId: string; depositPaid?: string }>();
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const bookingId = params.bookingId;
   const depositPaid = params.depositPaid === 'true';
 
@@ -42,6 +45,8 @@ export default function BookingConfirmationScreen() {
   const [error, setError] = useState<string | null>(null);
   const [scaleAnim] = useState(new Animated.Value(0));
   const [fadeAnim] = useState(new Animated.Value(0));
+  const [hasPreferences, setHasPreferences] = useState(false);
+  const [staffName, setStaffName] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     fetchBookingDetails();
@@ -71,6 +76,21 @@ export default function BookingConfirmationScreen() {
       setError(null);
       const data = await bookingAPI.getBookingById(bookingId);
       setBooking(data);
+      
+      if (isAuthenticated && data?.salonId) {
+        try {
+          const summaryResponse = await beautyProfileAPI.getBookingSummary(data.salonId);
+          if (summaryResponse?.success && summaryResponse?.summary) {
+            const hasSavedPreferences = 
+              summaryResponse.summary.hairProfile?.type ||
+              summaryResponse.summary.skinProfile?.type ||
+              (summaryResponse.summary.allergies && summaryResponse.summary.allergies.length > 0);
+            setHasPreferences(!!hasSavedPreferences);
+          }
+        } catch (prefError) {
+          console.log('No preferences found for this salon');
+        }
+      }
     } catch (err) {
       console.error('Error fetching booking details:', err);
       setError('Unable to load booking details. Please check your connection and try again.');
@@ -201,6 +221,10 @@ export default function BookingConfirmationScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {hasPreferences && (
+          <StylistPreferencesBadge stylistName={staffName} />
+        )}
 
         <View style={styles.detailsCard}>
           <View style={styles.cardHeader}>

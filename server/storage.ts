@@ -1165,6 +1165,12 @@ export interface IStorage {
 
   approveSalon(salonId: string, approvedBy: string): Promise<void>;
   rejectSalon(salonId: string, reason: string, rejectedBy: string): Promise<void>;
+  toggleSalonStatus(salonId: string, isActive: boolean, options?: { 
+    disabledBySuperAdmin?: boolean; 
+    disabledReason?: string; 
+    disabledBy?: string;
+  }): Promise<void>;
+  toggleSalonStatusBySuperAdmin(salonId: string, isActive: boolean, adminId: string, reason?: string): Promise<void>;
 
   // User management  
   getAllUsersForAdmin(filters?: {
@@ -8502,10 +8508,88 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(salons.id, salonId));
   }
 
-  async toggleSalonStatus(salonId: string, isActive: boolean): Promise<void> {
-    await db.update(salons).set({
+  async toggleSalonStatus(
+    salonId: string, 
+    isActive: boolean, 
+    options?: { 
+      disabledBySuperAdmin?: boolean; 
+      disabledReason?: string; 
+      disabledBy?: string;
+    }
+  ): Promise<void> {
+    const updateData: any = {
       isActive: isActive ? 1 : 0
-    }).where(eq(salons.id, salonId));
+    };
+    
+    if (isActive) {
+      // When enabling (owner-initiated only), clear owner-level disabled fields
+      updateData.disabledAt = null;
+      updateData.disabledReason = null;
+      updateData.disabledBy = null;
+      // Explicitly keep disabledBySuperAdmin = 0
+      updateData.disabledBySuperAdmin = 0;
+    } else {
+      // When disabling (owner-initiated), set the disabled fields
+      updateData.disabledAt = new Date();
+      updateData.disabledReason = options?.disabledReason || 'Temporarily paused by owner';
+      updateData.disabledBy = options?.disabledBy || null;
+      // SECURITY: Owner-initiated disables always set disabledBySuperAdmin = 0
+      updateData.disabledBySuperAdmin = 0;
+    }
+    
+    // SECURITY: ATOMIC UPDATE with WHERE clause that ensures disabledBySuperAdmin = 0
+    // This prevents race conditions where a super admin disables while owner is modifying
+    // The update will only succeed if the salon is NOT currently disabled by super admin
+    const result = await db.update(salons)
+      .set(updateData)
+      .where(
+        and(
+          eq(salons.id, salonId),
+          eq(salons.disabledBySuperAdmin, 0) // Only modify if NOT admin-disabled
+        )
+      );
+    
+    // Check if update was successful by verifying a row was modified
+    // If no rows modified, either salon doesn't exist or was admin-disabled
+    const salon = await db.select().from(salons).where(eq(salons.id, salonId)).limit(1);
+    if (salon.length === 0) {
+      throw new Error("Salon not found");
+    }
+    
+    // If the salon's isActive status doesn't match what we tried to set, 
+    // it means the update failed due to disabledBySuperAdmin = 1
+    if (salon[0].isActive !== (isActive ? 1 : 0)) {
+      if (salon[0].disabledBySuperAdmin === 1) {
+        throw new Error("Cannot modify salon: This salon was disabled by a platform administrator. Please contact support.");
+      }
+    }
+  }
+
+  async toggleSalonStatusBySuperAdmin(
+    salonId: string, 
+    isActive: boolean, 
+    adminId: string,
+    reason?: string
+  ): Promise<void> {
+    const updateData: any = {
+      isActive: isActive ? 1 : 0
+    };
+    
+    if (isActive) {
+      // Super admin enabling - clear ALL disabled flags
+      updateData.disabledBySuperAdmin = 0;
+      updateData.disabledAt = null;
+      updateData.disabledReason = null;
+      updateData.disabledBy = null;
+    } else {
+      // Super admin disabling - set the super admin flag
+      updateData.disabledBySuperAdmin = 1;
+      updateData.disabledAt = new Date();
+      updateData.disabledReason = reason || 'Disabled by platform administrator';
+      updateData.disabledBy = adminId;
+    }
+    
+    await db.update(salons).set(updateData).where(eq(salons.id, salonId));
   }
 
   async getAllUsersForAdmin(filters?: {

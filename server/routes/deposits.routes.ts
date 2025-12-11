@@ -2198,6 +2198,130 @@ export function registerMobileDepositRoutes(app: any) {
     }
   });
 
+  app.post('/api/deposits/create-deposit-order', authenticateMobileUser, async (req: any, res: any) => {
+    try {
+      const userId = req.user?.id;
+      const { salonId, bookingId, amountPaisa, serviceAmountPaisa, depositPercentage, serviceIds } = req.body;
+
+      if (!salonId || !amountPaisa || amountPaisa < 100) {
+        return res.status(400).json({ error: 'salonId and amountPaisa (minimum 100) are required' });
+      }
+
+      const settings = await db.query.depositSettings.findFirst({
+        where: eq(depositSettings.salonId, salonId),
+      });
+
+      if (!settings || settings.isEnabled !== 1) {
+        return res.status(400).json({ error: 'Deposits are not enabled for this salon' });
+      }
+
+      const amountInr = amountPaisa / 100;
+      const receiptId = `dep_${Date.now()}_${userId?.substring(0, 8) || 'guest'}`;
+
+      const order = await razorpay.orders.create({
+        amount: amountPaisa,
+        currency: 'INR',
+        receipt: receiptId,
+        notes: {
+          type: 'deposit',
+          userId: userId || 'guest',
+          salonId,
+          bookingId: bookingId || '',
+          serviceIds: JSON.stringify(serviceIds || []),
+          depositPercentage: String(depositPercentage || settings.depositPercentage),
+          serviceAmountPaisa: String(serviceAmountPaisa || 0),
+        },
+      });
+
+      res.json({
+        success: true,
+        order: {
+          id: order.id,
+          amount: order.amount,
+          currency: order.currency,
+          receipt: order.receipt,
+        },
+        keyId: process.env.RAZORPAY_KEY_ID,
+      });
+    } catch (error: any) {
+      console.error('Error creating deposit order:', error);
+      res.status(500).json({ error: error.message || 'Failed to create deposit order' });
+    }
+  });
+
+  app.post('/api/deposits/verify-deposit-payment', authenticateMobileUser, async (req: any, res: any) => {
+    try {
+      const userId = req.user?.id;
+      const { 
+        razorpayOrderId, 
+        razorpayPaymentId, 
+        razorpaySignature,
+        salonId,
+        bookingId,
+        amountPaisa,
+        serviceAmountPaisa,
+        depositPercentage,
+        serviceIds,
+      } = req.body;
+
+      if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+        return res.status(400).json({ error: 'Missing payment verification parameters' });
+      }
+
+      if (!salonId || !amountPaisa) {
+        return res.status(400).json({ error: 'salonId and amountPaisa are required' });
+      }
+
+      const body = razorpayOrderId + '|' + razorpayPaymentId;
+      const expectedSignature = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || '')
+        .update(body.toString())
+        .digest('hex');
+
+      if (expectedSignature !== razorpaySignature) {
+        console.error('Payment signature verification failed');
+        return res.status(400).json({ error: 'Payment verification failed - invalid signature' });
+      }
+
+      const [transaction] = await db.insert(depositTransactions).values({
+        salonId,
+        customerId: userId,
+        bookingId: bookingId || null,
+        transactionType: 'deposit_collected',
+        amountPaisa,
+        currency: 'INR',
+        serviceAmountPaisa: serviceAmountPaisa || 0,
+        depositPercentage: depositPercentage || 0,
+        razorpayPaymentId,
+        razorpayOrderId,
+        status: 'completed',
+        notes: `Deposit collected via mobile app for services: ${JSON.stringify(serviceIds || [])}`,
+      }).returning();
+
+      if (bookingId) {
+        await db.update(bookings)
+          .set({
+            notes: sql`COALESCE(${bookings.notes}, '') || '\n\nDeposit paid: ₹' || ${amountPaisa / 100}::text || ' (Transaction: ' || ${transaction.id}::text || ')'`,
+          })
+          .where(eq(bookings.id, bookingId));
+      }
+
+      res.json({
+        success: true,
+        message: 'Deposit payment verified successfully',
+        transaction: {
+          id: transaction.id,
+          amountPaisa: transaction.amountPaisa,
+          status: transaction.status,
+          createdAt: transaction.createdAt,
+        },
+      });
+    } catch (error: any) {
+      console.error('Error verifying deposit payment:', error);
+      res.status(500).json({ error: error.message || 'Failed to verify deposit payment' });
+    }
+  });
+
   console.log('✅ Mobile deposit routes registered');
 }
 

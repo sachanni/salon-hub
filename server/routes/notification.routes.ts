@@ -1,6 +1,6 @@
 import type { Express, Response } from "express";
 import { db } from "../db";
-import { userNotifications } from "@shared/schema";
+import { userNotifications, userPushTokens } from "@shared/schema";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { authenticateMobileUser } from "../middleware/authMobile";
 
@@ -156,6 +156,112 @@ export function registerNotificationRoutes(app: Express) {
     }
   });
 
+  // Register push notification token (persisted to database with deduplication)
+  app.post("/api/mobile/notifications/register-token", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { token, platform, deviceId, deviceName } = req.body;
+
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      // Generate unique device identifier if not provided (use token hash as fallback)
+      const effectiveDeviceId = deviceId || `device_${token.substring(0, 32)}`;
+
+      // First, check if this exact token already exists for this user
+      const existingTokenRecord = await db.query.userPushTokens.findFirst({
+        where: and(
+          eq(userPushTokens.userId, userId),
+          eq(userPushTokens.token, token)
+        ),
+      });
+
+      if (existingTokenRecord) {
+        // Token exists - update metadata and reactivate
+        await db.update(userPushTokens)
+          .set({
+            platform: platform || existingTokenRecord.platform,
+            deviceId: effectiveDeviceId,
+            deviceName: deviceName || existingTokenRecord.deviceName,
+            isActive: 1,
+            lastUsedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(userPushTokens.id, existingTokenRecord.id));
+      } else {
+        // New token - deactivate any previous tokens for this device
+        await db.update(userPushTokens)
+          .set({ isActive: 0, updatedAt: new Date() })
+          .where(and(
+            eq(userPushTokens.userId, userId),
+            eq(userPushTokens.deviceId, effectiveDeviceId)
+          ));
+
+        // Insert new token record
+        await db.insert(userPushTokens).values({
+          userId,
+          token,
+          platform: platform || 'unknown',
+          deviceId: effectiveDeviceId,
+          deviceName: deviceName || null,
+        });
+      }
+
+      console.log(`Push token registered for user ${userId} (device: ${effectiveDeviceId.substring(0, 20)}...)`);
+
+      res.json({
+        success: true,
+        message: "Push token registered successfully",
+      });
+    } catch (error) {
+      console.error("Error registering push token:", error);
+      res.status(500).json({ error: "Failed to register push token" });
+    }
+  });
+
+  app.post("/api/mobile/notifications/unregister-token", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { token } = req.body;
+
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      const existingToken = await db.query.userPushTokens.findFirst({
+        where: and(
+          eq(userPushTokens.userId, userId),
+          eq(userPushTokens.token, token)
+        ),
+      });
+
+      if (!existingToken) {
+        return res.json({
+          success: true,
+          message: "Token not found or already unregistered",
+        });
+      }
+
+      await db.update(userPushTokens)
+        .set({
+          isActive: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(userPushTokens.id, existingToken.id));
+
+      console.log(`Push token unregistered for user ${userId}`);
+
+      res.json({
+        success: true,
+        message: "Push token unregistered successfully",
+      });
+    } catch (error) {
+      console.error("Error unregistering push token:", error);
+      res.status(500).json({ error: "Failed to unregister push token" });
+    }
+  });
+
   console.log("✅ Mobile notification routes registered");
 }
 
@@ -175,5 +281,53 @@ export async function createUserNotification(data: {
   } catch (error) {
     console.error("Error creating notification:", error);
     return null;
+  }
+}
+
+// Helper function to get active push tokens for a user (for notification dispatch)
+export async function getActiveUserPushTokens(userId: string) {
+  try {
+    const tokens = await db.query.userPushTokens.findMany({
+      where: and(
+        eq(userPushTokens.userId, userId),
+        eq(userPushTokens.isActive, 1)
+      ),
+    });
+    return tokens.map(t => ({
+      token: t.token,
+      platform: t.platform,
+      deviceId: t.deviceId,
+    }));
+  } catch (error) {
+    console.error("Error fetching user push tokens:", error);
+    return [];
+  }
+}
+
+// Helper function to get all active push tokens for multiple users (batch dispatch)
+export async function getActiveUsersPushTokens(userIds: string[]) {
+  try {
+    const tokens = await db.query.userPushTokens.findMany({
+      where: and(
+        sql`${userPushTokens.userId} = ANY(${userIds})`,
+        eq(userPushTokens.isActive, 1)
+      ),
+    });
+    
+    // Group by userId
+    const tokensByUser: Record<string, { token: string; platform: string }[]> = {};
+    for (const t of tokens) {
+      if (!tokensByUser[t.userId]) {
+        tokensByUser[t.userId] = [];
+      }
+      tokensByUser[t.userId].push({
+        token: t.token,
+        platform: t.platform,
+      });
+    }
+    return tokensByUser;
+  } catch (error) {
+    console.error("Error fetching users push tokens:", error);
+    return {};
   }
 }

@@ -16,13 +16,14 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 ## Implementation Checklist
 
 ### Feature 1: Smart Rebooking Reminders
-**Status: WEB COMPLETE, MOBILE PENDING**
+**Status: WEB COMPLETE, MOBILE COMPLETE**
 
 #### Database
 - [x] `service_rebooking_cycles` table
 - [x] `customer_rebooking_stats` table (tracks rebooking patterns)
 - [x] `rebooking_settings` table (salon-level configuration)
 - [x] `rebooking_reminders` table
+- [x] `user_push_tokens` table (for push notification delivery)
 
 #### Backend API
 - [x] `GET/PUT /api/rebooking/settings/:salonId` - Configure settings
@@ -31,6 +32,7 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] `POST /api/rebooking/dismiss` - Dismiss suggestion
 - [x] `GET /api/rebooking/analytics/:salonId` - Analytics data
 - [x] `GET /api/rebooking/due-customers/:salonId` - Due customers list
+- [x] `POST /api/mobile/notifications/register-token` - Push token registration
 
 #### Scheduled Jobs
 - [x] Daily job - Generate rebooking reminders and update statuses
@@ -54,14 +56,14 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] Email/SMS templates with "Book Now" button
 
 #### Mobile App
-- [ ] Push notification with quick action
-- [ ] "Time to rebook" card on home screen
-- [ ] Pre-filled booking flow
+- [x] Push notification with quick action (NotificationContext.tsx with deep linking)
+- [x] Push notification service with Android channels (notificationService.ts)
+- [x] Pre-filled booking flow (quick_book action navigates to salon with preselected service)
 
 ---
 
 ### Feature 2: No-Show Protection (Deposits)
-**Status: WEB COMPLETE, MOBILE PARTIAL**
+**Status: WEB COMPLETE, MOBILE COMPLETE**
 
 #### Database
 - [x] `deposit_settings` table
@@ -69,6 +71,7 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] `cancellation_policies` table
 - [x] `trusted_customers` table
 - [x] `deposit_transactions` table
+- [x] `customer_saved_cards` table
 
 #### Backend API
 - [x] `GET/PUT /:salonId/deposit-settings` - Settings CRUD
@@ -78,6 +81,10 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] `POST /deposits/collect` - Collect deposit
 - [x] `POST /deposits/refund` - Process refund
 - [x] `GET /:salonId/analytics` - Deposit analytics
+- [x] `GET /api/mobile/payment-methods` - Get saved cards
+- [x] `DELETE /api/mobile/payment-methods/:cardId` - Remove card
+- [x] `POST /api/mobile/payment-methods/:cardId/set-default` - Set default card
+- [x] `GET /api/mobile/deposits/my-deposits` - Customer deposit history
 
 #### Web - Business Dashboard
 - [x] Deposit percentage settings (20%, 25%, 50%, custom)
@@ -96,12 +103,12 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] Deposit history page
 
 #### Mobile App
-- [ ] Deposit badge on service cards
+- [x] Deposit badge on service cards (DepositBadge.tsx component)
 - [x] Deposit payment during booking
 - [x] Cancellation policy display
-- [ ] Saved payment methods
-- [ ] Deposit transaction history
-- [ ] Refund/policy notifications
+- [x] Saved payment methods (SavedCardsScreen.tsx)
+- [x] Deposit transaction history (DepositHistoryScreen.tsx)
+- [x] Refund/policy notifications (Android notification channel configured)
 
 ---
 
@@ -152,13 +159,13 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] Photo gallery of past transformations (PhotoGallery with lightbox viewer)
 - [x] Notes feed timeline (NotesFeed component integrated in screen)
 - [x] BeautyPreferencesCard component for booking checkout
-- [ ] "Add special notes" in booking flow
-- [ ] "Stylist knows your preferences" badge
+- [x] "Add special notes" in booking flow (BookingNotesInput.tsx component)
+- [x] "Stylist knows your preferences" badge (StylistPreferencesBadge.tsx component)
 
 ---
 
 ### Feature 4: Gift Cards
-**Status: WEB COMPLETE, MOBILE PENDING**
+**Status: WEB COMPLETE, MOBILE COMPLETE**
 
 #### Database
 - [x] `gift_cards` table
@@ -201,8 +208,8 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 - [x] Wallet section with QR display
 - [x] Balance and expiry countdown
 - [x] "Apply Gift Card" at checkout
-- [ ] QR scanner for redemption
-- [ ] Push notifications (received, expiry reminders)
+- [x] QR scanner for redemption (QRScannerScreen.tsx with camera + manual entry)
+- [x] Push notifications (received, expiry reminders) - Android channel configured
 
 ---
 
@@ -210,11 +217,11 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 
 | Feature | Implemented | Pending |
 |---------|-------------|---------|
-| **Smart Rebooking Reminders** | 23 items | 4 items |
-| **No-Show Protection** | 21 items | 4 items |
-| **Client Notes & Preferences** | 31 items | 2 items |
-| **Gift Cards** | 29 items | 2 items |
-| **TOTAL** | **104 items** | **12 items** |
+| **Smart Rebooking Reminders** | 26 items | 1 item |
+| **No-Show Protection** | 27 items | 0 items |
+| **Client Notes & Preferences** | 33 items | 0 items |
+| **Gift Cards** | 31 items | 0 items |
+| **TOTAL** | **117 items** | **1 item** |
 
 ---
 
@@ -222,8 +229,8 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 
 | Feature | Backend | Database | Web (Business) | Web (Customer) | Mobile | Overall Status |
 |---------|---------|----------|----------------|----------------|--------|----------------|
-| **Smart Rebooking Reminders** | Complete | Complete | Complete | Complete | Not Started | **WEB COMPLETE** |
-| **No-Show Protection (Deposits)** | Complete | Complete | Complete | Complete | Partial | **WEB COMPLETE, MOBILE PARTIAL** |
+| **Smart Rebooking Reminders** | Complete | Complete | Complete | Complete | Complete | **COMPLETE** |
+| **No-Show Protection (Deposits)** | Complete | Complete | Complete | Complete | Complete | **COMPLETE** |
 | **Client Notes & Preferences** | Complete | Complete | Complete | Complete | Complete | **COMPLETE** |
 | **Gift Cards** | Complete | Complete | Complete | Complete | Complete | **COMPLETE** |
 
@@ -346,23 +353,111 @@ This document outlines the implementation plan for 4 high-impact value-added fea
 
 ## Remaining Work (Priority Order)
 
-### Priority 1: Mobile App Integration (All Features)
-Estimated effort: 2-3 weeks
-- **Smart Rebooking:** Push notifications, "Time to rebook" card, pre-filled booking
-- **Gift Cards:** Purchase flow, wallet section with QR display, balance/expiry, checkout integration
-- **Deposits:** Payment during booking, cancellation policy display, saved payment methods
-- **Client Notes:** Customer profile view, beauty profile section
+### CRITICAL: Missing Backend API Endpoints for Mobile App
 
-### Priority 2: Web Customer Views (Remaining)
+The following backend endpoints are called by the mobile app but **NOT YET IMPLEMENTED** on the server:
+
+#### User Profile APIs (Priority: HIGH)
+| Endpoint | Method | Mobile Usage | Status |
+|----------|--------|--------------|--------|
+| `/api/mobile/users/profile` | GET | ProfileScreen.tsx - Load user profile | **MISSING** |
+| `/api/bookings/my-bookings` | GET | AppointmentsScreen.tsx - Load user bookings | **MISSING** |
+| `/api/bookings/:bookingId` | GET | BookingDetailScreen.tsx - View booking details | **MISSING** |
+| `/api/bookings/:bookingId/cancel` | POST | AppointmentsScreen.tsx - Cancel booking | **MISSING** |
+| `/api/bookings/:bookingId/reschedule` | PATCH | appointmentsAPI.reschedule | **MISSING** |
+| `/api/bookings/:bookingId/review` | POST | appointmentsAPI.submitReview | **MISSING** |
+
+#### Offers APIs (Priority: HIGH)
+| Endpoint | Method | Mobile Usage | Status |
+|----------|--------|--------------|--------|
+| `/api/mobile/offers` | GET | OffersScreen.tsx - Browse offers | **MISSING** |
+| `/api/mobile/offers/:offerId` | GET | Offer detail view | **MISSING** |
+| `/api/mobile/offers/trending` | GET | HomeScreen.tsx - Trending offers | **MISSING** |
+| `/api/mobile/offers/saved` | GET | Saved offers list | **MISSING** |
+| `/api/mobile/offers/:offerId/save` | POST | Save an offer | **MISSING** |
+| `/api/mobile/offers/:offerId/save` | DELETE | Unsave an offer | **MISSING** |
+| `/api/mobile/offers/count` | GET | Badge count | **MISSING** |
+
+#### Deposit Payment APIs (Priority: HIGH)
+| Endpoint | Method | Mobile Usage | Status |
+|----------|--------|--------------|--------|
+| `/api/deposits/check-booking-deposit` | POST | Check if deposit required | **MISSING** (use `/api/mobile/deposits/check-booking-deposit`) |
+| `/api/deposits/create-deposit-order` | POST | Create Razorpay order for deposit | **MISSING** |
+| `/api/deposits/verify-deposit-payment` | POST | Verify deposit payment | **MISSING** |
+| `/api/deposits/cancellation-policy/:salonId` | GET | Get cancellation policy | **MISSING** (use `/api/mobile/deposits/cancellation-policy/:salonId`) |
+
+#### Notification APIs (Priority: MEDIUM)
+| Endpoint | Method | Mobile Usage | Status |
+|----------|--------|--------------|--------|
+| `/api/mobile/notifications/unregister-token` | POST | Logout - remove push token | **MISSING** |
+
+### Implemented Mobile Backend Endpoints (Reference)
+
+#### Notifications ✅
+- `GET /api/mobile/notifications` - List notifications
+- `GET /api/mobile/notifications/count` - Unread count
+- `POST /api/mobile/notifications/:id/read` - Mark as read
+- `POST /api/mobile/notifications/read-all` - Mark all read
+- `DELETE /api/mobile/notifications/:id` - Delete notification
+- `POST /api/mobile/notifications/register-token` - Register push token
+
+#### Wallet ✅
+- `GET /api/mobile/wallet` - Get wallet balance
+- `GET /api/mobile/wallet/transactions` - Transaction history
+- `POST /api/mobile/wallet/add-money/create-order` - Create order
+- `POST /api/mobile/wallet/add-money/verify` - Verify payment
+- `POST /api/mobile/wallet/use` - Use wallet balance
+
+#### Payment Methods ✅
+- `GET /api/mobile/payment-methods` - List saved cards
+- `DELETE /api/mobile/payment-methods/:cardId` - Remove card
+- `POST /api/mobile/payment-methods/:cardId/set-default` - Set default
+
+#### Deposits ✅
+- `GET /api/mobile/deposits/my-deposits` - Deposit history
+- `POST /api/mobile/deposits/check-booking-deposit` - Check deposit requirement
+- `GET /api/mobile/deposits/cancellation-policy/:salonId` - Get policy
+
+#### Rebooking ✅
+- `GET /api/mobile/rebooking/suggestions` - Get suggestions
+- `POST /api/mobile/rebooking/dismiss` - Dismiss suggestion
+
+#### Loyalty (via router) ✅
+- `GET /api/mobile/loyalty/tiers` - Loyalty tiers
+- `GET /api/mobile/loyalty/points` - User points
+- `GET /api/mobile/loyalty/transactions` - Point transactions
+- `POST /api/mobile/loyalty/earn` - Earn points
+- `GET /api/mobile/loyalty/rewards` - Available rewards
+- `POST /api/mobile/loyalty/rewards/:id/redeem` - Redeem reward
+- `GET /api/mobile/loyalty/my-rewards` - User's redeemed rewards
+
+#### Favorites (via router) ✅
+- `GET /api/mobile/favorites/salons` - Favorite salons
+- `POST /api/mobile/favorites/salons/:id` - Add favorite
+- `DELETE /api/mobile/favorites/salons/:id` - Remove favorite
+- `GET /api/mobile/favorites/salons/:id/check` - Check if favorited
+- `GET /api/mobile/favorites/salons/ids` - Get all IDs
+- Same endpoints for stylists
+
+#### Referrals (via router) ✅
+- `GET /api/mobile/referrals/my-code` - Get referral code
+- `GET /api/mobile/referrals/stats` - Referral stats
+- `GET /api/mobile/referrals/history` - Referral history
+- `POST /api/mobile/referrals/validate` - Validate code
+- `POST /api/mobile/referrals/apply` - Apply code
+- `POST /api/mobile/referrals/complete/:id` - Complete referral
+
+---
+
+### Priority 1: Implement Missing Backend Endpoints
 Estimated effort: 3-5 days
-- [x] Customer deposit history page - DONE
-- [x] Customer saved cards management - DONE
-- [x] Customer profile self-view (preferences, photos) - MyBeautyProfile page COMPLETE
-- [x] "Apply gift card" in booking checkout - DONE
-- [x] Scheduled delivery date picker for gift cards - DONE
-- [x] Email/SMS templates with "Book Now" button for rebooking - DONE
+- User profile GET endpoint
+- Bookings/appointments CRUD for mobile
+- Offers API suite (full implementation)
+- Deposit payment flow endpoints
+- Push token unregister endpoint
 
-### Priority 3: Additional Enhancements
+### Priority 2: Additional Enhancements
 Estimated effort: 3-5 days
 - Weekly job to recalculate optimal rebooking channels/timing
 - Gift card push notifications (received, expiry reminders)

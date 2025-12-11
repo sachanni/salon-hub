@@ -16,6 +16,7 @@ import { bookingAPI, depositAPI, DepositCheckResult, giftCardAPI } from '../serv
 import { SelectedService } from '../types/navigation';
 import { DepositInfoCard } from '../components/DepositInfoCard';
 import { CancellationPolicyModal } from '../components/CancellationPolicyModal';
+import BookingNotesInput from '../components/BookingNotesInput';
 
 type PaymentMethod = 'pay_now' | 'pay_at_salon' | 'pay_deposit';
 
@@ -43,6 +44,7 @@ export default function PaymentScreen() {
   const [giftCardLoading, setGiftCardLoading] = useState(false);
   const [appliedGiftCard, setAppliedGiftCard] = useState<AppliedGiftCard | null>(null);
   const [giftCardError, setGiftCardError] = useState<string | null>(null);
+  const [bookingNotes, setBookingNotes] = useState('');
 
   useEffect(() => {
     checkDepositRequirements();
@@ -169,6 +171,7 @@ export default function PaymentScreen() {
         depositAmountPaisa: selectedPaymentMethod === 'pay_deposit' && depositInfo ? depositInfo.totalDepositPaisa : undefined,
         giftCardId: appliedGiftCard?.id,
         giftCardAmountPaisa: appliedGiftCard?.amountToApply,
+        notes: bookingNotes || undefined,
       };
 
       const response = await bookingAPI.createBooking(bookingData);
@@ -279,6 +282,14 @@ export default function PaymentScreen() {
             <Text style={styles.priceTotalValue}>{formatPrice(total)}</Text>
           </View>
         </View>
+
+        {/* Special Notes Section */}
+        <BookingNotesInput
+          value={bookingNotes}
+          onChangeText={setBookingNotes}
+          maxLength={500}
+          placeholder="Add any special requests or notes for your stylist..."
+        />
 
         {/* Gift Card Section */}
         <View style={styles.giftCardCard}>

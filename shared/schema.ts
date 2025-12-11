@@ -333,6 +333,10 @@ export const salons = pgTable("salons", {
   closeTime: text("close_time"), // e.g., "8:00 PM" (legacy - kept for backward compatibility)
   businessHours: jsonb("business_hours"), // Structured day-by-day hours: { monday: { open: true, start: "09:00", end: "17:00" }, ... }
   isActive: integer("is_active").notNull().default(1),
+  disabledBySuperAdmin: integer("disabled_by_super_admin").notNull().default(0), // 1 if disabled by super admin (owner cannot re-enable)
+  disabledReason: text("disabled_reason"), // Reason for disabling (shown to salon owner)
+  disabledAt: timestamp("disabled_at"), // When the salon was disabled
+  disabledBy: varchar("disabled_by").references(() => users.id), // Who disabled the salon
   approvalStatus: varchar("approval_status", { length: 20 }).notNull().default('pending'), // pending, approved, rejected
   approvedAt: timestamp("approved_at"),
   approvedBy: varchar("approved_by").references(() => users.id), // Super admin who approved
@@ -664,7 +668,7 @@ export const insertTimeSlotSchema = createInsertSchema(timeSlots).omit({
 export type InsertTimeSlot = z.infer<typeof insertTimeSlotSchema>;
 export type TimeSlot = typeof timeSlots.$inferSelect;
 
-// Service Packages table - allows salons to create combo/package deals
+// Service Packages table - allows salons to create combo/package deals (Service Bundles)
 export const servicePackages = pgTable("service_packages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
@@ -675,12 +679,48 @@ export const servicePackages = pgTable("service_packages", {
   regularPriceInPaisa: integer("regular_price_in_paisa").notNull(), // Total if booked separately
   discountPercentage: integer("discount_percentage"), // Calculated discount percentage
   currency: varchar("currency", { length: 3 }).notNull().default('INR'),
+  
+  // Category and visual
+  category: varchar("category", { length: 50 }), // 'bridal', 'spa_day', 'grooming', 'seasonal', 'combo'
+  imageUrl: text("image_url"), // Package promotional image
+  
+  // Availability constraints
+  maxBookingsPerDay: integer("max_bookings_per_day"), // Limit daily package bookings (null = unlimited)
+  validFrom: timestamp("valid_from"), // Start of validity period
+  validUntil: timestamp("valid_until"), // End of validity period
+  minAdvanceBookingHours: integer("min_advance_booking_hours"), // Required advance notice
+  availableDays: text("available_days").array(), // Days available (e.g., ['Mon', 'Tue', 'Wed'])
+  availableTimeStart: text("available_time_start"), // Earliest booking time (HH:MM)
+  availableTimeEnd: text("available_time_end"), // Latest booking time (HH:MM)
+  
+  // Targeting
+  gender: varchar("gender", { length: 10 }), // 'male', 'female', 'unisex'
+  
+  // Display and metrics
+  isFeatured: integer("is_featured").notNull().default(0), // Featured on homepage
+  bookingCount: integer("booking_count").notNull().default(0), // Times booked
+  sortOrder: integer("sort_order").notNull().default(0), // Display order
+  
   isActive: integer("is_active").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   unique("service_packages_id_salon_id_unique").on(table.id, table.salonId),
+  index("service_packages_category_idx").on(table.category),
+  index("service_packages_featured_idx").on(table.isFeatured),
+  index("service_packages_salon_active_idx").on(table.salonId, table.isActive),
 ]);
+
+// Service Package category options
+export const SERVICE_PACKAGE_CATEGORIES = [
+  { value: 'bridal', label: 'Bridal' },
+  { value: 'spa_day', label: 'Spa Day' },
+  { value: 'grooming', label: 'Grooming' },
+  { value: 'seasonal', label: 'Seasonal Special' },
+  { value: 'combo', label: 'Combo Deal' },
+  { value: 'party', label: 'Party & Events' },
+  { value: 'wellness', label: 'Wellness' },
+] as const;
 
 export const insertServicePackageSchema = createInsertSchema(servicePackages).omit({
   id: true,
@@ -698,10 +738,11 @@ export const packageServices = pgTable("package_services", {
   serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
   salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
   sequenceOrder: integer("sequence_order").notNull().default(1), // Order in which services are performed
+  quantity: integer("quantity").notNull().default(1), // Quantity of this service in package (for same-service-twice scenario)
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
-  // Ensure same package doesn't have duplicate services
-  unique("package_services_package_service_unique").on(table.packageId, table.serviceId),
+  // Ensure same package doesn't have duplicate services (with same sequence)
+  unique("package_services_package_service_seq_unique").on(table.packageId, table.serviceId, table.sequenceOrder),
   // Foreign key constraints to enforce same-salon membership
   foreignKey({
     columns: [table.packageId, table.salonId],
@@ -723,6 +764,30 @@ export const insertPackageServiceSchema = createInsertSchema(packageServices).om
 export type InsertPackageService = z.infer<typeof insertPackageServiceSchema>;
 export type PackageService = typeof packageServices.$inferSelect;
 
+// Package Bookings table - tracks package-specific booking data
+export const packageBookings = pgTable("package_bookings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  packageId: varchar("package_id").notNull().references(() => servicePackages.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  packagePriceAtBooking: integer("package_price_at_booking").notNull(), // Price when booked (snapshot)
+  regularPriceAtBooking: integer("regular_price_at_booking").notNull(), // Regular price when booked (snapshot)
+  savingsPaisa: integer("savings_paisa").notNull(), // Amount saved
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  unique("package_bookings_booking_unique").on(table.bookingId),
+  index("package_bookings_package_idx").on(table.packageId),
+  index("package_bookings_salon_idx").on(table.salonId),
+]);
+
+export const insertPackageBookingSchema = createInsertSchema(packageBookings).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPackageBooking = z.infer<typeof insertPackageBookingSchema>;
+export type PackageBooking = typeof packageBookings.$inferSelect;
+
 // Package relations
 export const servicePackagesRelations = relations(servicePackages, ({ one, many }) => ({
   salon: one(salons, {
@@ -730,6 +795,22 @@ export const servicePackagesRelations = relations(servicePackages, ({ one, many 
     references: [salons.id],
   }),
   packageServices: many(packageServices),
+  packageBookings: many(packageBookings),
+}));
+
+export const packageBookingsRelations = relations(packageBookings, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [packageBookings.bookingId],
+    references: [bookings.id],
+  }),
+  package: one(servicePackages, {
+    fields: [packageBookings.packageId],
+    references: [servicePackages.id],
+  }),
+  salon: one(salons, {
+    fields: [packageBookings.salonId],
+    references: [salons.id],
+  }),
 }));
 
 export const packageServicesRelations = relations(packageServices, ({ one }) => ({
@@ -747,6 +828,54 @@ export const packageServicesRelations = relations(packageServices, ({ one }) => 
   }),
 }));
 
+// Package service entry with quantity support for same-service-twice scenario
+export const packageServiceEntrySchema = z.object({
+  serviceId: z.string().uuid('Invalid service ID'),
+  quantity: z.number().int().min(1, 'Quantity must be at least 1').max(10, 'Quantity cannot exceed 10').default(1),
+});
+
+// Base package schema without refinements (for partial/extend usage)
+const baseServicePackageSchema = z.object({
+  name: z.string().min(3, 'Package name must be at least 3 characters').max(100),
+  description: z.string().max(1000).optional(),
+  serviceIds: z.array(z.string().uuid()).optional(),
+  services: z.array(packageServiceEntrySchema).optional(),
+  packagePriceInPaisa: z.number().int().positive('Package price must be positive'),
+  category: z.enum(['bridal', 'spa_day', 'grooming', 'seasonal', 'combo', 'party', 'wellness']).optional(),
+  imageUrl: z.string().url().optional().nullable(),
+  gender: z.enum(['male', 'female', 'unisex']).optional(),
+  maxBookingsPerDay: z.number().int().positive().optional().nullable(),
+  validFrom: z.string().datetime().optional().nullable(),
+  validUntil: z.string().datetime().optional().nullable(),
+  minAdvanceBookingHours: z.number().int().min(0).optional().nullable(),
+  availableDays: z.array(z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])).optional().nullable(),
+  availableTimeStart: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format').optional().nullable(),
+  availableTimeEnd: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format').optional().nullable(),
+  isFeatured: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+// Package validation schemas - supports both simple serviceIds array and detailed services with quantity
+export const createServicePackageSchema = baseServicePackageSchema.refine(
+  (data) => (data.serviceIds && data.serviceIds.length >= 2) || (data.services && data.services.length >= 1 && data.services.reduce((sum, s) => sum + s.quantity, 0) >= 2),
+  { message: 'Package must contain at least 2 service instances (either 2 different services or same service with quantity >= 2)', path: ['services'] }
+);
+
+export type PackageServiceEntry = z.infer<typeof packageServiceEntrySchema>;
+
+export const updateServicePackageSchema = baseServicePackageSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+export const bookPackageSchema = z.object({
+  packageId: z.string().uuid('Invalid package ID'),
+  salonId: z.string().uuid('Invalid salon ID'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
+  time: z.string().regex(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time format'),
+  staffId: z.string().uuid().optional(),
+  notes: z.string().max(500).optional(),
+});
+
 // Bookings table - stores booking information before payment
 export const bookings = pgTable("bookings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -755,6 +884,7 @@ export const bookings = pgTable("bookings", {
   staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }),
   timeSlotId: varchar("time_slot_id").references(() => timeSlots.id, { onDelete: "restrict" }),
   userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }), // Link to authenticated user (null for guests)
+  packageId: varchar("package_id").references(() => servicePackages.id, { onDelete: "set null" }), // If this is a package booking
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone").notNull(),
@@ -767,6 +897,7 @@ export const bookings = pgTable("bookings", {
   paymentMethod: varchar("payment_method", { length: 20 }).notNull().default('pay_now'), // pay_now, pay_at_salon
   notes: text("notes"), // Special requests or notes
   guestSessionId: text("guest_session_id"), // For tracking guest user sessions (null for authenticated users)
+  isPackageBooking: integer("is_package_booking").notNull().default(0), // 1 if this is a package booking
   // Offer-related fields (snapshot at booking time for audit trail)
   offerId: varchar("offer_id").references(() => platformOffers.id, { onDelete: "set null" }), // Applied offer (if any)
   offerTitle: text("offer_title"), // Snapshot of offer title at booking time
@@ -909,6 +1040,181 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({
 
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
+
+// Booking Cancellations table - tracks structured cancellation reasons and analytics
+export const bookingCancellations = pgTable("booking_cancellations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull().unique().references(() => bookings.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  cancelledBy: varchar("cancelled_by", { length: 20 }).notNull(), // 'customer', 'salon', 'system'
+  reasonCode: varchar("reason_code", { length: 50 }).notNull(),
+  reasonCategory: varchar("reason_category", { length: 30 }).notNull(),
+  additionalComments: text("additional_comments"),
+  wasRescheduled: integer("was_rescheduled").notNull().default(0),
+  rescheduledBookingId: varchar("rescheduled_booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  refundRequested: integer("refund_requested").notNull().default(0),
+  refundAmountPaisa: integer("refund_amount_paisa"),
+  cancellationFeePaisa: integer("cancellation_fee_paisa"),
+  hoursBeforeAppointment: integer("hours_before_appointment"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("booking_cancellations_booking_id_idx").on(table.bookingId),
+  index("booking_cancellations_user_id_idx").on(table.userId),
+  index("booking_cancellations_reason_code_idx").on(table.reasonCode),
+  index("booking_cancellations_created_at_idx").on(table.createdAt),
+]);
+
+export const insertBookingCancellationSchema = createInsertSchema(bookingCancellations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertBookingCancellation = z.infer<typeof insertBookingCancellationSchema>;
+export type BookingCancellation = typeof bookingCancellations.$inferSelect;
+
+// Booking Cancellations relations
+export const bookingCancellationsRelations = relations(bookingCancellations, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [bookingCancellations.bookingId],
+    references: [bookings.id],
+  }),
+  user: one(users, {
+    fields: [bookingCancellations.userId],
+    references: [users.id],
+  }),
+  rescheduledBooking: one(bookings, {
+    fields: [bookingCancellations.rescheduledBookingId],
+    references: [bookings.id],
+  }),
+}));
+
+// Cancellation reason codes and categories for validation
+export const CANCELLATION_REASON_CODES = {
+  // Customer reasons
+  schedule_conflict: { category: 'scheduling', label: 'I have a schedule conflict' },
+  found_better_price: { category: 'pricing', label: 'Found a better price elsewhere' },
+  service_not_needed: { category: 'changed_mind', label: 'No longer need the service' },
+  health_issue: { category: 'emergency', label: 'Feeling unwell / health issue' },
+  family_emergency: { category: 'emergency', label: 'Family emergency' },
+  travel_plans: { category: 'scheduling', label: 'Travel plans changed' },
+  staff_unavailable: { category: 'salon_issue', label: 'Preferred staff not available' },
+  long_wait_time: { category: 'salon_issue', label: 'Expected long wait time' },
+  poor_reviews: { category: 'trust', label: 'Read negative reviews' },
+  booked_by_mistake: { category: 'user_error', label: 'Booked by mistake' },
+  weather_conditions: { category: 'external', label: 'Bad weather conditions' },
+  transportation_issue: { category: 'external', label: 'Transportation problems' },
+  financial_reason: { category: 'pricing', label: 'Financial constraints' },
+  other: { category: 'other', label: 'Other reason' },
+  // Salon reasons
+  staff_sick: { category: 'staff', label: 'Staff member is sick' },
+  staff_emergency: { category: 'staff', label: 'Staff emergency' },
+  equipment_issue: { category: 'operations', label: 'Equipment malfunction' },
+  double_booking: { category: 'operations', label: 'Scheduling error - double booked' },
+  salon_closed: { category: 'operations', label: 'Salon closed unexpectedly' },
+  customer_no_show_history: { category: 'policy', label: 'Customer has no-show history' },
+  // System reasons
+  payment_failed: { category: 'payment', label: 'Payment authorization failed' },
+  payment_timeout: { category: 'payment', label: 'Payment not completed in time' },
+  slot_no_longer_available: { category: 'system', label: 'Time slot became unavailable' },
+  service_discontinued: { category: 'system', label: 'Service no longer offered' },
+} as const;
+
+export type CancellationReasonCode = keyof typeof CANCELLATION_REASON_CODES;
+
+// ===============================================
+// LATE ARRIVAL NOTIFICATIONS - Customer notifies salon they're running late
+// ===============================================
+export const lateArrivalNotifications = pgTable("late_arrival_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  
+  // Delay information
+  estimatedDelayMinutes: integer("estimated_delay_minutes").notNull(), // 5, 10, 15, 20, 30, 45, 60
+  originalBookingTime: text("original_booking_time").notNull(), // HH:MM format
+  estimatedArrivalTime: text("estimated_arrival_time").notNull(), // HH:MM format (calculated)
+  
+  // Customer message
+  customerMessage: text("customer_message"), // Optional message from customer
+  
+  // Notification delivery status
+  salonNotified: integer("salon_notified").notNull().default(0), // 0 = pending, 1 = sent
+  salonNotifiedAt: timestamp("salon_notified_at"),
+  notificationChannel: varchar("notification_channel", { length: 20 }), // 'sms', 'whatsapp', 'push', 'in_app'
+  notificationMessageSid: varchar("notification_message_sid"), // Twilio message SID for tracking
+  
+  // Salon acknowledgment
+  salonAcknowledged: integer("salon_acknowledged").notNull().default(0),
+  salonAcknowledgedAt: timestamp("salon_acknowledged_at"),
+  salonAcknowledgedBy: varchar("salon_acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+  salonResponse: varchar("salon_response", { length: 50 }), // 'acknowledged', 'rescheduled', 'cancelled'
+  salonResponseNote: text("salon_response_note"),
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("late_arrival_notifications_booking_id_idx").on(table.bookingId),
+  index("late_arrival_notifications_salon_id_idx").on(table.salonId),
+  index("late_arrival_notifications_user_id_idx").on(table.userId),
+  index("late_arrival_notifications_created_at_idx").on(table.createdAt),
+]);
+
+export const insertLateArrivalNotificationSchema = createInsertSchema(lateArrivalNotifications).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertLateArrivalNotification = z.infer<typeof insertLateArrivalNotificationSchema>;
+export type LateArrivalNotification = typeof lateArrivalNotifications.$inferSelect;
+
+// Late Arrival Notifications relations
+export const lateArrivalNotificationsRelations = relations(lateArrivalNotifications, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [lateArrivalNotifications.bookingId],
+    references: [bookings.id],
+  }),
+  salon: one(salons, {
+    fields: [lateArrivalNotifications.salonId],
+    references: [salons.id],
+  }),
+  user: one(users, {
+    fields: [lateArrivalNotifications.userId],
+    references: [users.id],
+  }),
+  acknowledgedBy: one(users, {
+    fields: [lateArrivalNotifications.salonAcknowledgedBy],
+    references: [users.id],
+  }),
+}));
+
+// Delay options for customer selection (in minutes)
+export const LATE_ARRIVAL_DELAY_OPTIONS = [
+  { value: 5, label: '5 minutes' },
+  { value: 10, label: '10 minutes' },
+  { value: 15, label: '15 minutes' },
+  { value: 20, label: '20 minutes' },
+  { value: 30, label: '30 minutes' },
+  { value: 45, label: '45 minutes' },
+  { value: 60, label: '1 hour' },
+] as const;
+
+export type LateArrivalDelayMinutes = typeof LATE_ARRIVAL_DELAY_OPTIONS[number]['value'];
+
+// Zod schema for creating late arrival notification
+export const createLateArrivalNotificationSchema = z.object({
+  bookingId: z.string().min(1, 'Booking ID is required'),
+  estimatedDelayMinutes: z.number().int().min(5).max(60),
+  customerMessage: z.string().max(500).optional(),
+});
+
+// Zod schema for salon acknowledging late arrival
+export const acknowledgeLateArrivalSchema = z.object({
+  response: z.enum(['acknowledged', 'rescheduled', 'cancelled']),
+  responseNote: z.string().max(500).optional(),
+});
 
 // Role relations (roles table is standalone, no relations needed)
 
@@ -5355,6 +5661,28 @@ export type InsertUserNotification = z.infer<typeof insertUserNotificationSchema
 export type UserNotification = typeof userNotifications.$inferSelect;
 
 // ===============================================
+// PUSH NOTIFICATION TOKENS - Mobile device push tokens
+// ===============================================
+export const userPushTokens = pgTable("user_push_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull(),
+  platform: varchar("platform", { length: 20 }).notNull().default('unknown'), // ios, android, web
+  deviceId: varchar("device_id", { length: 255 }),
+  deviceName: varchar("device_name", { length: 255 }),
+  isActive: integer("is_active").notNull().default(1),
+  lastUsedAt: timestamp("last_used_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("user_push_tokens_user_id_idx").on(table.userId),
+  index("user_push_tokens_token_idx").on(table.token),
+]);
+
+export type UserPushToken = typeof userPushTokens.$inferSelect;
+export type InsertUserPushToken = typeof userPushTokens.$inferInsert;
+
+// ===============================================
 // LOYALTY & REWARDS SYSTEM
 // ===============================================
 
@@ -7012,6 +7340,98 @@ export const rebookingSettings = pgTable("rebooking_settings", {
 export type RebookingSettings = typeof rebookingSettings.$inferSelect;
 export type InsertRebookingSettings = typeof rebookingSettings.$inferInsert;
 
+// Express Rebooking - User Booking Preferences (learned from booking history)
+export const userBookingPreferences = pgTable("user_booking_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  preferredStaffId: varchar("preferred_staff_id").references(() => staff.id, { onDelete: "set null" }),
+  preferredServiceIds: text("preferred_service_ids").array(),
+  preferredDayOfWeek: integer("preferred_day_of_week"),
+  preferredTimeSlot: varchar("preferred_time_slot", { length: 20 }),
+  preferredTimeExact: text("preferred_time_exact"),
+  averageBookingIntervalDays: integer("average_booking_interval_days"),
+  lastBookingId: varchar("last_booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  lastBookingDate: text("last_booking_date"),
+  totalCompletedBookings: integer("total_completed_bookings").notNull().default(0),
+  totalSpentPaisa: integer("total_spent_paisa").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("user_booking_preferences_user_id_idx").on(table.userId),
+  index("user_booking_preferences_salon_id_idx").on(table.salonId),
+  uniqueIndex("user_booking_preferences_user_salon_unique").on(table.userId, table.salonId),
+]);
+
+export type UserBookingPreference = typeof userBookingPreferences.$inferSelect;
+export type InsertUserBookingPreference = typeof userBookingPreferences.$inferInsert;
+
+// Express Rebooking - Pre-computed rebooking suggestions
+export const rebookSuggestions = pgTable("rebook_suggestions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  suggestedDate: text("suggested_date").notNull(),
+  suggestedTime: text("suggested_time").notNull(),
+  suggestedServiceIds: text("suggested_service_ids").array().notNull(),
+  suggestedStaffId: varchar("suggested_staff_id").references(() => staff.id, { onDelete: "set null" }),
+  confidenceScore: integer("confidence_score").notNull(),
+  reason: varchar("reason", { length: 255 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default('pending'),
+  shownAt: timestamp("shown_at"),
+  respondedAt: timestamp("responded_at"),
+  resultingBookingId: varchar("resulting_booking_id").references(() => bookings.id, { onDelete: "set null" }),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("rebook_suggestions_user_id_idx").on(table.userId),
+  index("rebook_suggestions_salon_id_idx").on(table.salonId),
+  index("rebook_suggestions_status_idx").on(table.status),
+  index("rebook_suggestions_expires_at_idx").on(table.expiresAt),
+]);
+
+export type RebookSuggestion = typeof rebookSuggestions.$inferSelect;
+export type InsertRebookSuggestion = typeof rebookSuggestions.$inferInsert;
+
+// Express Rebooking Relations
+export const userBookingPreferencesRelations = relations(userBookingPreferences, ({ one }) => ({
+  user: one(users, {
+    fields: [userBookingPreferences.userId],
+    references: [users.id],
+  }),
+  salon: one(salons, {
+    fields: [userBookingPreferences.salonId],
+    references: [salons.id],
+  }),
+  preferredStaff: one(staff, {
+    fields: [userBookingPreferences.preferredStaffId],
+    references: [staff.id],
+  }),
+  lastBooking: one(bookings, {
+    fields: [userBookingPreferences.lastBookingId],
+    references: [bookings.id],
+  }),
+}));
+
+export const rebookSuggestionsRelations = relations(rebookSuggestions, ({ one }) => ({
+  user: one(users, {
+    fields: [rebookSuggestions.userId],
+    references: [users.id],
+  }),
+  salon: one(salons, {
+    fields: [rebookSuggestions.salonId],
+    references: [salons.id],
+  }),
+  suggestedStaff: one(staff, {
+    fields: [rebookSuggestions.suggestedStaffId],
+    references: [staff.id],
+  }),
+  resultingBooking: one(bookings, {
+    fields: [rebookSuggestions.resultingBookingId],
+    references: [bookings.id],
+  }),
+}));
+
 // Smart Rebooking Relations
 export const serviceRebookingCyclesRelations = relations(serviceRebookingCycles, ({ one }) => ({
   salon: one(salons, {
@@ -7184,6 +7604,33 @@ export const rebookingSuggestionSchema = z.object({
 });
 
 export type RebookingSuggestion = z.infer<typeof rebookingSuggestionSchema>;
+
+// Express Rebooking Schemas
+export const quickRebookSchema = z.object({
+  suggestionId: z.string(),
+});
+
+export type QuickRebookRequest = z.infer<typeof quickRebookSchema>;
+
+export const customizeRebookSchema = z.object({
+  suggestionId: z.string(),
+  modifications: z.object({
+    date: z.string().optional(),
+    time: z.string().optional(),
+    addServiceIds: z.array(z.string()).optional(),
+    removeServiceIds: z.array(z.string()).optional(),
+    staffId: z.string().optional(),
+  }),
+});
+
+export type CustomizeRebookRequest = z.infer<typeof customizeRebookSchema>;
+
+export const dismissRebookSuggestionSchema = z.object({
+  suggestionId: z.string(),
+  reason: z.enum(['not_now', 'wrong_service', 'wrong_time', 'changed_salon', 'other']).optional(),
+});
+
+export type DismissRebookSuggestionRequest = z.infer<typeof dismissRebookSuggestionSchema>;
 
 // Dismiss rebooking reminder schema
 export const dismissRebookingSchema = z.object({
@@ -8581,3 +9028,399 @@ export const metaBookingRefsRelations = relations(metaBookingRefs, ({ one }) => 
     references: [metaIntegrations.id],
   }),
 }));
+
+// User saved offers table - for mobile app offer bookmarking feature
+export const savedOffers = pgTable("saved_offers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  offerId: varchar("offer_id").notNull().references(() => platformOffers.id, { onDelete: "cascade" }),
+  savedAt: timestamp("saved_at").defaultNow(),
+}, (table) => [
+  uniqueIndex("saved_offers_user_offer_unique").on(table.userId, table.offerId),
+  index("saved_offers_user_id_idx").on(table.userId),
+]);
+
+export type SavedOffer = typeof savedOffers.$inferSelect;
+export type InsertSavedOffer = typeof savedOffers.$inferInsert;
+
+export const savedOffersRelations = relations(savedOffers, ({ one }) => ({
+  user: one(users, {
+    fields: [savedOffers.userId],
+    references: [users.id],
+  }),
+  offer: one(platformOffers, {
+    fields: [savedOffers.offerId],
+    references: [platformOffers.id],
+  }),
+}));
+
+// ==================== SLOT WAITLIST SYSTEM ====================
+
+// Waitlist status enum values
+export const WAITLIST_STATUS = {
+  waiting: 'waiting',
+  notified: 'notified',
+  booked: 'booked',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export type WaitlistStatus = typeof WAITLIST_STATUS[keyof typeof WAITLIST_STATUS];
+
+// Waitlist priority levels (based on loyalty tier)
+export const WAITLIST_PRIORITY = {
+  regular: 1,
+  gold: 2,
+  elite: 3,
+} as const;
+
+export type WaitlistPriority = typeof WAITLIST_PRIORITY[keyof typeof WAITLIST_PRIORITY];
+
+// Notification types
+export const WAITLIST_NOTIFICATION_TYPE = {
+  push: 'push',
+  sms: 'sms',
+  email: 'email',
+} as const;
+
+export type WaitlistNotificationType = typeof WAITLIST_NOTIFICATION_TYPE[keyof typeof WAITLIST_NOTIFICATION_TYPE];
+
+// Notification response types
+export const WAITLIST_RESPONSE = {
+  accepted: 'accepted',
+  declined: 'declined',
+  expired: 'expired',
+} as const;
+
+export type WaitlistResponse = typeof WAITLIST_RESPONSE[keyof typeof WAITLIST_RESPONSE];
+
+// Slot Waitlist table - customers waiting for unavailable slots
+export const slotWaitlist = pgTable("slot_waitlist", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  serviceId: varchar("service_id").notNull().references(() => services.id, { onDelete: "cascade" }),
+  staffId: varchar("staff_id").references(() => staff.id, { onDelete: "set null" }),
+  requestedDate: text("requested_date").notNull(),
+  timeWindowStart: text("time_window_start").notNull(),
+  timeWindowEnd: text("time_window_end").notNull(),
+  flexibilityDays: integer("flexibility_days").notNull().default(0),
+  priority: integer("priority").notNull().default(1),
+  status: varchar("status", { length: 20 }).notNull().default('waiting'),
+  notifiedAt: timestamp("notified_at"),
+  notifiedSlotId: varchar("notified_slot_id").references(() => timeSlots.id, { onDelete: "set null" }),
+  responseDeadline: timestamp("response_deadline"),
+  bookedAt: timestamp("booked_at"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("slot_waitlist_user_id_idx").on(table.userId),
+  index("slot_waitlist_salon_date_idx").on(table.salonId, table.requestedDate),
+  index("slot_waitlist_status_idx").on(table.status),
+  index("slot_waitlist_expires_at_idx").on(table.expiresAt),
+  index("slot_waitlist_priority_created_idx").on(table.priority, table.createdAt),
+  uniqueIndex("slot_waitlist_user_salon_service_date_unique")
+    .on(table.userId, table.salonId, table.serviceId, table.requestedDate),
+  foreignKey({
+    columns: [table.serviceId, table.salonId],
+    foreignColumns: [services.id, services.salonId],
+    name: "slot_waitlist_service_salon_fk"
+  }),
+]);
+
+export const insertSlotWaitlistSchema = createInsertSchema(slotWaitlist).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSlotWaitlist = z.infer<typeof insertSlotWaitlistSchema>;
+export type SlotWaitlist = typeof slotWaitlist.$inferSelect;
+
+// Waitlist Notifications table - tracks all notifications sent
+export const waitlistNotifications = pgTable("waitlist_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  waitlistId: varchar("waitlist_id").notNull().references(() => slotWaitlist.id, { onDelete: "cascade" }),
+  slotId: varchar("slot_id").notNull().references(() => timeSlots.id, { onDelete: "cascade" }),
+  notificationType: varchar("notification_type", { length: 20 }).notNull(),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+  openedAt: timestamp("opened_at"),
+  response: varchar("response", { length: 20 }),
+  respondedAt: timestamp("responded_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("waitlist_notifications_waitlist_id_idx").on(table.waitlistId),
+  index("waitlist_notifications_slot_id_idx").on(table.slotId),
+  index("waitlist_notifications_sent_at_idx").on(table.sentAt),
+]);
+
+export const insertWaitlistNotificationSchema = createInsertSchema(waitlistNotifications).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertWaitlistNotification = z.infer<typeof insertWaitlistNotificationSchema>;
+export type WaitlistNotification = typeof waitlistNotifications.$inferSelect;
+
+// Slot Waitlist Relations
+export const slotWaitlistRelations = relations(slotWaitlist, ({ one, many }) => ({
+  user: one(users, {
+    fields: [slotWaitlist.userId],
+    references: [users.id],
+  }),
+  salon: one(salons, {
+    fields: [slotWaitlist.salonId],
+    references: [salons.id],
+  }),
+  service: one(services, {
+    fields: [slotWaitlist.serviceId],
+    references: [services.id],
+  }),
+  staff: one(staff, {
+    fields: [slotWaitlist.staffId],
+    references: [staff.id],
+  }),
+  notifiedSlot: one(timeSlots, {
+    fields: [slotWaitlist.notifiedSlotId],
+    references: [timeSlots.id],
+  }),
+  notifications: many(waitlistNotifications),
+}));
+
+export const waitlistNotificationsRelations = relations(waitlistNotifications, ({ one }) => ({
+  waitlistEntry: one(slotWaitlist, {
+    fields: [waitlistNotifications.waitlistId],
+    references: [slotWaitlist.id],
+  }),
+  slot: one(timeSlots, {
+    fields: [waitlistNotifications.slotId],
+    references: [timeSlots.id],
+  }),
+}));
+
+// Zod validation schemas for API requests
+export const joinWaitlistSchema = z.object({
+  salonId: z.string().uuid(),
+  serviceId: z.string().uuid(),
+  staffId: z.string().uuid().optional().nullable(),
+  requestedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD format'),
+  timeWindowStart: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be HH:MM format'),
+  timeWindowEnd: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be HH:MM format'),
+  flexibilityDays: z.number().int().min(0).max(7).default(0),
+});
+
+export type JoinWaitlistInput = z.infer<typeof joinWaitlistSchema>;
+
+export const respondWaitlistSchema = z.object({
+  response: z.enum(['accepted', 'declined']),
+});
+
+export type RespondWaitlistInput = z.infer<typeof respondWaitlistSchema>;
+
+// ==========================================
+// Peak/Off-Peak Dynamic Pricing System
+// ==========================================
+
+// Demand level constants
+export const DEMAND_LEVELS = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  peak: 'peak',
+} as const;
+
+export type DemandLevel = typeof DEMAND_LEVELS[keyof typeof DEMAND_LEVELS];
+
+// Pricing rule types
+export const PRICING_RULE_TYPES = {
+  off_peak_discount: 'off_peak_discount',
+  peak_surcharge: 'peak_surcharge',
+  happy_hour: 'happy_hour',
+  seasonal: 'seasonal',
+} as const;
+
+export type PricingRuleType = typeof PRICING_RULE_TYPES[keyof typeof PRICING_RULE_TYPES];
+
+// Adjustment types
+export const ADJUSTMENT_TYPES = {
+  percentage: 'percentage',
+  fixed: 'fixed',
+} as const;
+
+export type AdjustmentType = typeof ADJUSTMENT_TYPES[keyof typeof ADJUSTMENT_TYPES];
+
+// Time Slot Demand - tracks demand patterns by day/time for each salon
+export const timeSlotDemand = pgTable("time_slot_demand", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  dayOfWeek: integer("day_of_week").notNull(), // 0-6 (Sunday-Saturday)
+  hourOfDay: integer("hour_of_day").notNull(), // 0-23
+  demandLevel: varchar("demand_level", { length: 20 }).notNull(), // 'low', 'medium', 'high', 'peak'
+  bookingCount30d: integer("booking_count_30d").notNull().default(0), // Bookings in last 30 days
+  avgUtilizationPercent: integer("avg_utilization_percent").notNull().default(0), // Slot fill rate 0-100
+  generatedAt: timestamp("generated_at").defaultNow(),
+}, (table) => [
+  index("time_slot_demand_salon_day_idx").on(table.salonId, table.dayOfWeek),
+  uniqueIndex("time_slot_demand_salon_day_hour_unique").on(table.salonId, table.dayOfWeek, table.hourOfDay),
+]);
+
+export const insertTimeSlotDemandSchema = createInsertSchema(timeSlotDemand).omit({
+  id: true,
+  generatedAt: true,
+});
+
+export type InsertTimeSlotDemand = z.infer<typeof insertTimeSlotDemandSchema>;
+export type TimeSlotDemand = typeof timeSlotDemand.$inferSelect;
+
+// Dynamic Pricing Rules - salon-defined pricing adjustments
+export const dynamicPricingRules = pgTable("dynamic_pricing_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  ruleType: varchar("rule_type", { length: 30 }).notNull(), // 'off_peak_discount', 'peak_surcharge', 'happy_hour', 'seasonal'
+  dayOfWeek: integer("day_of_week"), // Specific day or NULL for all days
+  startHour: integer("start_hour").notNull(), // 0-23
+  endHour: integer("end_hour").notNull(), // 0-23
+  adjustmentType: varchar("adjustment_type", { length: 20 }).notNull(), // 'percentage', 'fixed'
+  adjustmentValue: integer("adjustment_value").notNull(), // Negative = discount, positive = surcharge (paisa for fixed, percent for percentage)
+  maxDiscountPaisa: integer("max_discount_paisa"), // Cap on discount amount
+  minBookingValuePaisa: integer("min_booking_value_paisa"), // Minimum booking value for rule to apply
+  applicableServiceIds: text("applicable_service_ids").array(), // NULL = all services
+  isActive: integer("is_active").notNull().default(1),
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"),
+  priority: integer("priority").notNull().default(0), // Higher priority rules applied first when overlapping
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("dynamic_pricing_rules_salon_idx").on(table.salonId),
+  index("dynamic_pricing_rules_active_idx").on(table.isActive),
+  index("dynamic_pricing_rules_valid_idx").on(table.validFrom, table.validUntil),
+]);
+
+export const insertDynamicPricingRuleSchema = createInsertSchema(dynamicPricingRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDynamicPricingRule = z.infer<typeof insertDynamicPricingRuleSchema>;
+export type DynamicPricingRule = typeof dynamicPricingRules.$inferSelect;
+
+// Pricing Adjustments Log - audit trail of applied pricing adjustments
+export const pricingAdjustmentsLog = pgTable("pricing_adjustments_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  ruleId: varchar("rule_id").notNull().references(() => dynamicPricingRules.id, { onDelete: "cascade" }),
+  originalPricePaisa: integer("original_price_paisa").notNull(),
+  adjustedPricePaisa: integer("adjusted_price_paisa").notNull(),
+  adjustmentAmountPaisa: integer("adjustment_amount_paisa").notNull(), // Negative = discount, positive = surcharge
+  adjustmentPercent: integer("adjustment_percent"), // Store the percentage if applicable
+  ruleName: text("rule_name").notNull(), // Denormalized for historical reference
+  ruleType: varchar("rule_type", { length: 30 }).notNull(),
+  appliedAt: timestamp("applied_at").defaultNow(),
+}, (table) => [
+  index("pricing_adjustments_log_booking_idx").on(table.bookingId),
+  index("pricing_adjustments_log_rule_idx").on(table.ruleId),
+  index("pricing_adjustments_log_applied_at_idx").on(table.appliedAt),
+]);
+
+export const insertPricingAdjustmentLogSchema = createInsertSchema(pricingAdjustmentsLog).omit({
+  id: true,
+  appliedAt: true,
+});
+
+export type InsertPricingAdjustmentLog = z.infer<typeof insertPricingAdjustmentLogSchema>;
+export type PricingAdjustmentLog = typeof pricingAdjustmentsLog.$inferSelect;
+
+// Date-specific demand overrides - for holidays or special days
+export const demandDateOverrides = pgTable("demand_date_overrides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salonId: varchar("salon_id").notNull().references(() => salons.id, { onDelete: "cascade" }),
+  overrideDate: text("override_date").notNull(), // YYYY-MM-DD format
+  demandLevel: varchar("demand_level", { length: 20 }).notNull(), // Override demand for the whole day
+  reason: text("reason"), // e.g., "National Holiday", "Valentine's Day"
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("demand_date_overrides_salon_idx").on(table.salonId),
+  uniqueIndex("demand_date_overrides_salon_date_unique").on(table.salonId, table.overrideDate),
+]);
+
+export const insertDemandDateOverrideSchema = createInsertSchema(demandDateOverrides).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertDemandDateOverride = z.infer<typeof insertDemandDateOverrideSchema>;
+export type DemandDateOverride = typeof demandDateOverrides.$inferSelect;
+
+// Relations for Dynamic Pricing tables
+export const timeSlotDemandRelations = relations(timeSlotDemand, ({ one }) => ({
+  salon: one(salons, {
+    fields: [timeSlotDemand.salonId],
+    references: [salons.id],
+  }),
+}));
+
+export const dynamicPricingRulesRelations = relations(dynamicPricingRules, ({ one, many }) => ({
+  salon: one(salons, {
+    fields: [dynamicPricingRules.salonId],
+    references: [salons.id],
+  }),
+  adjustments: many(pricingAdjustmentsLog),
+}));
+
+export const pricingAdjustmentsLogRelations = relations(pricingAdjustmentsLog, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [pricingAdjustmentsLog.bookingId],
+    references: [bookings.id],
+  }),
+  rule: one(dynamicPricingRules, {
+    fields: [pricingAdjustmentsLog.ruleId],
+    references: [dynamicPricingRules.id],
+  }),
+}));
+
+export const demandDateOverridesRelations = relations(demandDateOverrides, ({ one }) => ({
+  salon: one(salons, {
+    fields: [demandDateOverrides.salonId],
+    references: [salons.id],
+  }),
+  createdByUser: one(users, {
+    fields: [demandDateOverrides.createdBy],
+    references: [users.id],
+  }),
+}));
+
+// Zod validation schemas for API requests
+export const createPricingRuleSchema = z.object({
+  name: z.string().min(1).max(100),
+  ruleType: z.enum(['off_peak_discount', 'peak_surcharge', 'happy_hour', 'seasonal']),
+  dayOfWeek: z.number().int().min(0).max(6).optional().nullable(),
+  startHour: z.number().int().min(0).max(23),
+  endHour: z.number().int().min(0).max(23),
+  adjustmentType: z.enum(['percentage', 'fixed']),
+  adjustmentValue: z.number().int().min(-50).max(25), // Max 50% discount, max 25% surcharge
+  maxDiscountPaisa: z.number().int().positive().optional().nullable(),
+  minBookingValuePaisa: z.number().int().positive().optional().nullable(),
+  applicableServiceIds: z.array(z.string().uuid()).optional().nullable(),
+  validFrom: z.string().datetime().optional().nullable(),
+  validUntil: z.string().datetime().optional().nullable(),
+  priority: z.number().int().min(0).max(100).default(0),
+});
+
+export type CreatePricingRuleInput = z.infer<typeof createPricingRuleSchema>;
+
+export const updatePricingRuleSchema = createPricingRuleSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+export type UpdatePricingRuleInput = z.infer<typeof updatePricingRuleSchema>;
+
+export const createDemandOverrideSchema = z.object({
+  overrideDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD format'),
+  demandLevel: z.enum(['low', 'medium', 'high', 'peak']),
+  reason: z.string().max(200).optional(),
+});
+
+export type CreateDemandOverrideInput = z.infer<typeof createDemandOverrideSchema>;

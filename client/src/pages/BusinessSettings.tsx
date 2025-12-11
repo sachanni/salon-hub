@@ -1172,6 +1172,41 @@ function SalonManagementSettings({
   currentSalonId: string;
   onDeleteSalon: (salon: Salon) => void;
 }) {
+  const { toast } = useToast();
+  
+  const toggleStatusMutation = useMutation({
+    mutationFn: async ({ salonId, isActive }: { salonId: string; isActive: boolean }) => {
+      const res = await fetch(`/api/salons/${salonId}/toggle-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ isActive }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to update salon status');
+      }
+      return res.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/my/salons'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/salons'] });
+      toast({ 
+        title: variables.isActive ? "Salon Enabled" : "Salon Paused", 
+        description: variables.isActive 
+          ? "Your salon is now visible and accepting bookings" 
+          : "Your salon is temporarily paused and hidden from customers"
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Cannot Update Salon Status", 
+        description: error.message, 
+        variant: "destructive" 
+      });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div>
@@ -1182,43 +1217,116 @@ function SalonManagementSettings({
       <Separator />
 
       <div className="space-y-3">
-        {Array.isArray(salons) && salons.map((salon: Salon) => (
+        {Array.isArray(salons) && salons.map((salon: any) => (
           <div
             key={salon.id}
-            className="flex items-center justify-between p-4 border rounded-lg bg-gradient-to-r from-violet-50/50 to-pink-50/50 hover:shadow-md transition-shadow"
+            className={`p-4 border rounded-lg transition-shadow ${
+              salon.isActive === 0 
+                ? 'bg-red-50/50 border-red-200' 
+                : 'bg-gradient-to-r from-violet-50/50 to-pink-50/50 hover:shadow-md'
+            }`}
             data-testid={`salon-item-${salon.id}`}
           >
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <Building className="h-5 w-5 text-violet-600" />
-                <h3 className="font-semibold text-lg">{salon.name}</h3>
-                {salon.id === currentSalonId && (
-                  <Badge variant="secondary" className="bg-violet-100 text-violet-700">
-                    Current
-                  </Badge>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Building className="h-5 w-5 text-violet-600" />
+                  <h3 className="font-semibold text-lg">{salon.name}</h3>
+                  {salon.id === currentSalonId && (
+                    <Badge variant="secondary" className="bg-violet-100 text-violet-700">
+                      Current
+                    </Badge>
+                  )}
+                  {salon.isActive === 0 && (
+                    <Badge variant="destructive">
+                      {salon.disabledBySuperAdmin === 1 ? 'Disabled by Admin' : 'Paused'}
+                    </Badge>
+                  )}
+                </div>
+                {salon.city && (
+                  <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1 ml-7">
+                    <MapPin className="h-3.5 w-3.5" />
+                    {salon.city}, {salon.state}
+                  </p>
+                )}
+                {salon.email && (
+                  <p className="text-sm text-muted-foreground ml-7">{salon.email}</p>
                 )}
               </div>
-              {salon.city && (
-                <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1 ml-7">
-                  <MapPin className="h-3.5 w-3.5" />
-                  {salon.city}, {salon.state}
-                </p>
-              )}
-              {salon.email && (
-                <p className="text-sm text-muted-foreground ml-7">{salon.email}</p>
-              )}
+              
+              <div className="flex items-center gap-3">
+                {/* Salon Status Toggle */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    {salon.isActive === 1 ? 'Active' : 'Paused'}
+                  </span>
+                  <Switch
+                    checked={salon.isActive === 1}
+                    onCheckedChange={(checked) => 
+                      toggleStatusMutation.mutate({ salonId: salon.id, isActive: checked })
+                    }
+                    disabled={toggleStatusMutation.isPending || salon.disabledBySuperAdmin === 1}
+                    data-testid={`switch-salon-status-${salon.id}`}
+                  />
+                </div>
+                
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => onDeleteSalon(salon)}
+                  disabled={salons.length <= 1}
+                  title={salons.length <= 1 ? "Cannot delete your only salon" : "Delete salon"}
+                  data-testid={`button-delete-salon-${salon.id}`}
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete
+                </Button>
+              </div>
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => onDeleteSalon(salon)}
-              disabled={salons.length <= 1}
-              title={salons.length <= 1 ? "Cannot delete your only salon" : "Delete salon"}
-              data-testid={`button-delete-salon-${salon.id}`}
-            >
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete
-            </Button>
+            
+            {/* Show warning if disabled by super admin */}
+            {salon.isActive === 0 && salon.disabledBySuperAdmin === 1 && (
+              <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Ban className="h-5 w-5 text-red-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-red-800">
+                      This salon was disabled by platform administrator
+                    </p>
+                    {salon.disabledReason && (
+                      <p className="text-sm text-red-700 mt-1">
+                        Reason: {salon.disabledReason}
+                      </p>
+                    )}
+                    <p className="text-xs text-red-600 mt-2">
+                      Please contact support to re-enable your salon.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Show info if self-paused */}
+            {salon.isActive === 0 && salon.disabledBySuperAdmin !== 1 && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Info className="h-5 w-5 text-amber-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">
+                      This salon is temporarily paused
+                    </p>
+                    {salon.disabledReason && (
+                      <p className="text-sm text-amber-700 mt-1">
+                        Reason: {salon.disabledReason}
+                      </p>
+                    )}
+                    <p className="text-xs text-amber-600 mt-2">
+                      Your salon is hidden from customers. Toggle the switch above to make it visible again.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

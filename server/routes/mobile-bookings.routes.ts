@@ -1,0 +1,508 @@
+import type { Express, Response } from "express";
+import { db } from "../db";
+import { bookings, services, salons, staff, salonReviews, users } from "@shared/schema";
+import { eq, and, sql, desc, or, gte, lt, asc, inArray } from "drizzle-orm";
+import { authenticateMobileUser } from "../middleware/authMobile";
+import { z } from "zod";
+
+const cancelBookingSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
+const rescheduleBookingSchema = z.object({
+  bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  bookingTime: z.string().regex(/^\d{2}:\d{2}$/),
+});
+
+const submitReviewSchema = z.object({
+  rating: z.number().min(1).max(5),
+  comment: z.string().max(2000).optional(),
+});
+
+const createBookingSchema = z.object({
+  salonId: z.string().min(1),
+  serviceIds: z.array(z.string()).min(1),
+  staffId: z.string().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  time: z.string().regex(/^\d{2}:\d{2}$/),
+  serviceType: z.enum(['salon', 'home']).default('salon'),
+  address: z.string().optional(),
+  notes: z.string().max(1000).optional(),
+}).refine(
+  (data) => data.serviceType !== 'home' || (data.address && data.address.trim().length > 0),
+  { message: "Address is required for home service", path: ["address"] }
+);
+
+export function registerMobileBookingsRoutes(app: Express) {
+  app.post("/api/mobile/bookings", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const parsed = createBookingSchema.safeParse(req.body);
+      
+      if (!parsed.success) {
+        return res.status(400).json({ 
+          error: "Invalid booking data", 
+          details: parsed.error.flatten() 
+        });
+      }
+
+      const { salonId, serviceIds, staffId, date, time, serviceType, address, notes } = parsed.data;
+
+      const bookingDate = new Date(date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (bookingDate < today) {
+        return res.status(400).json({ error: "Cannot book appointments in the past" });
+      }
+
+      const salon = await db.query.salons.findFirst({
+        where: eq(salons.id, salonId),
+      });
+
+      if (!salon) {
+        return res.status(404).json({ error: "Salon not found" });
+      }
+
+      if (salon.isActive !== 1) {
+        return res.status(400).json({ error: "This salon is not currently accepting bookings" });
+      }
+
+      const selectedServices = await db.select()
+        .from(services)
+        .where(and(
+          eq(services.salonId, salonId),
+          inArray(services.id, serviceIds),
+          eq(services.isActive, 1)
+        ));
+
+      if (selectedServices.length === 0) {
+        return res.status(400).json({ error: "No valid services found for this salon" });
+      }
+
+      if (selectedServices.length !== serviceIds.length) {
+        const foundIds = new Set(selectedServices.map(s => s.id));
+        const invalidIds = serviceIds.filter(id => !foundIds.has(id));
+        return res.status(400).json({ 
+          error: "Some services are invalid or do not belong to this salon",
+          invalidServiceIds: invalidIds
+        });
+      }
+
+      if (staffId) {
+        const staffMember = await db.query.staff.findFirst({
+          where: and(
+            eq(staff.id, staffId),
+            eq(staff.salonId, salonId),
+            eq(staff.isActive, 1)
+          ),
+        });
+        if (!staffMember) {
+          return res.status(400).json({ error: "Invalid or inactive staff member" });
+        }
+      }
+
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+      });
+
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const totalAmountPaisa = selectedServices.reduce((sum, s) => sum + (s.priceInPaisa || 0), 0);
+      const totalDuration = selectedServices.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+      const primaryService = selectedServices[0];
+      const serviceNames = selectedServices.map(s => s.name).join(', ');
+
+      const customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Customer';
+      const customerEmail = user.email || '';
+      const customerPhone = user.phone || '';
+
+      const [newBooking] = await db.insert(bookings).values({
+        userId,
+        salonId,
+        salonName: salon.name,
+        serviceId: primaryService.id,
+        staffId: staffId || null,
+        bookingDate: date,
+        bookingTime: time,
+        status: 'pending',
+        totalAmountPaisa,
+        finalAmountPaisa: totalAmountPaisa,
+        notes: notes || null,
+        customerName,
+        customerEmail,
+        customerPhone,
+      }).returning();
+
+      res.status(201).json({
+        success: true,
+        message: "Booking created successfully",
+        booking: {
+          ...newBooking,
+          salonName: salon.name,
+          serviceName: serviceNames,
+          serviceDuration: totalDuration,
+          totalAmount: totalAmountPaisa / 100,
+          serviceCount: selectedServices.length,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating booking:", error);
+      res.status(500).json({ error: "Failed to create booking" });
+    }
+  });
+
+  app.get("/api/mobile/bookings/my-bookings", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const status = req.query.status as string | undefined;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      let whereCondition = eq(bookings.userId, userId);
+
+      if (status === 'upcoming') {
+        whereCondition = and(
+          eq(bookings.userId, userId),
+          or(
+            eq(bookings.status, 'pending'),
+            eq(bookings.status, 'confirmed')
+          ),
+          sql`${bookings.bookingDate}::date >= CURRENT_DATE`
+        ) as any;
+      } else if (status === 'completed') {
+        whereCondition = and(
+          eq(bookings.userId, userId),
+          eq(bookings.status, 'completed')
+        ) as any;
+      } else if (status === 'cancelled') {
+        whereCondition = and(
+          eq(bookings.userId, userId),
+          eq(bookings.status, 'cancelled')
+        ) as any;
+      }
+
+      const userBookings = await db.select({
+        id: bookings.id,
+        salonId: bookings.salonId,
+        salonName: salons.name,
+        salonImageUrl: salons.imageUrl,
+        salonAddress: salons.address,
+        serviceId: bookings.serviceId,
+        serviceName: services.name,
+        serviceDuration: services.durationMinutes,
+        staffId: bookings.staffId,
+        staffName: staff.name,
+        staffImageUrl: staff.photoUrl,
+        bookingDate: bookings.bookingDate,
+        bookingTime: bookings.bookingTime,
+        status: bookings.status,
+        totalAmountPaisa: bookings.totalAmountPaisa,
+        finalAmountPaisa: bookings.finalAmountPaisa,
+        discountAmountPaisa: bookings.discountAmountPaisa,
+        paymentMethod: bookings.paymentMethod,
+        notes: bookings.notes,
+        createdAt: bookings.createdAt,
+      })
+        .from(bookings)
+        .leftJoin(salons, eq(bookings.salonId, salons.id))
+        .leftJoin(services, eq(bookings.serviceId, services.id))
+        .leftJoin(staff, eq(bookings.staffId, staff.id))
+        .where(whereCondition)
+        .orderBy(
+          status === 'upcoming' 
+            ? asc(sql`${bookings.bookingDate}::date`) 
+            : desc(bookings.createdAt)
+        )
+        .limit(limit)
+        .offset(offset);
+
+      const [countResult] = await db.select({ count: sql<number>`count(*)` })
+        .from(bookings)
+        .where(whereCondition);
+
+      res.json({
+        success: true,
+        bookings: userBookings.map(b => ({
+          ...b,
+          totalAmount: b.totalAmountPaisa ? b.totalAmountPaisa / 100 : 0,
+          finalAmount: b.finalAmountPaisa ? b.finalAmountPaisa / 100 : 0,
+          discountAmount: b.discountAmountPaisa ? b.discountAmountPaisa / 100 : 0,
+        })),
+        pagination: {
+          total: parseInt(String(countResult?.count || 0)),
+          limit,
+          offset,
+          hasMore: offset + userBookings.length < parseInt(String(countResult?.count || 0)),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching user bookings:", error);
+      res.status(500).json({ error: "Failed to fetch bookings" });
+    }
+  });
+
+  app.get("/api/mobile/bookings/:bookingId", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { bookingId } = req.params;
+
+      const booking = await db.select({
+        id: bookings.id,
+        salonId: bookings.salonId,
+        salonName: salons.name,
+        salonImageUrl: salons.imageUrl,
+        salonAddress: salons.address,
+        salonPhone: salons.phone,
+        salonLatitude: salons.latitude,
+        salonLongitude: salons.longitude,
+        serviceId: bookings.serviceId,
+        serviceName: services.name,
+        serviceDuration: services.durationMinutes,
+        serviceDescription: services.description,
+        staffId: bookings.staffId,
+        staffName: staff.name,
+        staffImageUrl: staff.photoUrl,
+        staffRoles: staff.roles,
+        bookingDate: bookings.bookingDate,
+        bookingTime: bookings.bookingTime,
+        status: bookings.status,
+        totalAmountPaisa: bookings.totalAmountPaisa,
+        originalAmountPaisa: bookings.originalAmountPaisa,
+        finalAmountPaisa: bookings.finalAmountPaisa,
+        discountAmountPaisa: bookings.discountAmountPaisa,
+        offerTitle: bookings.offerTitle,
+        paymentMethod: bookings.paymentMethod,
+        notes: bookings.notes,
+        customerName: bookings.customerName,
+        customerEmail: bookings.customerEmail,
+        customerPhone: bookings.customerPhone,
+        createdAt: bookings.createdAt,
+      })
+        .from(bookings)
+        .leftJoin(salons, eq(bookings.salonId, salons.id))
+        .leftJoin(services, eq(bookings.serviceId, services.id))
+        .leftJoin(staff, eq(bookings.staffId, staff.id))
+        .where(and(
+          eq(bookings.id, bookingId),
+          eq(bookings.userId, userId)
+        ))
+        .limit(1);
+
+      if (booking.length === 0) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      const b = booking[0];
+      res.json({
+        success: true,
+        booking: {
+          ...b,
+          totalAmount: b.totalAmountPaisa ? b.totalAmountPaisa / 100 : 0,
+          originalAmount: b.originalAmountPaisa ? b.originalAmountPaisa / 100 : 0,
+          finalAmount: b.finalAmountPaisa ? b.finalAmountPaisa / 100 : 0,
+          discountAmount: b.discountAmountPaisa ? b.discountAmountPaisa / 100 : 0,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching booking details:", error);
+      res.status(500).json({ error: "Failed to fetch booking details" });
+    }
+  });
+
+  app.post("/api/mobile/bookings/:bookingId/cancel", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { bookingId } = req.params;
+      const parsed = cancelBookingSchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid request body", details: parsed.error.errors });
+      }
+
+      const existing = await db.query.bookings.findFirst({
+        where: and(
+          eq(bookings.id, bookingId),
+          eq(bookings.userId, userId)
+        ),
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      if (existing.status === 'cancelled') {
+        return res.status(400).json({ error: "Booking is already cancelled" });
+      }
+
+      if (existing.status === 'completed') {
+        return res.status(400).json({ error: "Cannot cancel a completed booking" });
+      }
+
+      const cancellationNote = parsed.data.reason 
+        ? `Cancelled by customer: ${parsed.data.reason}`
+        : 'Cancelled by customer via mobile app';
+
+      const [updatedBooking] = await db.update(bookings)
+        .set({
+          status: 'cancelled',
+          notes: existing.notes 
+            ? `${existing.notes}\n\n${cancellationNote}`
+            : cancellationNote,
+        })
+        .where(eq(bookings.id, bookingId))
+        .returning();
+
+      res.json({
+        success: true,
+        message: "Booking cancelled successfully",
+        booking: {
+          id: updatedBooking.id,
+          status: updatedBooking.status,
+        },
+      });
+    } catch (error) {
+      console.error("Error cancelling booking:", error);
+      res.status(500).json({ error: "Failed to cancel booking" });
+    }
+  });
+
+  app.patch("/api/mobile/bookings/:bookingId/reschedule", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { bookingId } = req.params;
+      const parsed = rescheduleBookingSchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid request body", details: parsed.error.errors });
+      }
+
+      const existing = await db.query.bookings.findFirst({
+        where: and(
+          eq(bookings.id, bookingId),
+          eq(bookings.userId, userId)
+        ),
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      if (existing.status === 'cancelled') {
+        return res.status(400).json({ error: "Cannot reschedule a cancelled booking" });
+      }
+
+      if (existing.status === 'completed') {
+        return res.status(400).json({ error: "Cannot reschedule a completed booking" });
+      }
+
+      const newDate = new Date(parsed.data.bookingDate);
+      if (newDate < new Date()) {
+        return res.status(400).json({ error: "Cannot reschedule to a past date" });
+      }
+
+      const rescheduleNote = `Rescheduled from ${existing.bookingDate} ${existing.bookingTime} to ${parsed.data.bookingDate} ${parsed.data.bookingTime}`;
+
+      const [updatedBooking] = await db.update(bookings)
+        .set({
+          bookingDate: parsed.data.bookingDate,
+          bookingTime: parsed.data.bookingTime,
+          notes: existing.notes 
+            ? `${existing.notes}\n\n${rescheduleNote}`
+            : rescheduleNote,
+        })
+        .where(eq(bookings.id, bookingId))
+        .returning();
+
+      res.json({
+        success: true,
+        message: "Booking rescheduled successfully",
+        booking: {
+          id: updatedBooking.id,
+          bookingDate: updatedBooking.bookingDate,
+          bookingTime: updatedBooking.bookingTime,
+          status: updatedBooking.status,
+        },
+      });
+    } catch (error) {
+      console.error("Error rescheduling booking:", error);
+      res.status(500).json({ error: "Failed to reschedule booking" });
+    }
+  });
+
+  app.post("/api/mobile/bookings/:bookingId/review", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { bookingId } = req.params;
+      const parsed = submitReviewSchema.safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid request body", details: parsed.error.errors });
+      }
+
+      const booking = await db.query.bookings.findFirst({
+        where: and(
+          eq(bookings.id, bookingId),
+          eq(bookings.userId, userId)
+        ),
+      });
+
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      if (booking.status !== 'completed') {
+        return res.status(400).json({ error: "You can only review completed bookings" });
+      }
+
+      const existingReview = await db.query.salonReviews.findFirst({
+        where: and(
+          eq(salonReviews.bookingId, bookingId),
+          eq(salonReviews.customerId, userId)
+        ),
+      });
+
+      if (existingReview) {
+        return res.status(400).json({ error: "You have already reviewed this booking" });
+      }
+
+      const [newReview] = await db.insert(salonReviews).values({
+        salonId: booking.salonId,
+        customerId: userId,
+        bookingId: bookingId,
+        rating: parsed.data.rating,
+        comment: parsed.data.comment || null,
+        isVerified: 1,
+        source: 'salonhub',
+      }).returning();
+
+      const [ratingStats] = await db.select({
+        avgRating: sql<number>`AVG(${salonReviews.rating})`,
+        reviewCount: sql<number>`COUNT(*)`,
+      })
+        .from(salonReviews)
+        .where(eq(salonReviews.salonId, booking.salonId));
+
+      await db.update(salons)
+        .set({
+          rating: parseFloat(String(ratingStats.avgRating || 0)).toFixed(1),
+          reviewCount: parseInt(String(ratingStats.reviewCount || 0)),
+        })
+        .where(eq(salons.id, booking.salonId));
+
+      res.json({
+        success: true,
+        message: "Review submitted successfully",
+        review: {
+          id: newReview.id,
+          rating: newReview.rating,
+          createdAt: newReview.createdAt,
+        },
+      });
+    } catch (error) {
+      console.error("Error submitting review:", error);
+      res.status(500).json({ error: "Failed to submit review" });
+    }
+  });
+}

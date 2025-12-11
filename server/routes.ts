@@ -53,7 +53,9 @@ import clientProfileRoutes from "./routes/client-profiles.routes";
 import depositsRoutes, { publicDepositsRouter, registerMobileDepositRoutes } from "./routes/deposits.routes";
 import giftCardsRoutes, { publicGiftCardsRouter } from "./routes/gift-cards.routes";
 import rebookingRoutes, { registerMobileRebookingRoutes } from "./routes/rebooking.routes";
+import expressRebookingRoutes, { registerMobileExpressRebookingRoutes } from "./routes/expressRebooking.routes";
 import { rebookingService } from "./services/rebooking.service";
+import { expressRebookingService } from "./services/expressRebooking.service";
 import { rbacService } from "./services/rbacService";
 import shopAdminRoutes from "./routes/shopAdminRoutes";
 import jobCardRoutes, { registerJobCardRoutes } from "./routes/job-cards.routes";
@@ -67,6 +69,19 @@ import subscriptionRoutes from "./routes/subscription.routes";
 import metaRoutes from "./routes/meta.routes";
 import settingsRoutes from "./routes/settings.routes";
 import { subscriptionService } from "./services/subscriptionService";
+import { registerMobileUserRoutes } from "./routes/mobile-user.routes";
+import { registerMobileBookingsRoutes } from "./routes/mobile-bookings.routes";
+import { registerMobileOffersRoutes } from "./routes/mobile-offers.routes";
+import { registerCancellationRoutes, registerMobileCancellationRoutes } from "./routes/cancellation.routes";
+import waitlistRoutes from "./routes/waitlist.routes";
+import mobileWaitlistRoutes from "./routes/mobile-waitlist.routes";
+import { startWaitlistJobs } from "./jobs/waitlistJobs";
+import { startExpressRebookingJobs } from "./jobs/expressRebookingJobs";
+import dynamicPricingRoutes, { registerMobileDynamicPricingRoutes } from "./routes/dynamicPricing.routes";
+import { startDynamicPricingJobs } from "./jobs/dynamicPricingJobs";
+import { startServiceBundleJobs } from "./jobs/serviceBundleJobs";
+import lateArrivalRoutes, { mobileLateArrivalRouter } from "./routes/late-arrival.routes";
+import serviceBundleRoutes, { mobileServiceBundleRouter } from "./routes/serviceBundle.routes";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -1955,9 +1970,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        // SECURITY: Strip isActive and approvalStatus from salon owner updates
+        // SECURITY: Strip protected fields from salon owner updates
         // Only super admin can change these fields
-        const { isActive, approvalStatus, approvedAt, approvedBy, rejectionReason, ...safeData } = validationResult.data;
+        const { 
+          isActive, 
+          disabledBySuperAdmin, 
+          disabledReason, 
+          disabledAt, 
+          disabledBy,
+          approvalStatus, 
+          approvedAt, 
+          approvedBy, 
+          rejectionReason, 
+          ...safeData 
+        } = validationResult.data;
         
         if (isActive !== undefined || approvalStatus !== undefined) {
           console.log(`Blocked attempt to update protected fields by salon owner for salon ${salonId}`);
@@ -1971,6 +1997,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Error updating salon:", error);
         res.status(500).json({ error: "Failed to update salon" });
+      }
+    },
+  );
+
+  // Toggle salon active status (enable/disable) - Salon Owner only
+  // IMPORTANT: Owners CANNOT re-enable if salon was disabled by super admin
+  app.post(
+    "/api/salons/:salonId/toggle-status",
+    isAuthenticated,
+    requireSalonAccess(['owner']),
+    requireBusinessOwner(),
+    async (req: any, res) => {
+      try {
+        const { salonId } = req.params;
+        const { isActive, reason } = req.body;
+        const userId = req.user.id;
+        
+        if (typeof isActive !== 'boolean') {
+          return res.status(400).json({ error: "isActive must be a boolean" });
+        }
+        
+        // Get current salon state
+        const salon = await storage.getSalon(salonId);
+        if (!salon) {
+          return res.status(404).json({ error: "Salon not found" });
+        }
+        
+        // SECURITY: Prevent owner from re-enabling if disabled by super admin
+        if (isActive && salon.disabledBySuperAdmin === 1) {
+          return res.status(403).json({ 
+            error: "This salon was disabled by a platform administrator. Please contact support to re-enable your salon.",
+            disabledReason: salon.disabledReason,
+            disabledAt: salon.disabledAt,
+            disabledBySuperAdmin: true
+          });
+        }
+        
+        // Toggle salon status (owner-initiated)
+        await storage.toggleSalonStatus(salonId, isActive, {
+          disabledBySuperAdmin: false,
+          disabledReason: reason || (isActive ? null : 'Temporarily paused by owner'),
+          disabledBy: isActive ? undefined : userId
+        });
+        
+        res.json({ 
+          success: true, 
+          message: isActive ? "Salon enabled successfully" : "Salon temporarily paused",
+          isActive
+        });
+      } catch (error: any) {
+        console.error("Error toggling salon status:", error);
+        // Check if this is an admin-lock error from the storage layer
+        if (error.message && error.message.includes('platform administrator')) {
+          return res.status(403).json({ 
+            error: error.message,
+            disabledBySuperAdmin: true
+          });
+        }
+        res.status(500).json({ error: "Failed to update salon status" });
       }
     },
   );
@@ -8198,12 +8283,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           input.status,
         );
 
-        // If booking is completed, update customer rebooking stats
+        // If booking is completed, update customer rebooking stats and preferences
         if (input.status === "completed") {
           try {
             const updatedBooking = await storage.getBooking(bookingId);
             if (updatedBooking) {
               await rebookingService.updateCustomerStatsAfterBooking(updatedBooking);
+              // Update Express Rebooking preferences for learned behavior
+              await expressRebookingService.updatePreferencesAfterBooking(bookingId);
             }
           } catch (rebookingError) {
             console.error("Error updating rebooking stats:", rebookingError);
@@ -15606,7 +15693,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
-  // Toggle salon active status (enable/disable)
+  // Toggle salon active status (enable/disable) - Super Admin only
   app.post(
     "/api/admin/salons/:salonId/toggle-status",
     populateUserFromSession,
@@ -15614,13 +15701,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: AuthenticatedRequest, res) => {
       try {
         const { salonId } = req.params;
-        const { isActive } = req.body;
+        const { isActive, reason } = req.body;
         
         if (typeof isActive !== 'boolean') {
           return res.status(400).json({ error: "isActive must be a boolean" });
         }
         
-        await storage.toggleSalonStatus(salonId, isActive);
+        // Use the super admin specific method that sets disabledBySuperAdmin flag
+        await storage.toggleSalonStatusBySuperAdmin(salonId, isActive, req.user!.id, reason);
+        
         res.json({ 
           success: true, 
           message: isActive ? "Salon enabled successfully" : "Salon disabled successfully",
@@ -17174,6 +17263,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerMobileRebookingRoutes(app);
   console.log('✅ Rebooking routes registered (web + mobile)');
 
+  // Express Rebooking routes (one-tap rebooking with learned preferences)
+  app.use('/api/express-rebook', isAuthenticated, expressRebookingRoutes);
+  registerMobileExpressRebookingRoutes(app);
+  console.log('✅ Express Rebooking routes registered (web + mobile)');
+
+  // Peak/Off-Peak Dynamic Pricing routes
+  app.use('/api/dynamic-pricing', dynamicPricingRoutes);
+  registerMobileDynamicPricingRoutes(app, authenticateMobileUser);
+  console.log('✅ Dynamic Pricing routes registered (web + mobile)');
+
+  // Late Arrival Notification routes (customer notifies salon they're running late)
+  app.use('/api/late-arrival', lateArrivalRoutes);
+  app.use('/api/mobile/late-arrival', mobileLateArrivalRouter);
+  console.log('✅ Late Arrival routes registered (web + mobile)');
+
+  app.use('/api/service-bundles', serviceBundleRoutes);
+  app.use('/api/mobile/service-bundles', mobileServiceBundleRouter);
+  console.log('✅ Service Bundle routes registered (web + mobile)');
+
   // Shop Admin RBAC routes (manage shop admins, permissions, roles)
   app.use('/api/shop-admin', isAuthenticated, shopAdminRoutes);
   console.log('✅ Shop Admin RBAC routes registered');
@@ -17255,6 +17363,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mobile deposit routes (no-show protection for mobile app)
   registerMobileDepositRoutes(app);
   console.log('✅ Mobile deposit routes registered');
+
+  // Mobile user profile routes
+  registerMobileUserRoutes(app);
+  console.log('✅ Mobile user profile routes registered');
+
+  // Mobile bookings routes (appointments management)
+  registerMobileBookingsRoutes(app);
+  console.log('✅ Mobile bookings routes registered');
+
+  // Mobile cancellation routes (structured reason tracking)
+  registerMobileCancellationRoutes(app);
+  console.log('✅ Mobile cancellation routes registered');
+
+  // Web cancellation routes (customer portal and salon analytics)
+  registerCancellationRoutes(app);
+  console.log('✅ Cancellation routes registered');
+
+  // Slot Waitlist routes (web - join waitlist when slots unavailable)
+  app.use("/api/waitlist", waitlistRoutes);
+  console.log('✅ Waitlist routes registered');
+
+  // Mobile Waitlist routes (mobile app - join waitlist)
+  app.use("/api/mobile/waitlist", authenticateMobileUser, mobileWaitlistRoutes);
+  console.log('✅ Mobile waitlist routes registered');
+
+  // Start waitlist background jobs
+  startWaitlistJobs();
+  console.log('✅ Waitlist background jobs started');
+
+  // Start Express Rebooking background jobs
+  startExpressRebookingJobs();
+  console.log('✅ Express Rebooking background jobs started');
+
+  // Start Dynamic Pricing background jobs
+  startDynamicPricingJobs();
+  console.log('✅ Dynamic Pricing background jobs started');
+
+  // Start Service Bundle background jobs
+  startServiceBundleJobs();
+  console.log('✅ Service Bundle background jobs started');
+
+  // Mobile offers routes (browse, save, redeem offers)
+  registerMobileOffersRoutes(app);
+  console.log('✅ Mobile offers routes registered');
 
   // ===============================================
   // PRODUCT E-COMMERCE ROUTES

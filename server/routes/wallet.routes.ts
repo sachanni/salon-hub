@@ -1,6 +1,6 @@
 import type { Express, Response } from "express";
 import { db } from "../db";
-import { userWallets, walletTransactions, users } from "@shared/schema";
+import { userWallets, walletTransactions, users, customerSavedCards } from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { authenticateMobileUser } from "../middleware/authMobile";
 import Razorpay from "razorpay";
@@ -235,6 +235,113 @@ export function registerWalletRoutes(app: Express) {
     } catch (error) {
       console.error("Error using wallet:", error);
       res.status(500).json({ error: "Failed to process wallet payment" });
+    }
+  });
+
+  // ============ Payment Methods (Saved Cards) ============
+
+  // Get user's saved payment methods
+  app.get("/api/mobile/payment-methods", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+
+      const cards = await db.query.customerSavedCards.findMany({
+        where: and(
+          eq(customerSavedCards.customerId, userId),
+          eq(customerSavedCards.isActive, 1)
+        ),
+        orderBy: [desc(customerSavedCards.createdAt)],
+      });
+
+      res.json({
+        success: true,
+        cards: cards.map(card => ({
+          id: card.id,
+          last4: card.cardLast4,
+          cardType: card.cardNetwork || card.cardType || 'card',
+          expiryMonth: String(card.expiryMonth || '').padStart(2, '0'),
+          expiryYear: String(card.expiryYear || '').slice(-2),
+          cardholderName: card.nickname || '',
+          isDefault: card.isDefault === 1,
+          createdAt: card.createdAt,
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching saved cards:", error);
+      res.status(500).json({ error: "Failed to fetch saved cards" });
+    }
+  });
+
+  // Delete a saved payment method
+  app.delete("/api/mobile/payment-methods/:cardId", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { cardId } = req.params;
+
+      const card = await db.query.customerSavedCards.findFirst({
+        where: and(
+          eq(customerSavedCards.id, cardId),
+          eq(customerSavedCards.customerId, userId)
+        ),
+      });
+
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      // Soft delete by setting isActive to 0
+      await db.update(customerSavedCards)
+        .set({ isActive: 0, updatedAt: new Date() })
+        .where(eq(customerSavedCards.id, cardId));
+
+      res.json({
+        success: true,
+        message: "Card removed successfully",
+      });
+    } catch (error) {
+      console.error("Error deleting saved card:", error);
+      res.status(500).json({ error: "Failed to remove card" });
+    }
+  });
+
+  // Set a card as default
+  app.post("/api/mobile/payment-methods/:cardId/set-default", authenticateMobileUser, async (req: any, res: Response) => {
+    try {
+      const userId = req.user.id;
+      const { cardId } = req.params;
+
+      const card = await db.query.customerSavedCards.findFirst({
+        where: and(
+          eq(customerSavedCards.id, cardId),
+          eq(customerSavedCards.customerId, userId),
+          eq(customerSavedCards.isActive, 1)
+        ),
+      });
+
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      // Remove default from all other cards
+      await db.update(customerSavedCards)
+        .set({ isDefault: 0, updatedAt: new Date() })
+        .where(and(
+          eq(customerSavedCards.customerId, userId),
+          eq(customerSavedCards.isActive, 1)
+        ));
+
+      // Set this card as default
+      await db.update(customerSavedCards)
+        .set({ isDefault: 1, updatedAt: new Date() })
+        .where(eq(customerSavedCards.id, cardId));
+
+      res.json({
+        success: true,
+        message: "Default card updated",
+      });
+    } catch (error) {
+      console.error("Error setting default card:", error);
+      res.status(500).json({ error: "Failed to set default card" });
     }
   });
 

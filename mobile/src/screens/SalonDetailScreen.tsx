@@ -18,6 +18,7 @@ import { Salon, Service, StaffMember, SalonReview } from '../types/navigation';
 import { useChat } from '../contexts/ChatContext';
 import { useAuth } from '../contexts/AuthContext';
 import { chatService } from '../services/chatService';
+import DepositBadge from '../components/DepositBadge';
 
 const { width } = Dimensions.get('window');
 
@@ -302,7 +303,12 @@ export default function SalonDetailScreen() {
             {services.slice(0, 5).map((service) => (
               <View key={service.id} style={styles.serviceCard}>
                 <View style={styles.serviceInfo}>
-                  <Text style={styles.serviceName}>{service.name}</Text>
+                  <View style={styles.serviceNameRow}>
+                    <Text style={styles.serviceName}>{service.name}</Text>
+                    {service.depositPercentage && service.depositPercentage > 0 && (
+                      <DepositBadge size="small" />
+                    )}
+                  </View>
                   <Text style={styles.serviceDuration}>{service.durationMinutes} mins</Text>
                   <Text style={styles.servicePrice}>{formatPrice(service.priceInPaisa)}</Text>
                 </View>
@@ -761,11 +767,16 @@ const styles = StyleSheet.create({
   serviceInfo: {
     flex: 1,
   },
+  serviceNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
   serviceName: {
     fontSize: 16,
     fontWeight: '500',
     color: '#111827',
-    marginBottom: 4,
   },
   serviceDuration: {
     fontSize: 14,
