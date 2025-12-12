@@ -11,6 +11,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { bookingAPI } from '../services/api';
+import LateArrivalButton from '../components/LateArrivalButton';
 
 export default function BookingDetailScreen() {
   const router = useRouter();
@@ -255,6 +256,17 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
+        {/* Late Arrival Button - Only for today's active bookings */}
+        <LateArrivalButton
+          bookingId={booking.id}
+          bookingTime={booking.bookingTime}
+          bookingDate={booking.bookingDate}
+          salonName={booking.salonName || 'the salon'}
+          bookingStatus={booking.status}
+          onSuccess={loadBookingDetails}
+          style={styles.lateArrivalButton}
+        />
+
         {/* Booking ID */}
         <View style={styles.bookingIdContainer}>
           <Text style={styles.bookingIdLabel}>Booking ID</Text>
@@ -478,5 +490,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  lateArrivalButton: {
+    marginBottom: 16,
   },
 });

@@ -112,7 +112,7 @@ export default function RebookingSuggestions() {
 
   if (isLoading) {
     return (
-      <section className="py-12 bg-gradient-to-br from-purple-50/50 to-pink-50/50">
+      <section className="py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3 mb-6">
             <Skeleton className="h-8 w-8 rounded-full" />
@@ -172,7 +172,7 @@ export default function RebookingSuggestions() {
   };
 
   return (
-    <section className="py-12 bg-gradient-to-br from-purple-50/50 via-white to-pink-50/50">
+    <section className="py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">

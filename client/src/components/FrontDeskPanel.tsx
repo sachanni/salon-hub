@@ -23,10 +23,13 @@ import {
   AlertCircle,
   Timer,
   IndianRupee,
-  UserPlus
+  UserPlus,
+  MessageCircle
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { formatDistanceToNow, format, isToday, parseISO } from "date-fns";
 import WalkInDialog from "./WalkInDialog";
+import { ChatDock } from "./chat/ChatDock";
 
 interface JobCard {
   id: string;
@@ -115,6 +118,17 @@ interface Staff {
   role: string;
 }
 
+interface ChatConversation {
+  id: string;
+  salonId: string;
+  customerId: string;
+  customerName?: string;
+  customerPhone?: string;
+  staffUnreadCount: number;
+  lastMessageAt?: string;
+  status: string;
+}
+
 interface FrontDeskPanelProps {
   salonId: string;
   onOpenJobCard?: (jobCardId: string) => void;
@@ -174,6 +188,50 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
     },
     enabled: !!salonId && isAuthenticated
   });
+
+  const { data: chatConversations = [] } = useQuery({
+    queryKey: ['/api/chat/conversations', salonId, 'frontdesk'],
+    queryFn: async () => {
+      const response = await fetch(`/api/chat/conversations?role=staff&salonId=${salonId}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        console.error('Failed to fetch chat conversations for indicators:', response.status);
+        return [];
+      }
+      const data = await response.json();
+      return (data.conversations || []) as ChatConversation[];
+    },
+    enabled: !!salonId && isAuthenticated,
+    refetchInterval: 30000,
+    staleTime: 10000,
+    retry: 2,
+  });
+
+  const getCustomerChatInfo = (customerId?: string, customerPhone?: string) => {
+    if (!customerId && !customerPhone) return null;
+    
+    let conversation = null;
+    
+    if (customerId) {
+      conversation = chatConversations.find(c => c.customerId === customerId);
+    }
+    
+    if (!conversation && customerPhone) {
+      const normalizedPhone = customerPhone.replace(/\D/g, '').slice(-10);
+      conversation = chatConversations.find(c => {
+        const convPhone = c.customerPhone?.replace(/\D/g, '').slice(-10);
+        return convPhone && convPhone === normalizedPhone;
+      });
+    }
+    
+    if (!conversation) return null;
+    return {
+      hasConversation: true,
+      unreadCount: conversation.staffUnreadCount,
+      conversationId: conversation.id
+    };
+  };
 
   const checkInMutation = useMutation({
     mutationFn: async ({ bookingId, customerName, customerPhone, isWalkIn = false }: { 
@@ -393,6 +451,7 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
   }
 
   return (
+    <TooltipProvider>
     <Card className="h-full">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-lg">
@@ -466,6 +525,29 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
                             {jobCard.isWalkIn && (
                               <Badge variant="outline" className="text-xs">Walk-in</Badge>
                             )}
+                            {(() => {
+                              const chatInfo = getCustomerChatInfo(jobCard.customerId, jobCard.customerPhone);
+                              if (chatInfo) {
+                                return (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="relative cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                        <MessageCircle className={`h-4 w-4 ${chatInfo.unreadCount > 0 ? 'text-violet-600' : 'text-muted-foreground'}`} />
+                                        {chatInfo.unreadCount > 0 && (
+                                          <span className="absolute -top-1.5 -right-1.5 h-3.5 min-w-3.5 px-0.5 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
+                                            {chatInfo.unreadCount > 9 ? '9+' : chatInfo.unreadCount}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>{chatInfo.unreadCount > 0 ? `${chatInfo.unreadCount} unread message(s)` : 'Has chat conversation'}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                           <p className="font-medium truncate">{jobCard.customerName}</p>
                           {jobCard.customerPhone && (
@@ -583,6 +665,29 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
                             <Badge variant="secondary" className="text-xs">
                               Confirmed
                             </Badge>
+                            {(() => {
+                              const chatInfo = getCustomerChatInfo(booking.customerId, booking.customerPhone);
+                              if (chatInfo) {
+                                return (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="relative cursor-pointer">
+                                        <MessageCircle className={`h-4 w-4 ${chatInfo.unreadCount > 0 ? 'text-violet-600' : 'text-muted-foreground'}`} />
+                                        {chatInfo.unreadCount > 0 && (
+                                          <span className="absolute -top-1.5 -right-1.5 h-3.5 min-w-3.5 px-0.5 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
+                                            {chatInfo.unreadCount > 9 ? '9+' : chatInfo.unreadCount}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>{chatInfo.unreadCount > 0 ? `${chatInfo.unreadCount} unread message(s)` : 'Has chat conversation'}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                           <p className="font-medium truncate">{booking.customerName}</p>
                           {booking.customerPhone && (
@@ -652,6 +757,29 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
                             <Badge className={`text-xs ${getStatusColor(jobCard.status)}`}>
                               Ready to Pay
                             </Badge>
+                            {(() => {
+                              const chatInfo = getCustomerChatInfo(jobCard.customerId, jobCard.customerPhone);
+                              if (chatInfo) {
+                                return (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="relative cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                                        <MessageCircle className={`h-4 w-4 ${chatInfo.unreadCount > 0 ? 'text-violet-600' : 'text-muted-foreground'}`} />
+                                        {chatInfo.unreadCount > 0 && (
+                                          <span className="absolute -top-1.5 -right-1.5 h-3.5 min-w-3.5 px-0.5 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold">
+                                            {chatInfo.unreadCount > 9 ? '9+' : chatInfo.unreadCount}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>{chatInfo.unreadCount > 0 ? `${chatInfo.unreadCount} unread message(s)` : 'Has chat conversation'}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                           <p className="font-medium truncate">{jobCard.customerName}</p>
                           {jobCard.customerPhone && (
@@ -725,6 +853,9 @@ export default function FrontDeskPanel({ salonId, onOpenJobCard }: FrontDeskPane
           onOpenJobCard?.(jobCardId);
         }}
       />
+
+      <ChatDock salonId={salonId} />
     </Card>
+    </TooltipProvider>
   );
 }

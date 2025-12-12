@@ -23,6 +23,8 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import BookingModal from "@/components/BookingModal";
+import { RescheduleModal } from "@/components/RescheduleModal";
+import { LateArrivalButton } from "@/components/customer/LateArrivalButton";
 import MyBeautyProfile from "@/components/customer/MyBeautyProfile";
 import { 
   Calendar, 
@@ -71,7 +73,9 @@ interface ServerAppointment {
   id: string;
   salonId: string;
   salonName: string;
+  serviceId: string;
   serviceName: string;
+  staffId: string;
   staffName: string;
   bookingDate: string; // Server uses bookingDate
   bookingTime: string; // Server uses bookingTime
@@ -132,7 +136,9 @@ interface Appointment {
   id: string;
   salonId: string;
   salonName: string;
+  serviceId: string;
   serviceName: string;
+  staffId: string;
   staffName: string;
   date: string;
   time: string;
@@ -172,7 +178,9 @@ const mapAppointmentData = (serverData: ServerAppointment): Appointment => ({
   id: serverData.id,
   salonId: serverData.salonId,
   salonName: serverData.salonName,
+  serviceId: serverData.serviceId,
   serviceName: serverData.serviceName,
+  staffId: serverData.staffId || '',
   staffName: serverData.staffName,
   date: serverData.bookingDate, // Map bookingDate to date
   time: serverData.bookingTime, // Map bookingTime to time
@@ -557,18 +565,16 @@ export default function CustomerDashboard() {
   // Cancel appointment mutation
   const cancelAppointmentMutation = useMutation({
     mutationFn: async (appointmentId: string) => {
-      return apiRequest(`/api/customer/appointments/${appointmentId}`, {
-        method: 'PATCH',
-        body: { status: 'cancelled' }
-      });
+      return apiRequest('PATCH', `/api/customer/appointments/${appointmentId}`, { status: 'cancelled' });
     },
     onSuccess: () => {
       toast({
         title: "Appointment Cancelled",
         description: "Your appointment has been cancelled successfully.",
       });
-      // Invalidate and refetch appointments
-      queryClient.invalidateQueries({ queryKey: ['/api/customer/appointments'] });
+      // Invalidate and refetch all appointment queries
+      queryClient.invalidateQueries({ queryKey: ['/api/customer/appointments?status=upcoming'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/customer/appointments?status=history'] });
     },
     onError: (error: any) => {
       toast({
@@ -1237,6 +1243,17 @@ export default function CustomerDashboard() {
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
+                          
+                          <LateArrivalButton
+                            bookingId={appointment.id}
+                            bookingTime={appointment.time}
+                            bookingDate={appointment.date}
+                            salonName={appointment.salonName}
+                            bookingStatus={appointment.status}
+                            onSuccess={() => {
+                              queryClient.invalidateQueries({ queryKey: ['/api/customer/appointments?status=upcoming'] });
+                            }}
+                          />
                           
                           <Button 
                             variant="outline" 
@@ -2438,15 +2455,25 @@ export default function CustomerDashboard() {
 
       {/* Reschedule Modal */}
       {rescheduleAppointment && (
-        <BookingModal
+        <RescheduleModal
           isOpen={rescheduleModalOpen}
           onClose={() => {
             setRescheduleModalOpen(false);
             setRescheduleAppointment(null);
+            refetchUpcoming();
           }}
-          salonName={rescheduleAppointment.salonName}
-          salonId={rescheduleAppointment.salonId}
-          staffId={rescheduleAppointment.staffId}
+          appointment={{
+            id: rescheduleAppointment.id,
+            salonId: rescheduleAppointment.salonId,
+            salonName: rescheduleAppointment.salonName,
+            serviceId: rescheduleAppointment.serviceId,
+            serviceName: rescheduleAppointment.serviceName,
+            staffId: rescheduleAppointment.staffId,
+            staffName: rescheduleAppointment.staffName,
+            bookingDate: rescheduleAppointment.date,
+            bookingTime: rescheduleAppointment.time,
+            duration: rescheduleAppointment.duration,
+          }}
         />
       )}
 

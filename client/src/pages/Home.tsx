@@ -116,17 +116,10 @@ export default function Home() {
           <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
             {/* Simplified Hero Text */}
             <div className="text-center mb-8 sm:mb-12">
-              <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-gray-900 mb-4 sm:mb-6 leading-tight px-4">
-                Book Beauty Services
-                <br className="hidden sm:block" />
-                <span className="bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600 bg-clip-text text-transparent animate-gradient">
-                  {" "}In 30 Seconds
-                </span>
+              <h1 className="font-bold text-black mb-1 px-4 text-[55px]">
+                Selfcare & Wellness services near you
               </h1>
-              
-              <p className="text-lg sm:text-xl text-gray-700 max-w-2xl mx-auto leading-relaxed px-4 mb-6">
-                Top-rated salons, instant booking, verified professionals
-              </p>
+              <p className="text-gray-600 text-center text-[18px] mb-6">Explore elite studios, wellness retreats and visionary experts trusted worldwide</p>
             </div>
             
             {/* Search Bar */}
@@ -200,9 +193,7 @@ export default function Home() {
         {/* App Download - Final CTA */}
         <DownloadAppSection />
       </main>
-      
       <Footer />
-
       <LocationPermissionDialog
         onPermissionGranted={handleLocationGranted}
         onPermissionDenied={handleLocationDenied}

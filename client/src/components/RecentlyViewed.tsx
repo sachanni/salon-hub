@@ -46,7 +46,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
   // Scroll functions
   const scrollLeft = () => {
     if (!scrollContainerRef.current) return;
-    const cardWidth = 400; // Updated to match new card width (350-384px + gap)
+    const cardWidth = 280; // Compact card width + gap
     scrollContainerRef.current.scrollBy({
       left: -cardWidth * 2, // Scroll by 2 cards
       behavior: 'smooth'
@@ -55,7 +55,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
 
   const scrollRight = () => {
     if (!scrollContainerRef.current) return;
-    const cardWidth = 400; // Updated to match new card width (350-384px + gap)
+    const cardWidth = 280; // Compact card width + gap
     scrollContainerRef.current.scrollBy({
       left: cardWidth * 2, // Scroll by 2 cards
       behavior: 'smooth'
@@ -117,7 +117,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
         <div className="relative">
           <div 
             ref={scrollContainerRef}
-            className="flex gap-6 overflow-x-auto scrollbar-hide pb-4 snap-x snap-mandatory"
+            className="flex gap-4 overflow-x-auto scrollbar-hide pb-4 snap-x snap-mandatory"
             style={{
               WebkitOverflowScrolling: 'touch'
             }}
@@ -126,7 +126,7 @@ export default function RecentlyViewed({ onBookingClick }: RecentlyViewedProps) 
             {recentSalons.map((salon) => (
               <div 
                 key={salon.id} 
-                className="flex-none w-[350px] sm:w-96 snap-start"
+                className="flex-none w-[260px] sm:w-[280px] snap-start"
                 data-testid={`item-recently-viewed-${salon.id}`}
               >
                 <SalonCard

@@ -550,13 +550,13 @@ const MapComponent: React.FC<{
             <div className="absolute inset-0 w-4 h-4 bg-gradient-to-br from-red-500 to-red-600 rounded-full border border-white shadow-sm"></div>
             <div className="absolute top-0.5 left-0.5 w-1 h-1 bg-white rounded-full opacity-60"></div>
           </div>
-          <span className="font-medium text-gray-700">Salons ({salons.length})</span>
+          <span className="font-medium text-gray-700">Studios ({salons.length})</span>
         </div>
       </div>
 
       {/* Map Title */}
       <div className="absolute top-4 left-4 bg-white rounded-lg shadow-md p-2 text-sm font-medium z-10">
-        Map View - {salons.length} salons found
+        Map View - {salons.length} studios found
         {searchLocation && (
           <div className="text-xs text-gray-500 mt-1">
             <div className="font-medium text-gray-700">Searching from: {searchLocationName}</div>
@@ -900,7 +900,7 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Finding salons near you...</p>
+          <p className="text-gray-600">Finding studios near you...</p>
         </div>
       </div>
     );
@@ -924,8 +924,8 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   return (
     <div className="h-screen bg-gray-50 flex flex-col">
       <div className="flex flex-1 overflow-hidden min-w-0">
-        {/* Sidebar - Responsive: Full width on mobile, sidebar on desktop */}
-        <div className="w-full md:w-[550px] md:min-w-[480px] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
+        {/* Sidebar - Responsive: Full width on mobile, max 60% on desktop for 2-column grid */}
+        <div className="w-full md:w-[55%] lg:w-[60%] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
           {/* Shared Header Component */}
           <SearchResultsHeader
             salonCount={salons.length}
@@ -941,11 +941,11 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
 
           {/* Salon List */}
           <ScrollArea className="flex-1">
-            <div className="p-4 md:p-4 space-y-4">
+            <div className="p-4">
               {sortedSalons.length === 0 ? (
                 <div className="text-center py-8">
                   <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 font-medium">No salons found in this area</p>
+                  <p className="text-gray-600 font-medium">No studios found in this area</p>
                   <p className="text-sm text-gray-500 mt-1 mb-4">
                     Try expanding your search radius or changing your location
                   </p>
@@ -958,18 +958,19 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                   </Button>
                 </div>
               ) : (
-                sortedSalons.map((salon, index) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {sortedSalons.map((salon, index) => (
                   <Card
                     key={salon.id}
                     data-salon-id={salon.id}
-                    className={`group cursor-pointer transition-all duration-200 hover:shadow-lg hover:scale-[1.01] ${
+                    className={`group cursor-pointer transition-all duration-200 hover:shadow-md hover:scale-[1.01] ${
                       selectedSalonId === salon.id ? 'ring-2 ring-blue-500 shadow-lg' : 'hover:border-blue-200'
                     }`}
                     onClick={() => handleSalonClick(salon)}
                   >
                     <CardContent className="p-0">
-                      {/* Salon Image Carousel - Fresha Style: Larger Image */}
-                      <div className="relative h-48 w-full overflow-hidden rounded-t-lg">
+                      {/* Salon Image - Wider aspect ratio for compact height */}
+                      <div className="relative aspect-[16/9] w-full overflow-hidden rounded-t-lg">
                         {(() => {
                           const images = salon.imageUrls && salon.imageUrls.length > 0 
                             ? salon.imageUrls 
@@ -1083,131 +1084,88 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                         )}
                       </div>
 
-                      {/* Salon Details - Fresha Style */}
-                      <div className="p-4">
-                        {/* Salon Name - Larger, More Prominent */}
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2 leading-tight">
-                          {salon.name}
-                        </h3>
-                        
-                        {/* Rating & Reviews - Fresha Style */}
-                        <div className="flex items-center gap-1.5 mb-2">
-                          <Star className="w-4 h-4 text-yellow-500 fill-current" />
-                          <span className="text-base font-semibold text-gray-900">
-                            {formatRating(salon.rating)}
-                          </span>
-                          <span className="text-sm text-gray-500">
-                            ({salon.reviewCount})
-                          </span>
+                      {/* Studio Details */}
+                      <div className="p-3">
+                        {/* Header: Name + Rating */}
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <h3 className="text-sm font-bold text-gray-900 leading-tight line-clamp-1">
+                            {salon.name}
+                          </h3>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <Star className="w-3.5 h-3.5 text-yellow-500 fill-current" />
+                            <span className="text-sm font-semibold text-gray-900">
+                              {formatRating(salon.rating)}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              ({salon.reviewCount})
+                            </span>
+                          </div>
                         </div>
 
-                        {/* Location - Subtle */}
-                        <p className="text-sm text-gray-500 mb-4">
-                          {(() => {
-                            // Extract street and area (first 3 parts before state/pincode)
-                            const addressParts = salon.address?.split(',') || [];
-                            const cleanAddress = addressParts.slice(0, 3).join(',').trim();
-                            return `${cleanAddress}, ${salon.city}`;
-                          })()}
+                        {/* Location */}
+                        <p className="text-xs text-gray-500 mb-3">
+                          {formatDistance(salon.distance_km)} • {salon.city}
                         </p>
 
-                        {/* Services - Fresha Style: Interactive & Clickable */}
+                        {/* Services with Time Slots */}
                         {salon.services && salon.services.length > 0 && (
-                          <div className="mb-2">
-                            {salon.services.map((service, index) => (
-                              <a
-                                key={index}
-                                href={`/salon/${salon.id}/book?service=${encodeURIComponent(service.name)}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                          <div className="space-y-3">
+                            {salon.services.slice(0, 2).map((service, idx) => {
+                              const salonTimeSlots = timeSlotsData[salon.id];
+                              const displaySlots = salonTimeSlots?.availableSlots?.slice(0, 3) || [];
+                              
+                              return (
+                                <div key={idx} className="border-t border-gray-100 pt-2">
+                                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                                    <div>
+                                      <p className="text-sm font-medium text-gray-900 line-clamp-1">{service.name}</p>
+                                      <p className="text-xs text-gray-500">{service.durationMinutes} mins</p>
+                                    </div>
+                                    <p className="text-sm font-semibold text-gray-900 flex-shrink-0">
+                                      from ₹{service.price.toLocaleString()}
+                                    </p>
+                                  </div>
+                                  
+                                  {/* Time Slots */}
+                                  {displaySlots.length > 0 && idx === 0 && (
+                                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                      {displaySlots.map((slot) => (
+                                        <button
+                                          key={slot.id}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSalonClick(salon);
+                                          }}
+                                          className="px-2.5 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-full border border-purple-200 transition-colors"
+                                        >
+                                          {slot.time}
+                                        </button>
+                                      ))}
+                                      {(salonTimeSlots?.availableSlots?.length || 0) > 3 && (
+                                        <span className="text-xs text-gray-400">•••</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            
+                            {salon.services.length > 2 && (
+                              <a 
+                                href={`/salon/${salon.id}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className={`group/service flex items-start justify-between gap-3 py-1.5 px-2.5 -mx-2.5 transition-all duration-200 hover:bg-purple-50 cursor-pointer ${index < (salon.services?.length ?? 0) - 1 ? 'border-b border-gray-200' : ''}`}
-                                data-testid={`service-${salon.id}-${index}`}
+                                className="inline-block text-xs font-medium text-purple-600 hover:text-purple-700 hover:underline pt-1"
                               >
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 mb-0.5 group-hover/service:text-purple-700 transition-colors">
-                                    {service.name}
-                                  </p>
-                                  <p className="text-xs text-gray-500 group-hover/service:text-purple-600 transition-colors">
-                                    {service.durationMinutes} mins
-                                  </p>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                  <p className="text-sm font-semibold text-gray-900 group-hover/service:text-purple-700 transition-colors">
-                                    from ₹{service.price.toLocaleString()}
-                                  </p>
-                                </div>
+                                See all {salon.services.length} services
                               </a>
-                            ))}
-                            <a 
-                              href={`/salon/${salon.id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-block text-sm font-medium text-purple-600 hover:text-purple-700 hover:underline pt-1 ml-2.5"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              See more
-                            </a>
+                            )}
                           </div>
                         )}
-
-                        {/* Available Time Slots */}
-                        <div className="mt-2 pt-2 border-t border-gray-100">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-xs text-gray-500 font-medium">Available times</span>
-                          </div>
-                          
-                          {/* Time Slots */}
-                          <div className="space-y-1.5">
-                            {(() => {
-                              const salonTimeSlots = timeSlotsData[salon.id];
-                              const isLoading = loadingTimeSlots[salon.id];
-                              
-                              if (isLoading) {
-                                return (
-                                  <div className="flex items-center justify-center py-2">
-                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
-                                    <span className="ml-2 text-xs text-gray-500">Loading...</span>
-                                  </div>
-                                );
-                              }
-                              
-            if (!salonTimeSlots || salonTimeSlots.availableSlots.length === 0) {
-              return (
-                <div className="text-center py-2">
-                  <span className="text-xs text-gray-500">No availability set</span>
-                </div>
-              );
-            }
-                              
-                              // Show first 3 available time slots
-                              const displaySlots = salonTimeSlots.availableSlots.slice(0, 3);
-                              
-                              return displaySlots.map((slot) => (
-                                <button
-                                  key={slot.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSalonClick(salon);
-                                  }}
-                                  className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-blue-50 rounded transition-colors group"
-                                >
-                                  <div className="flex items-center gap-1.5">
-                                    <Clock className="w-3 h-3 text-blue-600 flex-shrink-0" />
-                                    <span className="text-xs font-medium text-blue-900">
-                                      {slot.time}
-                                    </span>
-                                  </div>
-                                  <span className="text-xs text-gray-500">{slot.duration} min</span>
-                                </button>
-                              ));
-                            })()}
-                          </div>
-                        </div>
                       </div>
                     </CardContent>
                   </Card>
-                ))
+                ))}
+                </div>
               )}
             </div>
           </ScrollArea>

@@ -130,17 +130,47 @@ router.get('/conversations', async (req: Request, res: Response) => {
     let conversations;
 
     if (role === 'staff') {
-      const userStaff = await db.query.staff.findFirst({
-        where: eq(staff.userId, userId)
-      });
+      const requestedSalonId = req.query.salonId as string;
+      let salonIdForQuery: string | null = null;
+      
+      if (requestedSalonId) {
+        const userSalon = await db.query.salons.findFirst({
+          where: eq(salons.id, requestedSalonId)
+        });
+        if (userSalon && userSalon.ownerId === userId) {
+          salonIdForQuery = requestedSalonId;
+        } else {
+          const userStaff = await db.query.staff.findFirst({
+            where: and(eq(staff.userId, userId), eq(staff.salonId, requestedSalonId))
+          });
+          if (userStaff) {
+            salonIdForQuery = requestedSalonId;
+          }
+        }
+      } else {
+        const userStaff = await db.query.staff.findFirst({
+          where: eq(staff.userId, userId)
+        });
 
-      if (!userStaff) {
+        if (userStaff) {
+          salonIdForQuery = userStaff.salonId;
+        } else {
+          const userSalon = await db.query.salons.findFirst({
+            where: eq(salons.ownerId, userId)
+          });
+          if (userSalon) {
+            salonIdForQuery = userSalon.id;
+          }
+        }
+      }
+
+      if (!salonIdForQuery) {
         return res.json({ conversations: [] });
       }
 
       conversations = await db.query.chatConversations.findMany({
         where: and(
-          eq(chatConversations.salonId, userStaff.salonId),
+          eq(chatConversations.salonId, salonIdForQuery),
           eq(chatConversations.status, status)
         ),
         with: {
@@ -283,14 +313,39 @@ router.get('/conversations/:id/messages', async (req: Request, res: Response) =>
     const cursor = req.query.cursor as string;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
+    const conversation = await db.query.chatConversations.findFirst({
+      where: eq(chatConversations.id, id)
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    let hasAccess = false;
+    
     const participant = await db.query.chatParticipants.findFirst({
       where: and(
         eq(chatParticipants.conversationId, id),
         eq(chatParticipants.userId, userId)
       )
     });
+    if (participant) hasAccess = true;
 
-    if (!participant) {
+    if (!hasAccess) {
+      const salon = await db.query.salons.findFirst({
+        where: eq(salons.id, conversation.salonId)
+      });
+      if (salon && salon.ownerId === userId) hasAccess = true;
+    }
+
+    if (!hasAccess) {
+      const userStaff = await db.query.staff.findFirst({
+        where: and(eq(staff.userId, userId), eq(staff.salonId, conversation.salonId))
+      });
+      if (userStaff) hasAccess = true;
+    }
+
+    if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -349,14 +404,49 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
       return res.status(400).json({ error: validation.error.errors });
     }
 
+    const conversation = await db.query.chatConversations.findFirst({
+      where: eq(chatConversations.id, id)
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    let hasAccess = false;
+    let senderRole: 'customer' | 'staff' = 'staff';
+    
     const participant = await db.query.chatParticipants.findFirst({
       where: and(
         eq(chatParticipants.conversationId, id),
         eq(chatParticipants.userId, userId)
       )
     });
+    if (participant) {
+      hasAccess = true;
+      senderRole = participant.role as 'customer' | 'staff';
+    }
 
-    if (!participant) {
+    if (!hasAccess) {
+      const salon = await db.query.salons.findFirst({
+        where: eq(salons.id, conversation.salonId)
+      });
+      if (salon && salon.ownerId === userId) {
+        hasAccess = true;
+        senderRole = 'staff';
+      }
+    }
+
+    if (!hasAccess) {
+      const userStaff = await db.query.staff.findFirst({
+        where: and(eq(staff.userId, userId), eq(staff.salonId, conversation.salonId))
+      });
+      if (userStaff) {
+        hasAccess = true;
+        senderRole = 'staff';
+      }
+    }
+
+    if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -377,7 +467,7 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
     const [message] = await db.insert(chatMessages).values({
       conversationId: id,
       senderId: userId,
-      senderRole: participant.role,
+      senderRole: senderRole,
       senderName,
       senderAvatar: user?.profileImageUrl,
       messageType,
@@ -396,7 +486,7 @@ router.post('/conversations/:id/messages', async (req: Request, res: Response) =
         lastMessageAt: new Date(),
         lastMessagePreview: preview,
         updatedAt: new Date(),
-        ...(participant.role === 'customer' 
+        ...(senderRole === 'customer' 
           ? { staffUnreadCount: sql`${chatConversations.staffUnreadCount} + 1` }
           : { customerUnreadCount: sql`${chatConversations.customerUnreadCount} + 1` }
         )
@@ -420,25 +510,62 @@ router.post('/conversations/:id/read', async (req: Request, res: Response) => {
 
     const { id } = req.params;
 
+    const conversation = await db.query.chatConversations.findFirst({
+      where: eq(chatConversations.id, id)
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    let hasAccess = false;
+    let isStaff = false;
+    
     const participant = await db.query.chatParticipants.findFirst({
       where: and(
         eq(chatParticipants.conversationId, id),
         eq(chatParticipants.userId, userId)
       )
     });
+    if (participant) {
+      hasAccess = true;
+      isStaff = participant.role === 'staff';
+    }
 
-    if (!participant) {
+    if (!hasAccess) {
+      const salon = await db.query.salons.findFirst({
+        where: eq(salons.id, conversation.salonId)
+      });
+      if (salon && salon.ownerId === userId) {
+        hasAccess = true;
+        isStaff = true;
+      }
+    }
+
+    if (!hasAccess) {
+      const userStaff = await db.query.staff.findFirst({
+        where: and(eq(staff.userId, userId), eq(staff.salonId, conversation.salonId))
+      });
+      if (userStaff) {
+        hasAccess = true;
+        isStaff = true;
+      }
+    }
+
+    if (!hasAccess) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    await db.update(chatParticipants)
-      .set({ lastReadAt: new Date() })
-      .where(and(
-        eq(chatParticipants.conversationId, id),
-        eq(chatParticipants.userId, userId)
-      ));
+    if (participant) {
+      await db.update(chatParticipants)
+        .set({ lastReadAt: new Date() })
+        .where(and(
+          eq(chatParticipants.conversationId, id),
+          eq(chatParticipants.userId, userId)
+        ));
+    }
 
-    if (participant.role === 'customer') {
+    if (!isStaff) {
       await db.update(chatConversations)
         .set({ customerUnreadCount: 0 })
         .where(eq(chatConversations.id, id));

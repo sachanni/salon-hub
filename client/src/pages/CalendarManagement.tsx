@@ -440,23 +440,10 @@ export default function CalendarManagement({ salonId: propSalonId }: CalendarMan
         </TabsList>
 
         <TabsContent value="frontdesk">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Today's Booking Calendar</CardTitle>
-                <CardDescription>
-                  Quick view of today's appointments with status indicators
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <BookingCalendarView salonId={salonId} defaultViewMode="day" />
-              </CardContent>
-            </Card>
-            <FrontDeskPanel 
-              salonId={salonId} 
-              onOpenJobCard={handleOpenJobCard}
-            />
-          </div>
+          <FrontDeskPanel 
+            salonId={salonId} 
+            onOpenJobCard={handleOpenJobCard}
+          />
         </TabsContent>
 
         <TabsContent value="calendar">

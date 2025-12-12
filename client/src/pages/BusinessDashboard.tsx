@@ -72,7 +72,8 @@ import {
   Instagram,
   AlertTriangle,
   Ban,
-  Clock
+  Clock,
+  MessageCircle
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSalonPermissions } from "@/hooks/useSalonPermissions";
@@ -97,6 +98,8 @@ import PastEvents from "@/pages/PastEvents";
 import CustomerImportDashboard from "@/components/business-dashboard/CustomerImportDashboard";
 import CampaignDashboard from "@/components/business-dashboard/CampaignDashboard";
 import CommissionManagement from "@/components/business-dashboard/CommissionManagement";
+import { ChatInbox } from "@/components/chat/ChatInbox";
+import { ChatNotificationBadge } from "@/components/chat/ChatNotificationBadge";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -186,6 +189,7 @@ interface NavigationItem {
   isSetup?: boolean;
   isOptional?: boolean;
   progress?: number;
+  unreadCount?: number;
 }
 
 interface NavigationSection {
@@ -237,6 +241,7 @@ export default function BusinessDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState("monthly");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [salonToDelete, setSalonToDelete] = useState<Salon | null>(null);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const isMobile = useIsMobile();
   
   // Subscription feature access
@@ -364,6 +369,31 @@ export default function BusinessDashboard() {
       }
     }
   }, [salons, salonId]);
+
+  // Fetch chat unread count for sidebar badge
+  useEffect(() => {
+    if (!salonId) return;
+    
+    const fetchChatUnreadCount = async () => {
+      try {
+        const response = await fetch(`/api/chat/conversations?salonId=${salonId}`, {
+          credentials: 'include'
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const convs = data.conversations || [];
+          const total = convs.reduce((sum: number, c: any) => sum + (c.staffUnreadCount || 0), 0);
+          setChatUnreadCount(total);
+        }
+      } catch (error) {
+        console.error('Failed to fetch chat unread count:', error);
+      }
+    };
+
+    fetchChatUnreadCount();
+    const interval = setInterval(fetchChatUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [salonId]);
 
   // Handler for salon switching
   const handleSalonSwitch = (value: string) => {
@@ -641,6 +671,7 @@ export default function BusinessDashboard() {
       label: "Communications",
       icon: MessageSquare,
       items: [
+        { id: "chat-inbox", label: "Chat Inbox", icon: MessageCircle, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin, unreadCount: chatUnreadCount },
         { id: "communications", label: "Customer Communications", icon: MessageSquare, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin },
         { id: "customer-import", label: "Customer Import", icon: Upload, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin },
         { id: "campaigns", label: "Invitation Campaigns", icon: Send, isComplete: false, isSetup: false, hasAccess: canViewCustomers || isAdmin }
@@ -822,6 +853,11 @@ export default function BusinessDashboard() {
                                       <span className="group-data-[collapsible=icon]:hidden flex items-center justify-between w-full text-sm">
                                         <span className={isActive ? 'font-medium' : ''}>{item.label}</span>
                                         <div className="flex items-center gap-1.5">
+                                          {item.unreadCount && item.unreadCount > 0 && (
+                                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 min-w-4 flex items-center justify-center">
+                                              {item.unreadCount > 99 ? '99+' : item.unreadCount}
+                                            </Badge>
+                                          )}
                                           {item.isComplete && (
                                             <div className="flex items-center justify-center h-5 w-5 rounded-full bg-green-500/20" title="Complete">
                                               <CheckCircle className="h-3 w-3 text-green-600" />
@@ -1884,6 +1920,37 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle chat inbox tab
+    if (activeTab === "chat-inbox") {
+      return (
+        <div className="p-6 h-[calc(100vh-120px)]">
+          <Card className="h-full">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2">
+                <MessageCircle className="h-5 w-5 text-purple-600" />
+                Chat Inbox
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[calc(100%-60px)]">
+              {user?.id && salonId ? (
+                <ChatInbox
+                  salonId={salonId}
+                  staffId={user.id}
+                  userId={user.id}
+                  userName={user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email || 'Staff'}
+                  authToken=""
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  Loading chat inbox...
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     // Handle communications tab
     if (activeTab === "communications") {
       return (
@@ -2119,9 +2186,15 @@ export default function BusinessDashboard() {
                   {Math.round(completionPercentage)}% Complete
                 </Badge>
               )}
-              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-violet-100">
-                <Bell className="h-4 w-4 text-slate-600" />
-              </Button>
+              {salonId && (
+                <ChatNotificationBadge 
+                  salonId={salonId}
+                  onOpenChat={() => setActiveTab("chat-inbox")}
+                  onSelectConversation={(convId) => {
+                    setActiveTab("chat-inbox");
+                  }}
+                />
+              )}
               
               {/* Settings Link */}
               <Link href={`/business/settings/${salonId}`}>

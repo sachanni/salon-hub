@@ -1,6 +1,6 @@
 import type { Express, Response } from "express";
 import { db } from "../db";
-import { bookings, services, salons, staff, salonReviews, users } from "@shared/schema";
+import { bookings, services, salons, staff, salonReviews, users, servicePackages } from "@shared/schema";
 import { eq, and, sql, desc, or, gte, lt, asc, inArray } from "drizzle-orm";
 import { authenticateMobileUser } from "../middleware/authMobile";
 import { z } from "zod";
@@ -28,6 +28,11 @@ const createBookingSchema = z.object({
   serviceType: z.enum(['salon', 'home']).default('salon'),
   address: z.string().optional(),
   notes: z.string().max(1000).optional(),
+  // Package booking fields
+  packageId: z.string().optional(),
+  isPackageBooking: z.boolean().optional(),
+  totalPrice: z.number().optional(),
+  totalDuration: z.number().optional(),
 }).refine(
   (data) => data.serviceType !== 'home' || (data.address && data.address.trim().length > 0),
   { message: "Address is required for home service", path: ["address"] }
@@ -109,14 +114,85 @@ export function registerMobileBookingsRoutes(app: Express) {
         return res.status(401).json({ error: "User not found" });
       }
 
-      const totalAmountPaisa = selectedServices.reduce((sum, s) => sum + (s.priceInPaisa || 0), 0);
-      const totalDuration = selectedServices.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+      // Calculate service totals
+      const serviceTotalPaisa = selectedServices.reduce((sum, s) => sum + (s.priceInPaisa || 0), 0);
+      const serviceTotalDuration = selectedServices.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
       const primaryService = selectedServices[0];
       const serviceNames = selectedServices.map(s => s.name).join(', ');
+
+      // Handle package booking - use package price instead of service sum
+      let totalAmountPaisa = serviceTotalPaisa;
+      let totalDuration = serviceTotalDuration;
+      let packageName: string | null = null;
+      let isPackageBookingFlag = false;
+
+      const { packageId, isPackageBooking: isPackageBookingInput, totalPrice: clientTotalPrice, totalDuration: clientTotalDuration } = parsed.data;
+
+      if (packageId && isPackageBookingInput) {
+        const packageData = await db.query.servicePackages.findFirst({
+          where: and(
+            eq(servicePackages.id, packageId),
+            eq(servicePackages.salonId, salonId)
+          ),
+        });
+
+        if (!packageData) {
+          return res.status(404).json({ error: "Package not found" });
+        }
+
+        if (!packageData.isActive) {
+          return res.status(400).json({ error: "Package is no longer active" });
+        }
+
+        // Check validity dates
+        const now = new Date();
+        if (packageData.validFrom && new Date(packageData.validFrom) > now) {
+          return res.status(400).json({ error: "Package is not yet available" });
+        }
+        if (packageData.validUntil && new Date(packageData.validUntil) < now) {
+          return res.status(400).json({ error: "Package has expired" });
+        }
+
+        // Validate that serviceIds match the package services
+        const packageServiceIds = Array.isArray(packageData.serviceIds) 
+          ? packageData.serviceIds 
+          : JSON.parse(packageData.serviceIds as string || '[]');
+        
+        const sortedPackageServiceIds = [...packageServiceIds].sort();
+        const sortedRequestServiceIds = [...serviceIds].sort();
+        
+        if (JSON.stringify(sortedPackageServiceIds) !== JSON.stringify(sortedRequestServiceIds)) {
+          console.warn(`Package service mismatch: package has ${packageServiceIds.join(',')}, request has ${serviceIds.join(',')}`);
+          return res.status(400).json({
+            error: "Service mismatch",
+            details: "The services in your booking do not match the package contents",
+          });
+        }
+
+        // Use server-calculated package price and duration (never trust client)
+        totalAmountPaisa = packageData.packagePriceInPaisa;
+        totalDuration = packageData.totalDurationMinutes;
+        packageName = packageData.name;
+        isPackageBookingFlag = true;
+
+        console.log(`📦 Mobile package booking: using package price ${totalAmountPaisa} instead of service total ${serviceTotalPaisa}`);
+      } else {
+        // For non-package bookings, always use server-calculated totals (ignore client values)
+        totalAmountPaisa = serviceTotalPaisa;
+        totalDuration = serviceTotalDuration;
+        
+        if (clientTotalPrice && clientTotalPrice !== serviceTotalPaisa) {
+          console.warn(`Non-package price mismatch ignored: client sent ${clientTotalPrice}, using server calculated ${serviceTotalPaisa}`);
+        }
+      }
 
       const customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Customer';
       const customerEmail = user.email || '';
       const customerPhone = user.phone || '';
+
+      const bookingNotes = isPackageBookingFlag && packageName
+        ? `Package: ${packageName}${notes ? `\n${notes}` : ''}`
+        : notes || null;
 
       const [newBooking] = await db.insert(bookings).values({
         userId,
@@ -128,8 +204,10 @@ export function registerMobileBookingsRoutes(app: Express) {
         bookingTime: time,
         status: 'pending',
         totalAmountPaisa,
+        originalAmountPaisa: serviceTotalPaisa, // Store original price for reference
         finalAmountPaisa: totalAmountPaisa,
-        notes: notes || null,
+        discountAmountPaisa: isPackageBookingFlag ? serviceTotalPaisa - totalAmountPaisa : 0,
+        notes: bookingNotes,
         customerName,
         customerEmail,
         customerPhone,
@@ -137,14 +215,18 @@ export function registerMobileBookingsRoutes(app: Express) {
 
       res.status(201).json({
         success: true,
-        message: "Booking created successfully",
+        message: isPackageBookingFlag ? "Package booking created successfully" : "Booking created successfully",
         booking: {
           ...newBooking,
           salonName: salon.name,
           serviceName: serviceNames,
           serviceDuration: totalDuration,
           totalAmount: totalAmountPaisa / 100,
+          originalAmount: serviceTotalPaisa / 100,
+          savings: isPackageBookingFlag ? (serviceTotalPaisa - totalAmountPaisa) / 100 : 0,
           serviceCount: selectedServices.length,
+          isPackageBooking: isPackageBookingFlag,
+          packageName,
         },
       });
     } catch (error) {

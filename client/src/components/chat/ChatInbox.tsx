@@ -65,6 +65,7 @@ export function ChatInbox({
   const [customerTyping, setCustomerTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
+  const [chatToken, setChatToken] = useState<string>(authToken || '');
   
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -72,10 +73,31 @@ export function ChatInbox({
   const pendingMessagesRef = useRef<Map<string, Message>>(new Map());
 
   useEffect(() => {
+    const fetchToken = async () => {
+      if (!authToken) {
+        try {
+          const response = await fetch('/api/chat/token', {
+            credentials: 'include'
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setChatToken(data.token);
+          }
+        } catch (error) {
+          console.error('Failed to fetch chat token:', error);
+        }
+      }
+    };
+    fetchToken();
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!chatToken) return;
+    
     const socket = io(window.location.origin, {
       path: '/socket.io',
       auth: {
-        token: authToken,
+        token: chatToken,
         userRole: 'staff',
         salonId,
         staffId
@@ -131,11 +153,13 @@ export function ChatInbox({
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [userId, salonId, staffId]);
+  }, [userId, salonId, staffId, chatToken]);
 
   useEffect(() => {
-    loadConversations();
-  }, []);
+    if (chatToken) {
+      loadConversations();
+    }
+  }, [chatToken]);
 
   useEffect(() => {
     if (selectedConversation && socketRef.current) {
@@ -158,10 +182,8 @@ export function ChatInbox({
 
   const loadConversations = async () => {
     try {
-      const response = await fetch('/api/chat/conversations?role=staff', {
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+      const response = await fetch(`/api/chat/conversations?role=staff&salonId=${salonId}`, {
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to load conversations');
@@ -178,9 +200,7 @@ export function ChatInbox({
   const loadMessages = async (conversationId: string) => {
     try {
       const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to load messages');

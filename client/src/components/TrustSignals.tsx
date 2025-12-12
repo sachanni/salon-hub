@@ -53,7 +53,7 @@ export default function TrustSignals() {
   ];
 
   return (
-    <section className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white">
+    <section className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
@@ -84,20 +84,20 @@ export default function TrustSignals() {
           ))}
         </div>
 
-        <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-3xl p-8 md:p-12 text-white">
-          <h3 className="text-2xl md:text-3xl font-bold text-center mb-8">
+        <div className="bg-gradient-to-r from-violet-50 via-white to-rose-50 rounded-3xl p-8 md:p-12 border border-violet-100/50 shadow-lg">
+          <h3 className="text-2xl md:text-3xl font-bold text-center mb-8 bg-gradient-to-r from-violet-700 via-fuchsia-600 to-rose-600 bg-clip-text text-transparent">
             Trusted by Millions Across India
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {stats.map((stat, index) => (
               <div key={index} className="text-center">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full mb-4">
-                  <stat.icon className="w-8 h-8 text-yellow-300" />
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-violet-500 to-fuchsia-500 backdrop-blur-sm rounded-full mb-4 shadow-lg shadow-violet-200/50">
+                  <stat.icon className="w-8 h-8 text-white" />
                 </div>
-                <div className="text-4xl md:text-5xl font-bold mb-2">
+                <div className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-violet-700 to-fuchsia-600 bg-clip-text text-transparent">
                   {stat.value}
                 </div>
-                <div className="text-purple-100 text-lg">
+                <div className="text-gray-600 text-lg font-medium">
                   {stat.label}
                 </div>
               </div>

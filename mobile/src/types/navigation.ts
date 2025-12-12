@@ -100,3 +100,36 @@ export interface SalonReview {
   createdAt: string;
   customerName?: string;
 }
+
+export interface ServicePackage {
+  id: string;
+  salonId: string;
+  name: string;
+  description?: string;
+  regularPriceInPaisa: number;
+  packagePriceInPaisa: number;
+  totalDurationMinutes: number;
+  discountPercentage?: number;
+  regularPrice: number;
+  packagePrice: number;
+  savings: number;
+  savingsPercentage: number;
+  validFrom?: string;
+  validUntil?: string;
+  isActive: boolean;
+  serviceCount?: number;
+  services?: PackageService[];
+}
+
+export interface PackageService {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  subCategory?: string;
+  priceInPaisa: number;
+  price: number;
+  durationMinutes: number;
+  imageUrl?: string;
+  quantity: number;
+}

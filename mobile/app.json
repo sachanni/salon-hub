@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "SalonHub",
-    "slug": "salonhub-mobile",
+    "name": "StudioHub",
+    "slug": "studiohub-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,8 +17,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.salonhub.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "We use your location to find the nearest top-rated salons and exclusive offers around you.",
-        "NSLocationAlwaysUsageDescription": "We use your location to find the nearest top-rated salons and exclusive offers around you."
+        "NSLocationWhenInUseUsageDescription": "We use your location to find the nearest top-rated studios and exclusive offers around you.",
+        "NSLocationAlwaysUsageDescription": "We use your location to find the nearest top-rated studios and exclusive offers around you."
       }
     },
     "android": {
@@ -38,7 +38,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow SalonHub to use your location to find nearby salons."
+          "locationAlwaysAndWhenInUsePermission": "Allow StudioHub to use your location to find nearby studio."
         }
       ],
       [

@@ -192,14 +192,12 @@ export default function Salons() {
           <>
             {!isSearchActive ? (
               /* Initial Landing - Hero Section with Search */
-              <div className="bg-gradient-to-br from-purple-600 to-pink-600 text-white">
+              (<div className="bg-gradient-to-br from-purple-600 to-pink-600 text-white">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
                   <div className="text-center mb-8">
-                    <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-4">
-                      Find Your Perfect Salon
-                    </h1>
+                    <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-4">Find Your Perfect Studio</h1>
                     <p className="text-lg sm:text-xl text-purple-100 max-w-2xl mx-auto">
-                      Browse thousands of verified salons, spas, and beauty professionals
+                      Browse thousands of verified studios, spas, and beauty professionals
                     </p>
                   </div>
 
@@ -279,10 +277,10 @@ export default function Salons() {
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>)
             ) : (
               /* Search Active - Compact Header with Search Bar (Map Style) */
-              <div className="sticky top-0 z-40 bg-white shadow-sm">
+              (<div className="sticky top-0 z-40 bg-white shadow-sm">
                 {/* Search Bar - Same as Map View */}
                 <div className="border-b border-gray-200 py-4 px-4">
                   <FreshaSearchBar
@@ -304,7 +302,6 @@ export default function Salons() {
                     savedLocations={[]}
                   />
                 </div>
-
                 {/* Results Header */}
                 <SearchResultsHeader
                   salonCount={filteredSalonCount}
@@ -313,7 +310,7 @@ export default function Salons() {
                   viewMode={showMapView ? 'map' : 'grid'}
                   onToggleView={(mode) => setShowMapView(mode === 'map')}
                 />
-              </div>
+              </div>)
             )}
 
             {/* Salon Listings */}
@@ -355,21 +352,17 @@ export default function Salons() {
           </>
         )}
       </main>
-      
       <Footer />
-      
       <BookingModal 
         isOpen={isBookingOpen}
         onClose={() => setIsBookingOpen(false)}
         salonName={selectedSalon}
         salonId={selectedSalonId}
       />
-
       <LocationPermissionDialog
         onPermissionGranted={handleLocationGranted}
         onPermissionDenied={handleLocationDenied}
       />
-
       <FilterPanel
         isOpen={isFilterPanelOpen}
         onClose={() => setIsFilterPanelOpen(false)}

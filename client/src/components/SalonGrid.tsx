@@ -159,7 +159,7 @@ export default function SalonGrid({ title, subtitle, searchParams, onBookingClic
   return (
     <section className="py-8 sm:py-16">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {isLoading ? (
             // Loading skeleton state
             Array.from({ length: 6 }).map((_, index) => (

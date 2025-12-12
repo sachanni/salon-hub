@@ -1,3 +1,14 @@
+/**
+ * StudioHub - Premium Beauty & Wellness Booking Platform
+ * Database Schema Definitions
+ * 
+ * Copyright (c) 2025 Aulnova Techsoft Ind Pvt Ltd
+ * https://aulnovatechsoft.com/
+ * 
+ * All rights reserved. This source code is proprietary and confidential.
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 import { sql, relations } from "drizzle-orm";
 import { pgTable, text, varchar, integer, timestamp, decimal, index, jsonb, check, foreignKey, unique, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";

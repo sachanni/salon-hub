@@ -2,7 +2,7 @@ import { Crown, Gift, Star, Zap, ArrowRight } from "lucide-react";
 
 export default function LoyaltyProgramCard() {
   return (
-    <section className="py-16 px-4 bg-white">
+    <section className="py-16 px-4">
       <div className="max-w-5xl mx-auto">
         <div className="relative bg-gradient-to-br from-purple-600 via-purple-700 to-pink-600 rounded-3xl p-8 md:p-12 shadow-2xl overflow-hidden">
           {/* Decorative background elements */}

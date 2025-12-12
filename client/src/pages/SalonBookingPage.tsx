@@ -69,6 +69,24 @@ interface Booking {
   serviceDuration?: number;
 }
 
+interface ServicePackage {
+  id: string;
+  name: string;
+  description?: string;
+  packagePriceInPaisa: number;
+  regularPriceInPaisa?: number;
+  totalDurationMinutes: number;
+  discountPercentage?: number;
+  services?: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    priceInPaisa: number;
+    durationMinutes: number;
+    category: string;
+  }>;
+}
+
 type BookingStep = 'services' | 'datetime' | 'confirm';
 
 export default function SalonBookingPage() {
@@ -89,6 +107,50 @@ export default function SalonBookingPage() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [firebaseToken, setFirebaseToken] = useState<string | undefined>(undefined);
+  const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
+  const [packageId, setPackageId] = useState<string | null>(null);
+
+  // Get package ID from URL on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pkgId = params.get('package');
+    if (pkgId) {
+      setPackageId(pkgId);
+    }
+  }, []);
+
+  // Fetch package details if packageId is set
+  const { data: packageData } = useQuery<ServicePackage>({
+    queryKey: [`/api/salons/${salonId}/packages/${packageId}`],
+    enabled: !!salonId && !!packageId,
+  });
+
+  // When package data is loaded, set selectedPackage and auto-select services
+  useEffect(() => {
+    if (packageData && !selectedPackage) {
+      setSelectedPackage(packageData);
+      
+      // Auto-select all services from the package
+      if (packageData.services && packageData.services.length > 0) {
+        const packageServices: SelectedService[] = packageData.services.map((svc, idx) => ({
+          id: svc.id,
+          name: svc.name,
+          category: svc.category || 'Package Service',
+          subCategory: null,
+          priceInPaisa: svc.priceInPaisa,
+          durationMinutes: svc.durationMinutes,
+          sequence: idx + 1,
+        }));
+        setSelectedServices(packageServices);
+        // Auto-select today's date and skip to datetime step
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        setSelectedDate(today);
+        setBookingStep('datetime');
+        console.log('✅ Package services auto-selected:', packageData.name);
+      }
+    }
+  }, [packageData, selectedPackage]);
 
   // Helper function to check if two dates are the same day (timezone-safe)
   const isSameDay = (date1: Date, date2: Date): boolean => {
@@ -129,8 +191,11 @@ export default function SalonBookingPage() {
   };
 
   // Calculate total price and duration from selected services
-  const totalPrice = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
+  const serviceTotal = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
   const totalDuration = selectedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+  // Use package price when booking a package, otherwise use service total
+  const totalPrice = selectedPackage ? selectedPackage.packagePriceInPaisa : serviceTotal;
+  const regularPrice = selectedPackage?.regularPriceInPaisa || serviceTotal;
 
   // Auto-populate authenticated user details
   useEffect(() => {
@@ -841,6 +906,25 @@ export default function SalonBookingPage() {
                   </div>
                 )}
 
+                {/* Package Booking Banner */}
+                {selectedPackage && (
+                  <div className="bg-gradient-to-r from-purple-100 to-pink-100 border border-purple-200 rounded-lg p-3 mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="bg-purple-600 text-white text-xs font-bold px-2 py-0.5 rounded">PACKAGE</div>
+                      <div className="font-semibold text-purple-900">{selectedPackage.name}</div>
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-sm text-purple-700">{selectedPackage.services?.length || 0} services included</span>
+                      <div className="flex items-center gap-2">
+                        {selectedPackage.regularPriceInPaisa && selectedPackage.regularPriceInPaisa > selectedPackage.packagePriceInPaisa && (
+                          <span className="text-sm text-gray-400 line-through">₹{(selectedPackage.regularPriceInPaisa / 100).toFixed(0)}</span>
+                        )}
+                        <span className="font-bold text-purple-900">₹{(selectedPackage.packagePriceInPaisa / 100).toFixed(0)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Selected Services Display - Services Step */}
                 {bookingStep === 'services' && (
                   selectedServices.length === 0 ? (
@@ -1138,10 +1222,28 @@ export default function SalonBookingPage() {
                 {/* Price Breakdown - Confirm Step */}
                 {bookingStep === 'confirm' && (
                   <div className="space-y-2 mb-4">
+                    {/* Show regular price for packages */}
+                    {selectedPackage && regularPrice > totalPrice && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Regular Price</span>
+                        <span className="text-gray-400 line-through">₹{(regularPrice / 100).toFixed(0)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600">Service Total</span>
+                      <span className="text-gray-600">{selectedPackage ? 'Package Price' : 'Service Total'}</span>
                       <span className="text-gray-900">₹{(totalPrice / 100).toFixed(0)}</span>
                     </div>
+                    {/* Package savings */}
+                    {selectedPackage && regularPrice > totalPrice && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-green-600 flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          Package Savings
+                        </span>
+                        <span className="text-green-600 font-medium">-₹{((regularPrice - totalPrice) / 100).toFixed(0)}</span>
+                      </div>
+                    )}
+                    {/* Promo offer discount */}
                     {bestOffer && discountAmount > 0 && (
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-green-600 flex items-center gap-1">
@@ -1158,7 +1260,12 @@ export default function SalonBookingPage() {
                         {finalPrice === 0 ? "Free" : `₹${(finalPrice / 100).toFixed(0)}`}
                       </div>
                     </div>
-                    {bestOffer && priceBreakdown.savingsPercentage > 0 && (
+                    {selectedPackage && regularPrice > totalPrice && (
+                      <div className="text-xs text-center text-green-600 font-medium bg-green-50 rounded-lg py-2">
+                        🎉 You're saving ₹{((regularPrice - totalPrice) / 100).toFixed(0)} with this package!
+                      </div>
+                    )}
+                    {!selectedPackage && bestOffer && priceBreakdown.savingsPercentage > 0 && (
                       <div className="text-xs text-center text-green-600 font-medium bg-green-50 rounded-lg py-2">
                         🎉 You're saving {priceBreakdown.savingsPercentage}% on this booking!
                       </div>
@@ -1171,7 +1278,10 @@ export default function SalonBookingPage() {
                   <div className="flex justify-between items-center mb-6">
                     <div className="text-sm font-semibold text-gray-900">Total</div>
                     <div className="text-xl font-bold text-gray-900">
-                      {totalPrice === 0 ? "Free" : `₹${(totalPrice / 100).toFixed(0)}`}
+                      {selectedPackage 
+                        ? `₹${(selectedPackage.packagePriceInPaisa / 100).toFixed(0)}`
+                        : totalPrice === 0 ? "Free" : `₹${(totalPrice / 100).toFixed(0)}`
+                      }
                     </div>
                   </div>
                 )}
@@ -1223,9 +1333,11 @@ export default function SalonBookingPage() {
                         customerPhone: customerPhone,
                         paymentMethod: paymentMethod === 'salon' ? 'pay_at_salon' : 'pay_now',
                         isGuest: true,
-                        totalPrice: totalPrice,
-                        totalDuration: totalDuration,
-                        offerId: bestOffer?.id || null
+                        totalPrice: selectedPackage ? selectedPackage.packagePriceInPaisa : totalPrice,
+                        totalDuration: selectedPackage ? selectedPackage.totalDurationMinutes : totalDuration,
+                        offerId: bestOffer?.id || null,
+                        packageId: selectedPackage?.id || null,
+                        isPackageBooking: !!selectedPackage
                       });
                     }
                   }}
@@ -1285,7 +1397,7 @@ export default function SalonBookingPage() {
               <div className="text-right">
                 <div className="text-sm text-gray-600">Total</div>
                 <div className="text-2xl font-bold text-gray-900">
-                  ₹{(totalPrice / 100).toFixed(0)}
+                  ₹{(selectedPackage ? selectedPackage.packagePriceInPaisa : totalPrice) / 100}
                 </div>
               </div>
             </div>

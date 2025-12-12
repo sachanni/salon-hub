@@ -187,6 +187,24 @@ interface Staff {
   salonId: string;
 }
 
+interface ServicePackage {
+  id: string;
+  name: string;
+  description?: string;
+  packagePriceInPaisa: number;
+  regularPriceInPaisa?: number;
+  totalDurationMinutes: number;
+  discountPercentage?: number;
+  category?: string;
+  imageUrl?: string;
+  isActive: number;
+  services?: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+  }>;
+}
+
 interface SalonProfileProps {
   salonId?: string;
 }
@@ -209,6 +227,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
 
   // Refs for scroll spy
   const servicesRef = useRef<HTMLDivElement>(null);
+  const packagesRef = useRef<HTMLDivElement>(null);
   const offersRef = useRef<HTMLDivElement>(null);
   const staffRef = useRef<HTMLDivElement>(null);
   const aboutRef = useRef<HTMLDivElement>(null);
@@ -265,6 +284,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
 
       const sections = [
         { id: 'services', ref: servicesRef },
+        { id: 'packages', ref: packagesRef },
         { id: 'offers', ref: offersRef },
         { id: 'staff', ref: staffRef },
         { id: 'about', ref: aboutRef },
@@ -313,10 +333,13 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
   }, [salonId]);
 
   // Booking handlers - Navigate to full-page booking
-  const handleBookNow = (serviceId?: string) => {
+  const handleBookNow = (serviceId?: string, packageId?: string) => {
     const params = new URLSearchParams();
     if (serviceId) {
       params.set('service', serviceId);
+    }
+    if (packageId) {
+      params.set('package', packageId);
     }
     setLocation(`/salon/${salonId}/book?${params.toString()}`);
   };
@@ -331,6 +354,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
   const scrollToSection = (sectionId: string) => {
     const refs: Record<string, React.RefObject<HTMLDivElement>> = {
       services: servicesRef,
+      packages: packagesRef,
       offers: offersRef,
       staff: staffRef,
       about: aboutRef,
@@ -404,6 +428,21 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
     },
     enabled: !!salonId,
   });
+
+  // Fetch salon packages
+  const { data: packages = [], isLoading: packagesLoading } = useQuery({
+    queryKey: ['salon-packages', salonId],
+    queryFn: async (): Promise<ServicePackage[]> => {
+      if (!salonId) return [];
+      const response = await fetch(`/api/salons/${salonId}/packages`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: !!salonId,
+  });
+
+  // Filter active packages only
+  const activePackages = packages.filter((pkg: ServicePackage) => pkg.isActive === 1);
 
   const handleBackToSearch = () => {
     window.close();
@@ -602,6 +641,7 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
               <div className="flex gap-1 overflow-x-auto scrollbar-hide">
                 {[
                   { id: 'services', label: 'Services', icon: Sparkles },
+                  { id: 'packages', label: 'Packages', icon: Gift },
                   { id: 'offers', label: 'Offers', icon: Tag },
                   { id: 'staff', label: 'Team', icon: Users },
                   { id: 'about', label: 'About', icon: MapPin },
@@ -742,6 +782,126 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                     <Sparkles className="w-16 h-16 mx-auto mb-4 text-gray-300" />
                     <p className="text-lg font-medium">No services available</p>
                     <p className="text-sm">Check back later for updates</p>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Packages Section */}
+            <section ref={packagesRef} id="packages" className="scroll-mt-[200px]">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Service Packages</h2>
+                <p className="text-gray-600">Save more with our bundled service packages</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {packagesLoading ? (
+                  <>
+                    {[1, 2].map((i) => (
+                      <Card key={i} className="animate-pulse">
+                        <CardContent className="p-6">
+                          <div className="h-32 bg-gray-200 rounded"></div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </>
+                ) : activePackages && activePackages.length > 0 ? (
+                  activePackages.map((pkg: ServicePackage) => {
+                    const savings = pkg.regularPriceInPaisa && pkg.regularPriceInPaisa > pkg.packagePriceInPaisa
+                      ? pkg.regularPriceInPaisa - pkg.packagePriceInPaisa
+                      : 0;
+                    const savingsPercent = pkg.discountPercentage || (savings > 0 && pkg.regularPriceInPaisa
+                      ? Math.round((savings / pkg.regularPriceInPaisa) * 100)
+                      : 0);
+
+                    return (
+                      <Card 
+                        key={pkg.id} 
+                        className="group hover:shadow-xl transition-all duration-300 border-2 hover:border-purple-200 relative overflow-hidden"
+                      >
+                        {/* Gradient Background */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-pink-500/5"></div>
+                        
+                        <CardContent className="p-6 relative">
+                          <div className="flex items-start gap-4">
+                            {/* Package Image */}
+                            {pkg.imageUrl && (
+                              <img
+                                src={pkg.imageUrl}
+                                alt={pkg.name}
+                                className="w-20 h-20 rounded-lg object-cover flex-shrink-0"
+                              />
+                            )}
+                            
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                {savingsPercent > 0 && (
+                                  <Badge className="bg-green-100 text-green-700 border-green-200" variant="outline">
+                                    Save {savingsPercent}%
+                                  </Badge>
+                                )}
+                                {pkg.category && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {pkg.category}
+                                  </Badge>
+                                )}
+                              </div>
+                              
+                              <h3 className="text-lg font-bold text-gray-900 mb-1 group-hover:text-purple-600 transition-colors truncate">
+                                {pkg.name}
+                              </h3>
+                              
+                              {pkg.description && (
+                                <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                                  {pkg.description}
+                                </p>
+                              )}
+
+                              {/* Services included */}
+                              {pkg.services && pkg.services.length > 0 && (
+                                <div className="text-xs text-gray-500 mb-3">
+                                  Includes: {pkg.services.map(s => s.name).slice(0, 3).join(', ')}
+                                  {pkg.services.length > 3 && ` +${pkg.services.length - 3} more`}
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xl font-bold text-gray-900">
+                                      ₹{(pkg.packagePriceInPaisa / 100).toFixed(0)}
+                                    </span>
+                                    {pkg.regularPriceInPaisa && pkg.regularPriceInPaisa > pkg.packagePriceInPaisa && (
+                                      <span className="text-sm text-gray-400 line-through">
+                                        ₹{(pkg.regularPriceInPaisa / 100).toFixed(0)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center text-xs text-gray-500 mt-1">
+                                    <Clock className="w-3 h-3 mr-1" />
+                                    {pkg.totalDurationMinutes} min
+                                  </div>
+                                </div>
+                                
+                                <Button 
+                                  size="sm"
+                                  onClick={() => handleBookNow(undefined, pkg.id)}
+                                  className="bg-purple-600 hover:bg-purple-700"
+                                >
+                                  Book Package
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-2 text-center py-12 text-gray-500 bg-white rounded-2xl border-2 border-dashed">
+                    <Gift className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p className="text-lg font-medium">No packages available</p>
+                    <p className="text-sm">Check back later for bundled service deals</p>
                   </div>
                 )}
               </div>

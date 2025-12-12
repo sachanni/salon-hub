@@ -1,3 +1,14 @@
+/**
+ * StudioHub - Premium Beauty & Wellness Booking Platform
+ * API Routes Configuration
+ * 
+ * Copyright (c) 2025 Aulnova Techsoft Ind Pvt Ltd
+ * https://aulnovatechsoft.com/
+ * 
+ * All rights reserved. This source code is proprietary and confidential.
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, initializeServices } from "./storage";
@@ -43,6 +54,7 @@ import { registerWalletRoutes } from "./routes/wallet.routes";
 import { registerNotificationRoutes } from "./routes/notification.routes";
 import { tempImageStorage } from "./services/tempImageStorage";
 import { authenticateMobileUser } from "./middleware/authMobile";
+import { authenticateChatUser } from "./middleware/authChat";
 import loyaltyRoutes from "./routes/loyalty";
 import favoritesRoutes from "./routes/favorites";
 import referralsRoutes from "./routes/referrals";
@@ -72,6 +84,7 @@ import { subscriptionService } from "./services/subscriptionService";
 import { registerMobileUserRoutes } from "./routes/mobile-user.routes";
 import { registerMobileBookingsRoutes } from "./routes/mobile-bookings.routes";
 import { registerMobileOffersRoutes } from "./routes/mobile-offers.routes";
+import { registerMobilePackagesRoutes } from "./routes/mobile-packages.routes";
 import { registerCancellationRoutes, registerMobileCancellationRoutes } from "./routes/cancellation.routes";
 import waitlistRoutes from "./routes/waitlist.routes";
 import mobileWaitlistRoutes from "./routes/mobile-waitlist.routes";
@@ -9398,6 +9411,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalPrice,
         totalDuration,
         offerId,
+        packageId,
+        isPackageBooking,
       } = req.body;
 
       // Validate required fields
@@ -9472,14 +9487,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Calculate server-side price (CRITICAL: Never trust client-side prices)
-      const serverTotalPrice = services.reduce(
+      // For individual services, sum up their prices
+      const serviceTotalPrice = services.reduce(
         (sum, service) => sum + service!.priceInPaisa,
         0,
       );
-      const serverTotalDuration = services.reduce(
+      const serviceTotalDuration = services.reduce(
         (sum, service) => sum + service!.durationMinutes,
         0,
       );
+
+      // For package bookings, validate against the package price instead
+      let serverTotalPrice = serviceTotalPrice;
+      let serverTotalDuration = serviceTotalDuration;
+
+      if (packageId && isPackageBooking) {
+        const packageData = await storage.getPackageWithServices(packageId);
+        if (!packageData) {
+          return res.status(404).json({ error: "Package not found" });
+        }
+        if (packageData.salonId !== salonId) {
+          return res.status(400).json({ error: "Package does not belong to this salon" });
+        }
+        if (!packageData.isActive) {
+          return res.status(400).json({ error: "Package is no longer active" });
+        }
+        // Use package price and duration for validation
+        serverTotalPrice = packageData.packagePriceInPaisa;
+        serverTotalDuration = packageData.totalDurationMinutes;
+        console.log(`📦 Package booking: using package price ${serverTotalPrice} instead of service total ${serviceTotalPrice}`);
+      }
 
       // Validate client sent correct totals (prevent price and duration manipulation)
       if (totalPrice !== serverTotalPrice) {
@@ -15259,13 +15296,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               | "upcoming"
               | "completed"
               | "cancelled"
+              | "history"
               | "all") || "all",
           limit: parseInt(req.query.limit as string) || 50,
           offset: parseInt(req.query.offset as string) || 0,
         };
 
         // Validate query parameters
-        const validStatuses = ["upcoming", "completed", "cancelled", "all"];
+        const validStatuses = ["upcoming", "completed", "cancelled", "history", "all"];
         if (!validStatuses.includes(filters.status)) {
           return res.status(400).json({
             error: "Invalid status parameter",
@@ -17219,7 +17257,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('✅ Referral routes registered');
 
   // Chat routes (real-time messaging between customers and salons)
-  app.use('/api/chat', authenticateMobileUser, chatRoutes);
+  // Uses combined auth middleware that supports both session (web) and JWT (mobile)
+  app.use('/api/chat', authenticateChatUser, chatRoutes);
   console.log('✅ Chat routes registered');
 
   // AI Beauty Consultant routes (AI-powered beauty advice)
@@ -17371,6 +17410,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mobile bookings routes (appointments management)
   registerMobileBookingsRoutes(app);
   console.log('✅ Mobile bookings routes registered');
+
+  // Mobile package routes (service bundles/packages for mobile app)
+  registerMobilePackagesRoutes(app);
 
   // Mobile cancellation routes (structured reason tracking)
   registerMobileCancellationRoutes(app);

@@ -83,14 +83,14 @@ export default function SalonCard({
   // Generate a unique fallback image URL based on salon ID
   // Using different Unsplash salon images to ensure variety
   const salonImageOptions = [
-    'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=600&h=400&fit=crop', // Modern salon
-    'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600&h=400&fit=crop', // Hair salon
-    'https://images.unsplash.com/photo-1633681926022-84c23e8cb2d6?w=600&h=400&fit=crop', // Beauty salon
-    'https://images.unsplash.com/photo-1600948836101-f9ffda59d250?w=600&h=400&fit=crop', // Spa interior
-    'https://images.unsplash.com/photo-1521590832167-7bcbfaa6381f?w=600&h=400&fit=crop', // Barber shop
-    'https://images.unsplash.com/photo-1559599101-f09722fb4948?w=600&h=400&fit=crop', // Nail salon
-    'https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=600&h=400&fit=crop', // Massage room
-    'https://images.unsplash.com/photo-1595476108010-b4d1f102b1b1?w=600&h=400&fit=crop', // Wellness spa
+    'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=600&h=400&fit=crop', // Spa massage wellness
+    'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=600&h=400&fit=crop', // Wellness retreat spa
+    'https://images.unsplash.com/photo-1507652313519-d4e9174996dd?w=600&h=400&fit=crop', // Yoga meditation studio
+    'https://images.unsplash.com/photo-1600334129128-685c5582fd35?w=600&h=400&fit=crop', // Luxury spa treatment
+    'https://images.unsplash.com/photo-1519823551278-64ac92734fb1?w=600&h=400&fit=crop', // Wellness studio
+    'https://images.unsplash.com/photo-1552693673-1bf958298935?w=600&h=400&fit=crop', // Fitness wellness
+    'https://images.unsplash.com/photo-1515377905703-c4788e51af15?w=600&h=400&fit=crop', // Peaceful spa
+    'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=600&h=400&fit=crop', // Wellness therapy
   ];
   
   // Generate consistent index from salon ID to ensure same salon always gets same fallback
@@ -123,8 +123,8 @@ export default function SalonCard({
         data-testid={`card-salon-${id}`}
         className="overflow-hidden hover:shadow-lg transition-shadow duration-200 cursor-pointer border border-gray-200 bg-white group"
       >
-        {/* Single Hero Image - Fresha Style */}
-        <div className="relative h-48 sm:h-52 overflow-hidden bg-gray-100">
+        {/* Single Hero Image - Compact Style */}
+        <div className="relative h-36 sm:h-40 overflow-hidden bg-gray-100">
           <img 
             src={heroImage}
             alt={name}
@@ -160,7 +160,7 @@ export default function SalonCard({
           </div>
         </div>
 
-        <CardContent className="p-4 sm:p-5 space-y-2">
+        <CardContent className="p-3 space-y-1.5">
           {/* Rating and Review Count - First (Fresha Style) */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
@@ -184,7 +184,7 @@ export default function SalonCard({
 
           {/* Salon Name - Bold */}
           <h3 
-            className="font-bold text-lg leading-tight line-clamp-1 text-gray-900" 
+            className="font-bold text-base leading-tight line-clamp-1 text-gray-900" 
             data-testid={`text-salon-name-${id}`}
           >
             {name}

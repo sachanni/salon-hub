@@ -1,8 +1,19 @@
 {
-  "name": "rest-express",
+  "name": "studiohub",
   "version": "1.0.0",
+  "description": "StudioHub - Premium Beauty & Wellness Booking Platform",
   "type": "module",
-  "license": "MIT",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": {
+    "name": "Aulnova Techsoft Ind Pvt Ltd",
+    "url": "https://aulnovatechsoft.com/"
+  },
+  "homepage": "https://aulnovatechsoft.com/",
+  "repository": {
+    "type": "git",
+    "private": true
+  },
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
@@ -107,6 +118,7 @@
     "react-icons": "^5.4.0",
     "react-leaflet": "^5.0.0",
     "react-map-gl": "^8.1.0",
+    "react-native-calendars": "^1.1313.0",
     "react-native-webview": "^13.16.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.2",

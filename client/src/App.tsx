@@ -1,3 +1,14 @@
+/**
+ * StudioHub - Premium Beauty & Wellness Booking Platform
+ * Main Application Component
+ * 
+ * Copyright (c) 2025 Aulnova Techsoft Ind Pvt Ltd
+ * https://aulnovatechsoft.com/
+ * 
+ * All rights reserved. This source code is proprietary and confidential.
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 import { useEffect } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";

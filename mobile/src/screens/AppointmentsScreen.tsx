@@ -8,83 +8,37 @@ import {
   RefreshControl,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { ProfileHeader } from '../components/ProfileHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { appointmentsAPI } from '../services/api';
+import { RescheduleModal } from '../components/RescheduleModal';
 
 type AppointmentStatus = 'upcoming' | 'completed' | 'cancelled';
 type TabType = 'upcoming' | 'past';
 
 interface Appointment {
   id: string;
+  salonId: string;
   salonName: string;
   salonImage: string;
+  serviceId: string;
   serviceName: string;
+  staffId?: string;
+  staffName?: string;
   date: string;
   time: string;
   status: AppointmentStatus;
   price: string;
   serviceType: 'salon' | 'home';
-  staffName?: string;
   address?: string;
+  duration?: number;
 }
 
-const SAMPLE_APPOINTMENTS: Appointment[] = [
-  {
-    id: '1',
-    salonName: 'Glow Studio',
-    salonImage: 'https://storage.googleapis.com/uxpilot-auth.appspot.com/688939e330-bad6a2b97e3779575df6.png',
-    serviceName: 'Bridal Makeup',
-    date: 'Dec 15, 2024',
-    time: '2:00 PM',
-    status: 'upcoming',
-    price: '₹2,500',
-    serviceType: 'salon',
-    staffName: 'Priya',
-    address: 'Sector 18, Noida',
-  },
-  {
-    id: '2',
-    salonName: 'Hair Masters',
-    salonImage: 'https://storage.googleapis.com/uxpilot-auth.appspot.com/35c073455d-437ad899247819ca011a.png',
-    serviceName: 'Haircut & Styling',
-    date: 'Dec 18, 2024',
-    time: '11:00 AM',
-    status: 'upcoming',
-    price: '₹800',
-    serviceType: 'home',
-    staffName: 'Amit',
-    address: 'Your Home',
-  },
-  {
-    id: '3',
-    salonName: 'Radiance Spa',
-    salonImage: 'https://storage.googleapis.com/uxpilot-auth.appspot.com/c40f3d6898-2d0b20b65119f03679e4.png',
-    serviceName: 'Full Body Massage',
-    date: 'Dec 10, 2024',
-    time: '4:00 PM',
-    status: 'completed',
-    price: '₹1,500',
-    serviceType: 'salon',
-    staffName: 'Ritu',
-    address: 'Connaught Place, Delhi',
-  },
-  {
-    id: '4',
-    salonName: 'Glamour Point',
-    salonImage: 'https://storage.googleapis.com/uxpilot-auth.appspot.com/4821e1e32d-b8db54dc8f6587c75e8d.png',
-    serviceName: 'Facial Treatment',
-    date: 'Dec 5, 2024',
-    time: '3:00 PM',
-    status: 'cancelled',
-    price: '₹1,200',
-    serviceType: 'home',
-    address: 'Your Home',
-  },
-];
+const SAMPLE_APPOINTMENTS: Appointment[] = [];
 
 export const AppointmentsScreen = () => {
   const router = useRouter();
@@ -94,6 +48,9 @@ export const AppointmentsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rescheduleModalVisible, setRescheduleModalVisible] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
 
   const fetchAppointments = async () => {
     try {
@@ -102,16 +59,20 @@ export const AppointmentsScreen = () => {
       if (response.bookings && response.bookings.length > 0) {
         setAppointments(response.bookings.map((booking: any) => ({
           id: booking.id,
+          salonId: booking.salonId || '',
           salonName: booking.salonName || 'Salon',
           salonImage: booking.salonImage || 'https://storage.googleapis.com/uxpilot-auth.appspot.com/688939e330-bad6a2b97e3779575df6.png',
+          serviceId: booking.serviceId || '',
           serviceName: booking.serviceName || 'Service',
+          staffId: booking.staffId,
+          staffName: booking.staffName,
           date: booking.date,
           time: booking.time,
           status: booking.status,
           price: `₹${booking.price || 0}`,
           serviceType: booking.serviceType || 'salon',
-          staffName: booking.staffName,
           address: booking.address,
+          duration: booking.duration,
         })));
       } else {
         setAppointments(SAMPLE_APPOINTMENTS);
@@ -122,6 +83,52 @@ export const AppointmentsScreen = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleReschedule = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
+    setRescheduleModalVisible(true);
+  };
+
+  const handleCancel = (appointment: Appointment) => {
+    Alert.alert(
+      'Cancel Appointment',
+      `Are you sure you want to cancel your ${appointment.serviceName} appointment at ${appointment.salonName}?`,
+      [
+        { text: 'No, Keep It', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: () => confirmCancel(appointment),
+        },
+      ]
+    );
+  };
+
+  const confirmCancel = async (appointment: Appointment) => {
+    setCancelling(appointment.id);
+    try {
+      await appointmentsAPI.cancelAppointment(appointment.id, { reason: 'Customer requested cancellation' });
+      Alert.alert('Appointment Cancelled', 'Your appointment has been cancelled successfully.');
+      fetchAppointments();
+    } catch (err: any) {
+      console.error('Error cancelling appointment:', err);
+      Alert.alert('Cancellation Failed', err.response?.data?.error || 'Could not cancel your appointment. Please try again.');
+    } finally {
+      setCancelling(null);
+    }
+  };
+
+  const handleRebook = (appointment: Appointment) => {
+    router.push({
+      pathname: '/salon/[id]',
+      params: {
+        id: appointment.salonId,
+        preselectedServiceId: appointment.serviceId,
+        preferredStaffId: appointment.staffId || '',
+        fromRebooking: 'true',
+      },
+    });
   };
 
   useEffect(() => {
@@ -218,22 +225,44 @@ export const AppointmentsScreen = () => {
 
         {appointment.status === 'upcoming' && (
           <View style={styles.cardActions}>
-            <TouchableOpacity style={styles.rescheduleButton}>
+            <TouchableOpacity 
+              style={styles.rescheduleButton}
+              onPress={() => handleReschedule(appointment)}
+            >
               <Ionicons name="calendar" size={16} color="#8B5CF6" />
               <Text style={styles.rescheduleText}>Reschedule</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelButton}>
-              <Ionicons name="close-circle" size={16} color="#EF4444" />
-              <Text style={styles.cancelText}>Cancel</Text>
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => handleCancel(appointment)}
+              disabled={cancelling === appointment.id}
+            >
+              {cancelling === appointment.id ? (
+                <ActivityIndicator size="small" color="#EF4444" />
+              ) : (
+                <>
+                  <Ionicons name="close-circle" size={16} color="#EF4444" />
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
 
         {appointment.status === 'completed' && (
-          <TouchableOpacity style={styles.reviewButton}>
-            <Ionicons name="star" size={16} color="#F59E0B" />
-            <Text style={styles.reviewText}>Leave a Review</Text>
-          </TouchableOpacity>
+          <View style={styles.cardActions}>
+            <TouchableOpacity 
+              style={styles.rebookButton}
+              onPress={() => handleRebook(appointment)}
+            >
+              <Ionicons name="refresh" size={16} color="#059669" />
+              <Text style={styles.rebookText}>Book Again</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reviewButton}>
+              <Ionicons name="star" size={16} color="#F59E0B" />
+              <Text style={styles.reviewText}>Review</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </TouchableOpacity>
     );
@@ -303,6 +332,29 @@ export const AppointmentsScreen = () => {
           displayedAppointments.map(renderAppointmentCard)
         )}
       </ScrollView>
+
+      {selectedAppointment && (
+        <RescheduleModal
+          visible={rescheduleModalVisible}
+          onClose={() => {
+            setRescheduleModalVisible(false);
+            setSelectedAppointment(null);
+          }}
+          onSuccess={() => fetchAppointments()}
+          appointment={{
+            id: selectedAppointment.id,
+            salonId: selectedAppointment.salonId,
+            salonName: selectedAppointment.salonName,
+            serviceId: selectedAppointment.serviceId,
+            serviceName: selectedAppointment.serviceName,
+            staffId: selectedAppointment.staffId,
+            staffName: selectedAppointment.staffName,
+            date: selectedAppointment.date,
+            time: selectedAppointment.time,
+            duration: selectedAppointment.duration,
+          }}
+        />
+      )}
     </View>
   );
 };
@@ -470,14 +522,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginLeft: 6,
   },
+  rebookButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    flex: 1,
+    marginRight: 8,
+    justifyContent: 'center',
+  },
+  rebookText: {
+    color: '#059669',
+    fontWeight: '600',
+    fontSize: 13,
+    marginLeft: 6,
+  },
   reviewButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FEF3C7',
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 10,
-    marginTop: 12,
+    flex: 1,
   },
   reviewText: {
     color: '#D97706',

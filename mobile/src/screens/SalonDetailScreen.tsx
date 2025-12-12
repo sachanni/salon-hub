@@ -14,15 +14,17 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { salonAPI } from '../services/api';
-import { Salon, Service, StaffMember, SalonReview } from '../types/navigation';
+import { Salon, Service, StaffMember, SalonReview, ServicePackage } from '../types/navigation';
 import { useChat } from '../contexts/ChatContext';
 import { useAuth } from '../contexts/AuthContext';
 import { chatService } from '../services/chatService';
 import DepositBadge from '../components/DepositBadge';
+import PackageCard from '../components/PackageCard';
+import PackageDetailModal from '../components/PackageDetailModal';
 
 const { width } = Dimensions.get('window');
 
-const TABS = ['Photos', 'Services', 'Team', 'Reviews', 'About'] as const;
+const TABS = ['Photos', 'Packages', 'Services', 'Team', 'Reviews', 'About'] as const;
 type TabType = typeof TABS[number];
 
 export default function SalonDetailScreen() {
@@ -39,10 +41,13 @@ export default function SalonDetailScreen() {
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [reviews, setReviews] = useState<SalonReview[]>([]);
+  const [packages, setPackages] = useState<ServicePackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('Photos');
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [startingChat, setStartingChat] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
+  const [packageModalVisible, setPackageModalVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -58,23 +63,65 @@ export default function SalonDetailScreen() {
   const fetchSalonData = async () => {
     try {
       setLoading(true);
-      const [salonData, servicesData, staffData, reviewsData] = await Promise.all([
+      const [salonData, servicesData, staffData, reviewsData, packagesData] = await Promise.all([
         salonAPI.getSalonById(salonId),
         salonAPI.getSalonServices(salonId),
         salonAPI.getSalonStaff(salonId),
         salonAPI.getSalonReviews(salonId, { limit: 5 }),
+        salonAPI.getSalonPackages(salonId).catch(() => ({ packages: [] })),
       ]);
       
       setSalon(salonData);
       setServices(servicesData || []);
       setStaff(staffData || []);
       setReviews(reviewsData || []);
+      setPackages(packagesData?.packages || []);
     } catch (error) {
       console.error('Error fetching salon data:', error);
       Alert.alert('Error', 'Failed to load salon details. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePackagePress = async (pkg: ServicePackage) => {
+    try {
+      const response = await salonAPI.getPackageDetails(salonId, pkg.id);
+      if (response?.package) {
+        setSelectedPackage(response.package);
+        setPackageModalVisible(true);
+      }
+    } catch (error) {
+      console.error('Error fetching package details:', error);
+      Alert.alert('Error', 'Failed to load package details. Please try again.');
+    }
+  };
+
+  const handleBookPackage = () => {
+    if (!selectedPackage || !salon) return;
+
+    setPackageModalVisible(false);
+    
+    const packageServices = selectedPackage.services?.map(s => ({
+      id: s.id,
+      name: s.name,
+      durationMinutes: s.durationMinutes,
+      priceInPaisa: s.priceInPaisa,
+      currency: 'INR',
+      category: s.category,
+    })) || [];
+
+    const servicesParam = encodeURIComponent(JSON.stringify(packageServices));
+    const packageData = encodeURIComponent(JSON.stringify({
+      packageId: selectedPackage.id,
+      packageName: selectedPackage.name,
+      packagePriceInPaisa: selectedPackage.packagePriceInPaisa,
+      regularPriceInPaisa: selectedPackage.regularPriceInPaisa,
+      totalDurationMinutes: selectedPackage.totalDurationMinutes,
+      savingsPercentage: selectedPackage.savingsPercentage,
+    }));
+    
+    router.push(`/booking/details?salonId=${salonId}&salonName=${encodeURIComponent(salon.name)}&selectedServices=${servicesParam}&packageData=${packageData}&isPackageBooking=true`);
   };
 
   const handleCall = () => {
@@ -285,6 +332,42 @@ export default function SalonDetailScreen() {
           </View>
         )}
 
+        {activeTab === 'Packages' && (
+          <View style={styles.packagesSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Service Packages</Text>
+            </View>
+            {packages.length > 0 ? (
+              <>
+                <Text style={styles.packagesSubtitle}>
+                  Save more with our bundled service packages
+                </Text>
+                {packages.map((pkg) => (
+                  <PackageCard
+                    key={pkg.id}
+                    package_={pkg}
+                    onPress={() => handlePackagePress(pkg)}
+                  />
+                ))}
+              </>
+            ) : (
+              <View style={styles.emptyPackages}>
+                <Ionicons name="gift-outline" size={48} color="#D1D5DB" />
+                <Text style={styles.emptyPackagesTitle}>No Packages Available</Text>
+                <Text style={styles.emptyPackagesText}>
+                  This salon doesn't have any packages at the moment. Check out individual services instead.
+                </Text>
+                <TouchableOpacity
+                  style={styles.viewServicesButton}
+                  onPress={() => setActiveTab('Services')}
+                >
+                  <Text style={styles.viewServicesButtonText}>View Services</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
         {activeTab === 'Services' && (
           <View style={styles.servicesSection}>
             <View style={styles.sectionHeader}>
@@ -450,6 +533,14 @@ export default function SalonDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      <PackageDetailModal
+        visible={packageModalVisible}
+        package_={selectedPackage}
+        salonName={salon?.name || ''}
+        onClose={() => setPackageModalVisible(false)}
+        onBookPackage={handleBookPackage}
+      />
     </View>
   );
 }
@@ -989,5 +1080,44 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#111827',
+  },
+  packagesSection: {
+    padding: 16,
+  },
+  packagesSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  emptyPackages: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  emptyPackagesTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyPackagesText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  viewServicesButton: {
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  viewServicesButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

@@ -822,15 +822,21 @@ export default function FreshaSearchBar({
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 md:px-0">
-      {/* Main Search Bar - Clean Purple Border Design */}
-      <div className="relative">
-        {/* Main container with purple border */}
-        <div className="bg-white rounded-[28px] p-2 md:p-1 border-[3px] border-purple-200 shadow-sm hover:border-purple-300 hover:shadow-md transition-all duration-200">
-          {/* Mobile: Stacked Layout | Desktop: Horizontal Layout */}
-          <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-1 bg-white rounded-[24px] text-[14px] font-medium text-justify">
+    <div className="w-full max-w-5xl mx-auto px-4 md:px-0">
+      {/* Main Search Bar - Premium Elevated Design */}
+      <div className="relative group">
+        {/* Subtle border matching page gradient */}
+        <div className="absolute -inset-[2px] bg-gradient-to-r from-violet-200 via-white to-rose-200 rounded-[30px]" />
+        
+        {/* Main container with premium styling */}
+        <div className="relative bg-gradient-to-r from-violet-50 via-white to-rose-50 backdrop-blur-xl rounded-[28px] p-2 md:p-1.5 shadow-lg hover:shadow-xl transition-all duration-300">
+          {/* Inner container with subtle gradient border effect */}
+          <div className="relative rounded-[24px]">
+            <div className="absolute inset-0 bg-gradient-to-r from-violet-100/30 via-transparent to-rose-100/30 pointer-events-none rounded-[24px]" />
+            {/* Mobile: Stacked Layout | Desktop: Horizontal Layout */}
+            <div className="relative flex flex-col md:flex-row md:items-center gap-2 md:gap-0 bg-white/80 backdrop-blur-sm rounded-[24px] text-[14px] font-medium">
           {/* Service Selection */}
-          <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0" ref={serviceRef}>
+          <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-violet-100/50 pb-2 md:pb-0" ref={serviceRef}>
             <button
               onClick={() => {
                 // If a category is already selected, show sub-services
@@ -844,10 +850,12 @@ export default function FreshaSearchBar({
                   }
                 }
               }}
-              className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 md:rounded-xl transition-colors"
+              className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-gradient-to-r hover:from-violet-50/50 hover:to-transparent md:rounded-2xl transition-all duration-200 group/btn"
             >
-              <Search className="h-4 w-4 text-gray-400 flex-shrink-0" />
-              <span className="flex-1 text-gray-900">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-violet-100 to-fuchsia-100 flex items-center justify-center group-hover/btn:from-violet-200 group-hover/btn:to-fuchsia-200 transition-all duration-200">
+                <Search className="h-4 w-4 text-violet-600" />
+              </div>
+              <span className="flex-1 text-gray-800 font-medium tracking-tight">
                 {selectedService 
                   ? subServices.find(s => s.id === selectedService)?.name 
                   : selectedCategory 
@@ -939,20 +947,24 @@ export default function FreshaSearchBar({
             )}
           </div>
 
-          {/* Divider - Hidden on mobile */}
-          <div className="hidden md:block w-px h-8 bg-gray-200" />
+          {/* Divider - Premium gradient line */}
+          <div className="hidden md:flex items-center px-1">
+            <div className="w-px h-10 bg-gradient-to-b from-transparent via-violet-200 to-transparent" />
+          </div>
 
           {/* Location Selection */}
-          <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0" ref={locationRef}>
-            <div className="flex items-center gap-2 px-4 py-3">
-              <MapPin className="h-4 w-4 text-gray-400" />
+          <div className="relative flex-1 w-full md:w-auto border-b md:border-b-0 border-violet-100/50 pb-2 md:pb-0" ref={locationRef}>
+            <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-gradient-to-r hover:from-violet-50/50 hover:to-transparent md:rounded-2xl transition-all duration-200 group/loc">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-rose-100 to-pink-100 flex items-center justify-center group-hover/loc:from-rose-200 group-hover/loc:to-pink-200 transition-all duration-200">
+                <MapPin className="h-4 w-4 text-rose-600" />
+              </div>
               <input
                 type="text"
                 value={locationQuery}
                 onChange={handleLocationChange}
                 onFocus={handleLocationFocus}
                 placeholder="Where are you located?"
-                className="flex-1 outline-none text-gray-900 placeholder-gray-500"
+                className="flex-1 outline-none text-gray-800 placeholder-gray-400 bg-transparent font-medium tracking-tight"
               />
               {locationQuery && (
                 <button
@@ -1110,19 +1122,23 @@ export default function FreshaSearchBar({
             )}
           </div>
 
-          {/* Divider - Hidden on mobile */}
-          <div className="hidden md:block w-px h-8 bg-gray-200" />
+          {/* Divider - Premium gradient line */}
+          <div className="hidden md:flex items-center px-1">
+            <div className="w-px h-10 bg-gradient-to-b from-transparent via-violet-200 to-transparent" />
+          </div>
 
           {/* Date & Time Container - Compact single row */}
-          <div className="flex gap-1 w-full md:w-auto border-b md:border-b-0 border-gray-200 pb-2 md:pb-0">
+          <div className="flex gap-0 w-full md:w-auto border-b md:border-b-0 border-violet-100/50 pb-2 md:pb-0">
             {/* Date Selection */}
             <div className="relative flex-1" ref={dateRef}>
             <button
               onClick={() => setShowDatePicker(!showDatePicker)}
-              className="flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors w-full"
+              className="flex items-center gap-2 px-3 py-3.5 text-left hover:bg-gradient-to-r hover:from-violet-50/50 hover:to-transparent rounded-2xl transition-all duration-200 w-full group/date"
             >
-              <Calendar className="h-4 w-4 text-gray-400 flex-shrink-0" />
-              <span className="text-gray-900 whitespace-nowrap">
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-amber-100 to-orange-100 flex items-center justify-center group-hover/date:from-amber-200 group-hover/date:to-orange-200 transition-all duration-200">
+                <Calendar className="h-3.5 w-3.5 text-amber-600" />
+              </div>
+              <span className="text-gray-800 whitespace-nowrap font-medium tracking-tight text-sm">
                 {getDateDisplayText()}
               </span>
             </button>
@@ -1184,10 +1200,12 @@ export default function FreshaSearchBar({
           <div className="relative flex-1" ref={timeRef}>
             <button
               onClick={() => setShowTimePicker(!showTimePicker)}
-              className="flex items-center gap-2 px-4 py-3 text-left hover:bg-gray-50 rounded-xl transition-colors w-full"
+              className="flex items-center gap-2 px-3 py-3.5 text-left hover:bg-gradient-to-r hover:from-violet-50/50 hover:to-transparent rounded-2xl transition-all duration-200 w-full group/time"
             >
-              <Clock className="h-4 w-4 text-gray-400 flex-shrink-0" />
-              <span className="text-gray-900 whitespace-nowrap">
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center group-hover/time:from-emerald-200 group-hover/time:to-teal-200 transition-all duration-200">
+                <Clock className="h-3.5 w-3.5 text-emerald-600" />
+              </div>
+              <span className="text-gray-800 whitespace-nowrap font-medium tracking-tight text-sm">
                 {getTimeDisplayText()}
               </span>
             </button>
@@ -1264,23 +1282,30 @@ export default function FreshaSearchBar({
           </div>
           </div>
 
-          {/* Divider - Hidden on mobile */}
-          <div className="hidden md:block w-px h-8 bg-gray-200" />
+          {/* Divider - Premium gradient line */}
+          <div className="hidden md:flex items-center px-1">
+            <div className="w-px h-10 bg-gradient-to-b from-transparent via-violet-200 to-transparent" />
+          </div>
 
-          {/* Search Button */}
-          <Button
-            onClick={handleSearch}
-            className="bg-black hover:bg-gray-800 text-white px-6 py-3 rounded-xl font-medium"
-          >
-            Search
-          </Button>
-        </div>
+          {/* Search Button - Premium Design */}
+          <div className="relative group/search p-1 flex-shrink-0">
+            <div className="absolute inset-0 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-2xl blur-lg opacity-40 group-hover/search:opacity-60 transition-opacity duration-300 pointer-events-none" />
+            <Button
+              onClick={handleSearch}
+              className="relative bg-gradient-to-r from-violet-600 via-fuchsia-600 to-violet-600 hover:from-violet-700 hover:via-fuchsia-700 hover:to-violet-700 text-white px-6 py-3.5 rounded-2xl font-semibold shadow-lg shadow-violet-300/30 hover:shadow-violet-400/40 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] bg-[length:200%_100%] hover:bg-right"
+            >
+              <Search className="h-4 w-4 mr-2" />
+              Search
+            </Button>
+          </div>
+            </div>
+          </div>
         </div>
       </div>
-      {/* Radius Selector */}
-      <div className="mt-4 flex items-center justify-center gap-2">
-        <span className="text-sm text-gray-600">Search radius:</span>
-        <div className="flex gap-1">
+      {/* Radius Selector - Premium Design */}
+      <div className="mt-5 flex items-center justify-center gap-3">
+        <span className="text-sm font-medium text-gray-500">Search radius:</span>
+        <div className="flex gap-1.5 bg-white/60 backdrop-blur-sm p-1 rounded-full border border-violet-100/50 shadow-sm">
           {radiusOptions.map((option) => (
             <button
               key={option.value}
@@ -1292,10 +1317,10 @@ export default function FreshaSearchBar({
                 }
               }}
               className={cn(
-                "px-3 py-1 text-sm rounded-full transition-colors",
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-all duration-200",
                 selectedRadius === option.value
-                  ? "bg-purple-500 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-md"
+                  : "text-gray-600 hover:text-violet-700 hover:bg-violet-50"
               )}
             >
               {option.label}

@@ -27,12 +27,33 @@ interface AppliedGiftCard {
   amountToApply: number;
 }
 
+interface PackageData {
+  packageId: string;
+  packageName: string;
+  packagePriceInPaisa: number;
+  regularPriceInPaisa: number;
+  totalDurationMinutes: number;
+  savingsPercentage: number;
+}
+
 export default function PaymentScreen() {
-  const params = useLocalSearchParams<{ salonId: string; salonName: string; selectedServices: string; bookingDate: string; bookingTime: string }>();
+  const params = useLocalSearchParams<{ 
+    salonId: string; 
+    salonName: string; 
+    selectedServices: string; 
+    bookingDate: string; 
+    bookingTime: string;
+    packageData?: string;
+    isPackageBooking?: string;
+  }>();
   const router = useRouter();
   const { user } = useAuth();
   const { salonId, salonName, bookingDate, bookingTime } = params;
   const selectedServices: SelectedService[] = JSON.parse(decodeURIComponent(params.selectedServices));
+  const isPackageBooking = params.isPackageBooking === 'true';
+  const packageData: PackageData | null = params.packageData 
+    ? JSON.parse(decodeURIComponent(params.packageData)) 
+    : null;
 
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('pay_now');
   const [loading, setLoading] = useState(false);
@@ -84,8 +105,14 @@ export default function PaymentScreen() {
     }
   };
 
-  const subtotal = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
-  const discount = Math.floor(subtotal * 0.05);
+  const serviceSubtotal = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
+  const subtotal = isPackageBooking && packageData 
+    ? packageData.packagePriceInPaisa 
+    : serviceSubtotal;
+  const packageSavings = isPackageBooking && packageData 
+    ? packageData.regularPriceInPaisa - packageData.packagePriceInPaisa 
+    : 0;
+  const discount = isPackageBooking ? 0 : Math.floor(subtotal * 0.05);
   const gst = Math.floor((subtotal - discount) * 0.18);
   const total = subtotal - discount + gst;
   const onlineDiscount = selectedPaymentMethod === 'pay_now' ? Math.floor(total * 0.05) : 0;
@@ -147,6 +174,9 @@ export default function PaymentScreen() {
   };
 
   const getTotalDuration = () => {
+    if (isPackageBooking && packageData) {
+      return packageData.totalDurationMinutes;
+    }
     return selectedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
   };
 
@@ -172,6 +202,10 @@ export default function PaymentScreen() {
         giftCardId: appliedGiftCard?.id,
         giftCardAmountPaisa: appliedGiftCard?.amountToApply,
         notes: bookingNotes || undefined,
+        packageId: isPackageBooking && packageData ? packageData.packageId : undefined,
+        isPackageBooking: isPackageBooking || undefined,
+        totalPrice: isPackageBooking && packageData ? packageData.packagePriceInPaisa : undefined,
+        totalDuration: isPackageBooking && packageData ? packageData.totalDurationMinutes : undefined,
       };
 
       const response = await bookingAPI.createBooking(bookingData);

@@ -413,17 +413,125 @@ Next available slots:
 
 ---
 
+## Implementation Status Checklist
+
+*Last updated: 2025-12-11*
+
+### Phase 1: Database & Core Logic
+| Item | Status | Notes |
+|------|--------|-------|
+| `late_arrival_notifications` table | ✅ Implemented | Full schema in shared/schema.ts |
+| `late_policy_settings` table | ❌ Not Implemented | Salon-specific policy settings not created |
+| Notification creation logic | ✅ Implemented | lateArrival.service.ts |
+| Delay calculation/ETA | ✅ Implemented | calculateEstimatedArrivalTime() |
+| Prevent duplicate notifications | ✅ Implemented | Checks existing for same booking |
+
+### Phase 2: API Layer
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| GET /api/late-arrival/delay-options | ✅ Implemented | Returns predefined delay options |
+| GET /api/late-arrival/bookings/:id/can-notify | ✅ Implemented | Eligibility check |
+| POST /api/late-arrival/notify | ✅ Implemented | Create notification |
+| GET /api/late-arrival/bookings/:id/history | ✅ Implemented | Booking's late history |
+| GET /api/late-arrival/customer/history | ✅ Implemented | Customer's history |
+| GET /api/late-arrival/salons/:id/pending | ✅ Implemented | Pending for salon |
+| GET /api/late-arrival/salons/:id/history | ✅ Implemented | Salon's history |
+| POST /api/late-arrival/:id/acknowledge | ✅ Implemented | Salon response |
+| GET /api/bookings/:id/late-status | ❌ Not Implemented | Check late status endpoint |
+| PUT /api/salons/:id/late-policy | ❌ Not Implemented | Policy management |
+| Mobile API endpoints | ✅ Implemented | /api/mobile/late-arrival/* mirrored |
+
+### Phase 3: Notifications
+| Item | Status | Notes |
+|------|--------|-------|
+| SMS notification to salon | ✅ Implemented | Uses Twilio |
+| In-app notification to salon owner | ✅ Implemented | userNotifications table |
+| Push notification to salon (FCM) | ❌ Not Implemented | No Firebase push for salon |
+| Customer notification on salon response | ✅ Implemented | In-app notification |
+| Push notification to customer (FCM) | ❌ Not Implemented | No Firebase push |
+| Reminder to salon if no response | ❌ Not Implemented | No auto-reminder logic |
+
+### Phase 4: Web Integration
+| Item | Status | Notes |
+|------|--------|-------|
+| "Running Late?" button on booking | ✅ Implemented | LateArrivalButton.tsx |
+| Late notification modal | ✅ Implemented | LateArrivalModal.tsx |
+| Delay selector (5-30 min options) | ✅ Implemented | RadioGroup in modal |
+| Optional message field | ✅ Implemented | Textarea in modal |
+| Salon dashboard - Late Arrivals panel | ✅ Implemented | LateArrivalDashboard.tsx |
+| Pending notifications with quick response | ✅ Implemented | Tabs: Pending/History |
+| Salon response dialog | ✅ Implemented | Acknowledge/Reschedule/Cancel |
+| Policy configuration page | ❌ Not Implemented | No late policy settings UI |
+
+### Phase 5: Mobile Integration
+| Item | Status | Notes |
+|------|--------|-------|
+| "Running Late?" button on booking | ❌ Not Implemented | No mobile UI component |
+| Late notification modal/screen | ❌ Not Implemented | No mobile UI |
+| Delay selector | ❌ Not Implemented | No mobile UI |
+| Pre-appointment reminder with late option | ❌ Not Implemented | No mobile UI |
+| Status tracking screen | ❌ Not Implemented | No mobile UI |
+| Mobile API integration | ✅ Implemented | Backend routes exist |
+
+### Business Rules & Edge Cases
+| Item | Status | Notes |
+|------|--------|-------|
+| Notification window (2hr before to 30min after) | ✅ Implemented | In canSendLateNotification() |
+| Delay limits (5-60 min) | ✅ Implemented | LATE_ARRIVAL_DELAY_OPTIONS |
+| Salon response options (wait/reschedule/cancel) | ✅ Implemented | acknowledgeLateArrival() |
+| Auto-cancel if delay > threshold | ❌ Not Implemented | No late_policy_settings |
+| Notify next customer of delay | ❌ Not Implemented | No cascade logic |
+| Grace period logic | ❌ Not Implemented | No late_policy_settings |
+| Shortened service option | ❌ Not Implemented | Response options limited |
+| Late fee handling | ❌ Not Implemented | No late_policy_settings |
+| Group booking handling | ❌ Not Implemented | No special logic |
+| Multiple delay updates | ⚠️ Partial | Creates new notification, no update logic |
+
+### Analytics
+| Item | Status | Notes |
+|------|--------|-------|
+| Customer late notification frequency | ❌ Not Implemented | No analytics |
+| Average delay time | ❌ Not Implemented | No analytics |
+| No-show rate after late notification | ❌ Not Implemented | No analytics |
+| Salon response time tracking | ❌ Not Implemented | No analytics |
+| Most common salon responses | ❌ Not Implemented | No analytics |
+
+---
+
+## Summary
+
+### What's Working
+1. **Core Flow**: Customers can notify salon they're late via web app
+2. **Salon Notifications**: SMS + in-app notifications work
+3. **Salon Dashboard**: Full UI for viewing and responding to late arrivals
+4. **Web Customer UI**: Complete with button, modal, delay options
+5. **Mobile Backend**: API endpoints are ready
+
+### What's Missing
+1. **Mobile UI**: No customer-facing mobile components
+2. **Late Policy Settings**: No configurable policies per salon
+3. **Push Notifications**: Only SMS + in-app (no FCM)
+4. **Auto-Actions**: No auto-cancel, reminders, or escalation
+5. **Analytics**: No tracking or reporting
+6. **Advanced Features**: Next customer notification, shortened service, late fees
+
+---
+
 ## Testing Checklist
 
-- [ ] Late notification created successfully
-- [ ] Salon receives push notification
-- [ ] Salon can respond with all options
-- [ ] Customer receives response notification
-- [ ] Delay updates work correctly
+- [x] Late notification created successfully
+- [x] Salon receives SMS notification
+- [x] Salon receives in-app notification
+- [ ] Salon receives push notification (FCM)
+- [x] Salon can respond with all options
+- [x] Customer receives response notification (in-app)
+- [ ] Customer receives push notification (FCM)
+- [ ] Delay updates work correctly (update vs new record)
 - [ ] Grace period logic works
 - [ ] Auto-cancel threshold enforced
-- [ ] Notification window enforced
-- [ ] Multiple notifications prevented
+- [x] Notification window enforced
+- [x] Multiple notifications prevented (per booking)
 - [ ] Group booking handling works
 - [ ] Policy configuration saves correctly
 - [ ] Analytics tracking works
+- [ ] Mobile UI components work

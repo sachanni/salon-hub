@@ -26,7 +26,7 @@ export default function USPStrip() {
   ];
 
   return (
-    <div className="relative w-full py-4 sm:py-6 bg-white/80 backdrop-blur-sm border-y border-gray-200/50 shadow-sm">
+    <div className="relative w-full py-4 sm:py-6 backdrop-blur-sm border-y border-gray-200/30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
           {usps.map((usp, index) => {

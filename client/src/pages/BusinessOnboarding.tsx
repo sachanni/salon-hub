@@ -17,7 +17,7 @@ function WorkPreferenceStep({ onNext, onBack }: WorkPreferenceStepProps) {
   const preferences = [
     {
       id: "salon",
-      title: "At Salon",
+      title: "At Your Studio",
       subtitle: "Setup",
       description: "I have a physical salon location",
       image: "/api/placeholder/300/200",
@@ -33,7 +33,7 @@ function WorkPreferenceStep({ onNext, onBack }: WorkPreferenceStepProps) {
     },
     {
       id: "both",
-      title: "At Salon + At Home",
+      title: "At Your Studio + At Home",
       subtitle: "Both",
       description: "I offer both salon and at-home services",
       image: "/api/placeholder/300/200",

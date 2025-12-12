@@ -72,6 +72,21 @@
   .delay-1000 {
     animation-delay: 1s;
   }
+  
+  /* Shimmer border animation for premium search bar */
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 50%;
+    }
+    100% {
+      background-position: -200% 50%;
+    }
+  }
+  
+  .animate-shimmer {
+    background-size: 200% 100%;
+    animation: shimmer 3s linear infinite;
+  }
 }
 
 /* LIGHT MODE */

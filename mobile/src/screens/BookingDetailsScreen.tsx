@@ -20,18 +20,47 @@ const TIME_SLOTS = {
   evening: ['05:00 PM', '05:30 PM', '06:00 PM', '06:30 PM', '07:00 PM', '07:30 PM'],
 };
 
+interface PackageData {
+  packageId: string;
+  packageName: string;
+  packagePriceInPaisa: number;
+  regularPriceInPaisa: number;
+  totalDurationMinutes: number;
+  savingsPercentage: number;
+}
+
 export default function BookingDetailsScreen() {
-  const params = useLocalSearchParams<{ salonId: string; salonName: string; selectedServices: string }>();
+  const params = useLocalSearchParams<{ 
+    salonId: string; 
+    salonName: string; 
+    selectedServices: string;
+    packageData?: string;
+    isPackageBooking?: string;
+  }>();
   const router = useRouter();
   const { salonId, salonName } = params;
   const selectedServices: SelectedService[] = JSON.parse(decodeURIComponent(params.selectedServices));
+  const isPackageBooking = params.isPackageBooking === 'true';
+  const packageData: PackageData | null = params.packageData 
+    ? JSON.parse(decodeURIComponent(params.packageData)) 
+    : null;
 
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  const totalDuration = selectedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
-  const totalPrice = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
+  const serviceTotalDuration = selectedServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+  const serviceTotalPrice = selectedServices.reduce((sum, s) => sum + s.priceInPaisa, 0);
+  
+  const totalDuration = isPackageBooking && packageData 
+    ? packageData.totalDurationMinutes 
+    : serviceTotalDuration;
+  const totalPrice = isPackageBooking && packageData 
+    ? packageData.packagePriceInPaisa 
+    : serviceTotalPrice;
+  const regularPrice = isPackageBooking && packageData 
+    ? packageData.regularPriceInPaisa 
+    : serviceTotalPrice;
 
   const formatPrice = (priceInPaisa: number) => {
     return `₹${(priceInPaisa / 100).toFixed(0)}`;
@@ -99,7 +128,13 @@ export default function BookingDetailsScreen() {
     const formattedDate = selectedDate.toISOString().split('T')[0];
     
     const servicesParam = encodeURIComponent(JSON.stringify(selectedServices));
-    router.push(`/booking/payment?salonId=${salonId}&salonName=${encodeURIComponent(salonName)}&selectedServices=${servicesParam}&bookingDate=${formattedDate}&bookingTime=${encodeURIComponent(selectedTime)}`);
+    let paymentUrl = `/booking/payment?salonId=${salonId}&salonName=${encodeURIComponent(salonName)}&selectedServices=${servicesParam}&bookingDate=${formattedDate}&bookingTime=${encodeURIComponent(selectedTime)}`;
+    
+    if (isPackageBooking && packageData) {
+      paymentUrl += `&packageData=${encodeURIComponent(JSON.stringify(packageData))}&isPackageBooking=true`;
+    }
+    
+    router.push(paymentUrl);
   };
 
   const days = getDaysInMonth(currentMonth);
@@ -140,22 +175,45 @@ export default function BookingDetailsScreen() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
-            <Text style={styles.summaryTitle}>Selected Services</Text>
-            <TouchableOpacity onPress={() => router.back()}>
-              <Text style={styles.editText}>Edit</Text>
-            </TouchableOpacity>
+            <Text style={styles.summaryTitle}>
+              {isPackageBooking ? 'Package Booking' : 'Selected Services'}
+            </Text>
+            {!isPackageBooking && (
+              <TouchableOpacity onPress={() => router.back()}>
+                <Text style={styles.editText}>Edit</Text>
+              </TouchableOpacity>
+            )}
           </View>
+          {isPackageBooking && packageData && (
+            <View style={styles.packageBadge}>
+              <Ionicons name="gift" size={14} color="#059669" />
+              <Text style={styles.packageBadgeText}>{packageData.packageName}</Text>
+            </View>
+          )}
           <View style={styles.summaryContent}>
             <View style={styles.summaryRow}>
-              <Ionicons name="cut-outline" size={16} color="#8B5CF6" />
+              <Ionicons name={isPackageBooking ? 'gift-outline' : 'cut-outline'} size={16} color="#8B5CF6" />
               <Text style={styles.summaryText}>{selectedServices.length} Services</Text>
             </View>
-            <Text style={styles.summaryPrice}>{formatPrice(totalPrice)}</Text>
+            <View style={styles.priceColumn}>
+              <Text style={styles.summaryPrice}>{formatPrice(totalPrice)}</Text>
+              {isPackageBooking && regularPrice > totalPrice && (
+                <Text style={styles.regularPriceStruck}>{formatPrice(regularPrice)}</Text>
+              )}
+            </View>
           </View>
           <View style={styles.summaryMeta}>
             <Ionicons name="time-outline" size={14} color="#6B7280" />
             <Text style={styles.summaryMetaText}>Total duration: {totalDuration} min</Text>
           </View>
+          {isPackageBooking && packageData && packageData.savingsPercentage > 0 && (
+            <View style={styles.savingsBanner}>
+              <Ionicons name="pricetag" size={14} color="#059669" />
+              <Text style={styles.savingsText}>
+                You save {packageData.savingsPercentage}% with this package!
+              </Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -643,5 +701,44 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  packageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  packageBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#059669',
+  },
+  priceColumn: {
+    alignItems: 'flex-end',
+  },
+  regularPriceStruck: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  savingsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 12,
+    gap: 8,
+  },
+  savingsText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#059669',
   },
 });

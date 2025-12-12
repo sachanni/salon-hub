@@ -7043,7 +7043,7 @@ export class DatabaseStorage implements IStorage {
 
   // Customer Dashboard API Implementation
   async getCustomerAppointments(customerId: string, filters?: {
-    status?: "upcoming" | "completed" | "cancelled" | "all";
+    status?: "upcoming" | "completed" | "cancelled" | "history" | "all";
     limit?: number;
     offset?: number;
   }) {
@@ -7068,6 +7068,12 @@ export class DatabaseStorage implements IStorage {
           whereCondition,
           gte(bookings.bookingDate, today),
           sql`${bookings.status} IN ('confirmed', 'pending')`
+        ) as any;
+      } else if (status === "history") {
+        // History = past appointments (completed or cancelled)
+        whereCondition = and(
+          whereCondition,
+          sql`${bookings.status} IN ('completed', 'cancelled')`
         ) as any;
       } else if (status !== "all") {
         whereCondition = and(whereCondition, eq(bookings.status, status)) as any;
@@ -7354,7 +7360,25 @@ export class DatabaseStorage implements IStorage {
     return [];
   }
 
-  // Minimal stub implementations for other missing methods
+  // Communication preferences methods
+  async getCommunicationPreferences(customerId: string, salonId: string): Promise<CommunicationPreferences | undefined> {
+    const [prefs] = await db.select()
+      .from(communicationPreferences)
+      .where(and(
+        eq(communicationPreferences.customerId, customerId),
+        eq(communicationPreferences.salonId, salonId)
+      ))
+      .limit(1);
+    return prefs;
+  }
+
+  async createCommunicationPreferences(preferences: InsertCommunicationPreferences): Promise<CommunicationPreferences> {
+    const [created] = await db.insert(communicationPreferences)
+      .values(preferences)
+      .returning();
+    return created;
+  }
+
   async updateCommunicationPreferences(customerId: string, salonId: string, updates: {
     emailOptIn?: number;
     smsOptIn?: number;
@@ -7389,6 +7413,60 @@ export class DatabaseStorage implements IStorage {
         eq(communicationPreferences.smsOptIn, 0)
       ));
     return unsubscribed.map(u => u.customerId);
+  }
+
+  // Communication history methods
+  async getCommunicationHistory(id: string): Promise<CommunicationHistory | undefined> {
+    const [history] = await db.select()
+      .from(communicationHistory)
+      .where(eq(communicationHistory.id, id))
+      .limit(1);
+    return history;
+  }
+
+  async getCommunicationHistoryBySalonId(salonId: string, filters?: {
+    customerId?: string;
+    campaignId?: string;
+    bookingId?: string;
+    type?: string;
+    channel?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<CommunicationHistory[]> {
+    let query = db.select().from(communicationHistory).where(eq(communicationHistory.salonId, salonId));
+    return await query;
+  }
+
+  async getCommunicationHistoryByCustomer(customerId: string, salonId: string): Promise<CommunicationHistory[]> {
+    return await db.select()
+      .from(communicationHistory)
+      .where(and(
+        eq(communicationHistory.customerId, customerId),
+        eq(communicationHistory.salonId, salonId)
+      ));
+  }
+
+  async createCommunicationHistory(history: InsertCommunicationHistory): Promise<CommunicationHistory> {
+    const [created] = await db.insert(communicationHistory)
+      .values(history)
+      .returning();
+    return created;
+  }
+
+  async updateCommunicationHistory(id: string, updates: {
+    status?: string;
+    providerId?: string;
+    sentAt?: Date;
+    deliveredAt?: Date;
+    openedAt?: Date;
+    clickedAt?: Date;
+    failureReason?: string;
+    metadata?: any;
+  }): Promise<void> {
+    await db.update(communicationHistory)
+      .set(updates)
+      .where(eq(communicationHistory.id, id));
   }
 
   async getCommunicationDashboardMetrics(salonId: string, period: string): Promise<{

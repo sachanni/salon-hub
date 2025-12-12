@@ -179,6 +179,24 @@ export const salonAPI = {
     const response = await api.get(`/api/salons/${salonId}/reviews`, { params });
     return response.data;
   },
+
+  getSalonPackages: async (salonId: string) => {
+    const response = await api.get(`/api/mobile/salons/${salonId}/packages`);
+    return response.data;
+  },
+
+  getPackageDetails: async (salonId: string, packageId: string) => {
+    const response = await api.get(`/api/mobile/salons/${salonId}/packages/${packageId}`);
+    return response.data;
+  },
+
+  getAvailableSlots: async (salonId: string, date: string, serviceId?: string, staffId?: string) => {
+    const params: any = { date };
+    if (serviceId) params.serviceId = serviceId;
+    if (staffId) params.staffId = staffId;
+    const response = await api.get(`/api/salons/${salonId}/available-slots`, { params });
+    return response.data;
+  },
 };
 
 // Booking API endpoints
@@ -197,6 +215,10 @@ export const bookingAPI = {
     depositAmountPaisa?: number;
     giftCardId?: string;
     giftCardAmountPaisa?: number;
+    packageId?: string;
+    isPackageBooking?: boolean;
+    totalPrice?: number;
+    totalDuration?: number;
   }) => {
     const response = await api.post('/api/mobile/bookings', bookingData);
     return response.data;
@@ -1083,6 +1105,93 @@ export interface BookingSummary {
   };
   additionalNotes?: string;
 }
+
+export interface LateNotificationInput {
+  bookingId: string;
+  estimatedDelayMinutes: number;
+  customerMessage?: string;
+}
+
+export interface DelayOption {
+  value: number;
+  label: string;
+}
+
+export const lateArrivalAPI = {
+  getDelayOptions: async (): Promise<{
+    success: boolean;
+    options: DelayOption[];
+    error?: string;
+  }> => {
+    try {
+      const response = await api.get('/api/mobile/late-arrival/delay-options');
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to fetch delay options:', error);
+      return {
+        success: false,
+        options: [],
+        error: error?.response?.data?.error || 'Failed to load delay options',
+      };
+    }
+  },
+
+  canNotify: async (bookingId: string): Promise<{
+    success: boolean;
+    canSend: boolean;
+    reason?: string;
+    booking?: any;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.get(`/api/mobile/late-arrival/bookings/${bookingId}/can-notify`);
+      return { success: true, ...response.data };
+    } catch (error: any) {
+      console.error('Failed to check late notification eligibility:', error);
+      return {
+        success: false,
+        canSend: false,
+        error: error?.response?.data?.error || 'Failed to check eligibility',
+      };
+    }
+  },
+
+  sendNotification: async (data: LateNotificationInput): Promise<{
+    success: boolean;
+    message?: string;
+    notification?: any;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post('/api/mobile/late-arrival/notify', data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to send late notification:', error);
+      return {
+        success: false,
+        error: error?.response?.data?.error || 'Failed to send notification',
+      };
+    }
+  },
+
+  getHistory: async (): Promise<{
+    success: boolean;
+    notifications: any[];
+    error?: string;
+  }> => {
+    try {
+      const response = await api.get('/api/mobile/late-arrival/customer/history');
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to fetch notification history:', error);
+      return {
+        success: false,
+        notifications: [],
+        error: error?.response?.data?.error || 'Failed to load history',
+      };
+    }
+  },
+};
 
 export const beautyProfileAPI = {
   getMyBeautyProfile: async (): Promise<{
