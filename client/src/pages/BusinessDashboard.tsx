@@ -73,7 +73,8 @@ import {
   AlertTriangle,
   Ban,
   Clock,
-  MessageCircle
+  MessageCircle,
+  Brain
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSalonPermissions } from "@/hooks/useSalonPermissions";
@@ -100,6 +101,8 @@ import CampaignDashboard from "@/components/business-dashboard/CampaignDashboard
 import CommissionManagement from "@/components/business-dashboard/CommissionManagement";
 import { ChatInbox } from "@/components/chat/ChatInbox";
 import { ChatNotificationBadge } from "@/components/chat/ChatNotificationBadge";
+import { MLAnalyticsDashboard } from "@/components/business-dashboard/ml-analytics";
+import MembershipManagement from "@/components/business-dashboard/MembershipManagement";
 
 // Type definitions for completion data
 interface CompletionData {
@@ -231,6 +234,7 @@ export default function BusinessDashboard() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("overview");
+  const [expandedSections, setExpandedSections] = useState<string[]>(["overview", "business", "operations", "financials"]);
   const [salonId, setSalonId] = useState<string | null>(() => {
     // Try to get salon ID from localStorage
     if (typeof window !== 'undefined') {
@@ -394,6 +398,27 @@ export default function BusinessDashboard() {
     const interval = setInterval(fetchChatUnreadCount, 30000);
     return () => clearInterval(interval);
   }, [salonId]);
+
+  // Auto-expand section containing active tab when it changes
+  useEffect(() => {
+    const tabToSectionMap: Record<string, string> = {
+      'overview': 'overview',
+      'calendar': 'operations', 'client-profiles': 'operations', 'inventory': 'operations', 
+      'beauty-catalog': 'operations', 'offers': 'operations',
+      'events-dashboard': 'events', 'create-event': 'events', 'draft-events': 'events', 'past-events': 'events',
+      'business-info': 'business', 'location-contact': 'business', 'services': 'business', 'packages': 'business',
+      'memberships': 'business', 'staff': 'business', 'resources': 'business', 'booking-settings': 'business', 'payment-setup': 'business',
+      'media': 'business', 'publish': 'business',
+      'shop-admins': 'admin',
+      'financials': 'financials', 'commissions': 'financials',
+      'analytics': 'analytics', 'ml-analytics': 'analytics',
+      'chat-inbox': 'communications', 'communications': 'communications', 'customer-import': 'communications', 'campaigns': 'communications'
+    };
+    const sectionId = tabToSectionMap[activeTab];
+    if (sectionId && !expandedSections.includes(sectionId)) {
+      setExpandedSections(prev => [...prev, sectionId]);
+    }
+  }, [activeTab, expandedSections]);
 
   // Handler for salon switching
   const handleSalonSwitch = (value: string) => {
@@ -639,6 +664,7 @@ export default function BusinessDashboard() {
         { id: "location-contact", label: "Location & Contact", icon: MapPin, isComplete: !!isLocationContactComplete, isSetup: true, hasAccess: canViewSettings || isAdmin },
         { id: "services", label: "Services & Pricing", icon: Scissors, isComplete: hasServices, isSetup: true, hasAccess: canViewServices || isAdmin },
         { id: "packages", label: "Package & Combos", icon: Gift, isComplete: false, isSetup: false, hasAccess: canViewServices || isAdmin },
+        { id: "memberships", label: "Membership Plans", icon: Crown, isComplete: false, isSetup: false, hasAccess: canViewServices || isAdmin },
         { id: "staff", label: "Staff Management", icon: Users, isComplete: hasStaff, isSetup: true, hasAccess: canViewStaff || isAdmin },
         { id: "resources", label: "Resources & Equipment", icon: Settings, isComplete: false, isSetup: false, isOptional: true, hasAccess: canViewSettings || isAdmin },
         { id: "booking-settings", label: "Booking Settings", icon: Cog, isComplete: hasSettings, isSetup: true, hasAccess: canViewSettings || isAdmin },
@@ -657,13 +683,21 @@ export default function BusinessDashboard() {
       ]
     },
     {
+      id: "financials",
+      label: "Financial Management",
+      icon: Wallet,
+      items: [
+        { id: "financials", label: "Financial Dashboard", icon: CreditCard, isComplete: false, isSetup: false, hasAccess: canViewFinancials || isAdmin },
+        { id: "commissions", label: "Staff Commissions", icon: Wallet, isComplete: false, isSetup: false, hasAccess: isBusinessOwner || canViewFinancials || isAdmin }
+      ]
+    },
+    {
       id: "analytics",
       label: "Analytics & Reports",
       icon: BarChart,
       items: [
         { id: "analytics", label: "Advanced Analytics", icon: TrendingUp, isComplete: false, isSetup: false, hasAccess: canViewReports || isAdmin },
-        { id: "financials", label: "Financial Reports", icon: CreditCard, isComplete: false, isSetup: false, hasAccess: canViewFinancials || isAdmin },
-        { id: "commissions", label: "Staff Commissions", icon: Wallet, isComplete: false, isSetup: false, hasAccess: isBusinessOwner || canViewFinancials || isAdmin }
+        { id: "ml-analytics", label: "ML Predictions", icon: Brain, isComplete: false, isSetup: false, hasAccess: canViewReports || isAdmin }
       ]
     },
     {
@@ -690,6 +724,28 @@ export default function BusinessDashboard() {
       ...section,
       items: section.items.filter(item => item.hasAccess)
     }));
+
+  // Handle navigation with auto-expand
+  const handleNavigation = (tabId: string) => {
+    const tabToSectionMap: Record<string, string> = {
+      'overview': 'overview',
+      'calendar': 'operations', 'client-profiles': 'operations', 'inventory': 'operations', 
+      'beauty-catalog': 'operations', 'offers': 'operations',
+      'events-dashboard': 'events', 'create-event': 'events', 'draft-events': 'events', 'past-events': 'events',
+      'business-info': 'business', 'location-contact': 'business', 'services': 'business', 'packages': 'business',
+      'memberships': 'business', 'staff': 'business', 'resources': 'business', 'booking-settings': 'business', 'payment-setup': 'business',
+      'media': 'business', 'publish': 'business',
+      'shop-admins': 'admin',
+      'financials': 'financials', 'commissions': 'financials',
+      'analytics': 'analytics', 'ml-analytics': 'analytics',
+      'chat-inbox': 'communications', 'communications': 'communications', 'customer-import': 'communications', 'campaigns': 'communications'
+    };
+    const sectionId = tabToSectionMap[tabId];
+    if (sectionId && !expandedSections.includes(sectionId)) {
+      setExpandedSections(prev => [...prev, sectionId]);
+    }
+    setActiveTab(tabId);
+  };
 
   // Stunning Sidebar navigation component with WOW factors
   const SidebarNavigation = () => {
@@ -771,14 +827,14 @@ export default function BusinessDashboard() {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button 
-                      onClick={() => setActiveTab('calendar')}
+                      onClick={() => handleNavigation('calendar')}
                       className="flex items-center justify-center gap-1 px-2 py-1 bg-white hover:bg-blue-50 rounded-md border border-blue-100 transition-all text-[10px] font-medium text-blue-700 hover:shadow-sm"
                     >
                       <Calendar className="h-3 w-3" />
                       <span>Book</span>
                     </button>
                     <button 
-                      onClick={() => setActiveTab('services')}
+                      onClick={() => handleNavigation('services')}
                       className="flex items-center justify-center gap-1 px-2 py-1 bg-white hover:bg-blue-50 rounded-md border border-blue-100 transition-all text-[10px] font-medium text-blue-700 hover:shadow-sm"
                     >
                       <Scissors className="h-3 w-3" />
@@ -788,7 +844,7 @@ export default function BusinessDashboard() {
                 </div>
               </div>
 
-              <Accordion type="multiple" defaultValue={["overview", "business", "operations"]} className="w-full space-y-1">
+              <Accordion type="multiple" value={expandedSections} onValueChange={setExpandedSections} className="w-full space-y-1">
                 {navigationSections.map((section) => (
                   section.items.length === 1 ? (
                     // Single item sections (no accordion)
@@ -798,7 +854,7 @@ export default function BusinessDashboard() {
                           <SidebarMenu>
                             <SidebarMenuItem>
                               <SidebarMenuButton
-                                onClick={() => setActiveTab(section.items[0].id)}
+                                onClick={() => handleNavigation(section.items[0].id)}
                                 isActive={activeTab === section.items[0].id}
                                 tooltip={section.label}
                                 className={`w-full justify-start h-10 rounded-lg transition-all ${
@@ -839,7 +895,7 @@ export default function BusinessDashboard() {
                                 return (
                                   <SidebarMenuItem key={item.id}>
                                     <SidebarMenuButton
-                                      onClick={() => setActiveTab(item.id)}
+                                      onClick={() => handleNavigation(item.id)}
                                       isActive={isActive}
                                       tooltip={item.label}
                                       className={`w-full justify-start ml-4 group-data-[collapsible=icon]:ml-0 h-9 rounded-lg transition-all ${
@@ -932,7 +988,7 @@ export default function BusinessDashboard() {
                         </div>
                       </Link>
                       <div 
-                        onClick={() => setActiveTab('loyalty-rewards')}
+                        onClick={() => handleNavigation('loyalty-rewards')}
                         className="flex items-center gap-2 text-xs text-emerald-800 hover:bg-emerald-100/70 rounded-md p-1.5 cursor-pointer transition-colors"
                       >
                         <div className="p-0.5 rounded bg-emerald-100">
@@ -1898,6 +1954,15 @@ export default function BusinessDashboard() {
       );
     }
 
+    // Handle ML analytics tab
+    if (activeTab === "ml-analytics") {
+      return (
+        <div className="p-6">
+          <MLAnalyticsDashboard salonId={salonId || ''} />
+        </div>
+      );
+    }
+
     // Handle financials tab
     if (activeTab === "financials") {
       return (
@@ -2002,6 +2067,15 @@ export default function BusinessDashboard() {
       return (
         <div className="p-6">
           <PackageManagement salonId={salonId || ''} />
+        </div>
+      );
+    }
+
+    // Handle memberships tab
+    if (activeTab === "memberships") {
+      return (
+        <div className="p-6">
+          <MembershipManagement salonId={salonId || ''} />
         </div>
       );
     }

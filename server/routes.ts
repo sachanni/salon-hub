@@ -61,6 +61,7 @@ import referralsRoutes from "./routes/referrals";
 import chatRoutes from "./routes/chat.routes";
 import aiConsultantRoutes, { initializeAIConsultantRoutes } from "./routes/ai-consultant.routes";
 import { initializeChatSocket } from "./services/chat.service";
+import { initializeQueueSocketEvents } from "./services/queueSocket.service";
 import clientProfileRoutes from "./routes/client-profiles.routes";
 import depositsRoutes, { publicDepositsRouter, registerMobileDepositRoutes } from "./routes/deposits.routes";
 import giftCardsRoutes, { publicGiftCardsRouter } from "./routes/gift-cards.routes";
@@ -78,6 +79,7 @@ import { registerWelcomeOfferRoutes } from "./routes/welcome-offer.routes";
 import { registerOnboardingAnalyticsRoutes } from "./routes/onboarding-analytics.routes";
 import phoneVerificationRoutes from "./routes/phone-verification.routes";
 import subscriptionRoutes from "./routes/subscription.routes";
+import razorpayWebhookRoutes from "./routes/razorpay-webhook.routes";
 import metaRoutes from "./routes/meta.routes";
 import settingsRoutes from "./routes/settings.routes";
 import { subscriptionService } from "./services/subscriptionService";
@@ -93,8 +95,13 @@ import { startExpressRebookingJobs } from "./jobs/expressRebookingJobs";
 import dynamicPricingRoutes, { registerMobileDynamicPricingRoutes } from "./routes/dynamicPricing.routes";
 import { startDynamicPricingJobs } from "./jobs/dynamicPricingJobs";
 import { startServiceBundleJobs } from "./jobs/serviceBundleJobs";
+import { startDepartureAlertsJobs } from "./jobs/departureAlertsJobs";
+import { startMLAnalyticsJobs } from "./jobs/mlAnalyticsJobs";
 import lateArrivalRoutes, { mobileLateArrivalRouter } from "./routes/late-arrival.routes";
 import serviceBundleRoutes, { mobileServiceBundleRouter } from "./routes/serviceBundle.routes";
+import departureAlertsRoutes, { mobileDepartureAlertsRouter } from "./routes/departure-alerts.routes";
+import membershipRoutes from "./routes/membership.routes";
+import premiumAnalyticsRoutes from "./routes/premiumAnalytics";
 import {
   createPaymentOrderSchema,
   verifyPaymentSchema,
@@ -17275,6 +17282,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/business', isAuthenticated, clientProfileRoutes);
   console.log('✅ Client Profile routes registered');
 
+  app.use('/api/premium-analytics', premiumAnalyticsRoutes);
+  console.log('✅ Premium Analytics routes registered');
+
   // Phone verification routes (public - no auth required for OTP)
   app.use('/api/phone-verification', phoneVerificationRoutes);
   console.log('✅ Phone verification routes registered');
@@ -17317,9 +17327,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/mobile/late-arrival', mobileLateArrivalRouter);
   console.log('✅ Late Arrival routes registered (web + mobile)');
 
+  // Smart Departure Notification routes (predictive queue-based departure alerts)
+  app.use('/api', departureAlertsRoutes);
+  app.use('/api/mobile/departure-alerts', mobileDepartureAlertsRouter);
+  console.log('✅ Smart Departure Notification routes registered (web + mobile)');
+
   app.use('/api/service-bundles', serviceBundleRoutes);
   app.use('/api/mobile/service-bundles', mobileServiceBundleRouter);
   console.log('✅ Service Bundle routes registered (web + mobile)');
+
+  // Customer Membership Package routes (salon membership plans, members management)
+  app.use('/api', membershipRoutes);
+  console.log('✅ Customer Membership routes registered');
 
   // Shop Admin RBAC routes (manage shop admins, permissions, roles)
   app.use('/api/shop-admin', isAuthenticated, shopAdminRoutes);
@@ -17344,6 +17363,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Subscription tier management routes (Free, Growth, Elite)
   app.use('/api/subscriptions', subscriptionRoutes);
   console.log('✅ Subscription tier routes registered');
+
+  // Razorpay webhook handler for payment events (path: /api/payment/webhooks/razorpay)
+  app.use('/api/payment/webhooks', razorpayWebhookRoutes);
+  console.log('✅ Razorpay webhook routes registered');
 
   // Meta (Facebook/Instagram) integration routes
   app.use('/api/meta', metaRoutes);
@@ -17445,6 +17468,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Start Service Bundle background jobs
   startServiceBundleJobs();
   console.log('✅ Service Bundle background jobs started');
+
+  // Start Smart Departure Alerts background jobs
+  startDepartureAlertsJobs();
+  console.log('✅ Smart Departure Alerts background jobs started');
+
+  // Start ML Analytics background jobs (premium salons only)
+  startMLAnalyticsJobs();
+  console.log('✅ ML Analytics background jobs started');
 
   // Mobile offers routes (browse, save, redeem offers)
   registerMobileOffersRoutes(app);
@@ -18943,6 +18974,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Initialize Socket.IO for real-time chat (must be after httpServer creation)
   initializeChatSocket(httpServer);
+
+  // Initialize queue socket events for real-time departure/queue updates
+  initializeQueueSocketEvents();
 
   return httpServer;
 }

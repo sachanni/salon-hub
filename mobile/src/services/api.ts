@@ -1193,6 +1193,126 @@ export const lateArrivalAPI = {
   },
 };
 
+export interface DeparturePreferences {
+  receiveAlerts: boolean;
+  defaultLocationLabel: 'home' | 'office' | 'ask_each_time';
+  preferredBufferMinutes: number;
+  reminderTimingPreference: '30_minutes' | '60_minutes' | '90_minutes' | '2_hours';
+  preferredChannel: 'push' | 'sms' | 'whatsapp' | 'all';
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+}
+
+export interface DepartureStatus {
+  bookingId: string;
+  alertId?: string;
+  originalTime: string;
+  predictedStartTime: string;
+  delayMinutes: number;
+  delayReason?: string;
+  suggestedDeparture: {
+    time: string;
+    fromLocation?: string;
+    estimatedTravelMinutes?: number;
+    bufferMinutes: number;
+  };
+  staffStatus?: {
+    name: string;
+    currentStatus: string;
+    appointmentsAhead: number;
+  };
+  lastUpdated: string;
+}
+
+export const departureAPI = {
+  getPreferences: async (): Promise<{
+    success: boolean;
+    preferences: DeparturePreferences | null;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.get('/api/mobile/departure-alerts/preferences');
+      const data = response.data;
+      if (data.success && data.preferences) {
+        return { success: true, preferences: data.preferences };
+      }
+      return { success: data.success ?? true, preferences: data.preferences ?? data };
+    } catch (error: any) {
+      console.error('Failed to fetch departure preferences:', error);
+      return { 
+        success: false, 
+        preferences: null,
+        error: error?.response?.data?.error || 'Failed to load preferences',
+      };
+    }
+  },
+
+  updatePreferences: async (preferences: Partial<DeparturePreferences>): Promise<{
+    success: boolean;
+    preferences?: DeparturePreferences;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.put('/api/mobile/departure-alerts/preferences', preferences);
+      const data = response.data;
+      if (data.success === false) {
+        return { success: false, error: data.error || 'Failed to update preferences' };
+      }
+      return { success: true, preferences: data.preferences ?? data };
+    } catch (error: any) {
+      console.error('Failed to update departure preferences:', error);
+      return {
+        success: false,
+        error: error?.response?.data?.error || 'Failed to update preferences',
+      };
+    }
+  },
+
+  getDepartureStatus: async (bookingId: string): Promise<{
+    success: boolean;
+    status?: DepartureStatus;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.get(`/api/mobile/departure-alerts/departure-status/${bookingId}`);
+      const data = response.data;
+      if (data.success === false) {
+        return { success: false, error: data.error || 'Failed to load departure status' };
+      }
+      return { success: true, status: data.status ?? data };
+    } catch (error: any) {
+      console.error('Failed to fetch departure status:', error);
+      return {
+        success: false,
+        error: error?.response?.data?.error || 'Failed to load departure status',
+      };
+    }
+  },
+
+  acknowledgeAlert: async (alertId: string, responseData: {
+    response: 'acknowledged' | 'will_be_late' | 'reschedule' | 'cancel';
+    actualDepartureTime?: string;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post(`/api/mobile/departure-alerts/alerts/${alertId}/acknowledge`, responseData);
+      const data = response.data;
+      if (data.success === false) {
+        return { success: false, error: data.error || 'Failed to acknowledge' };
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to acknowledge departure alert:', error);
+      return {
+        success: false,
+        error: error?.response?.data?.error || 'Failed to acknowledge',
+      };
+    }
+  },
+};
+
 export const beautyProfileAPI = {
   getMyBeautyProfile: async (): Promise<{
     success: boolean;

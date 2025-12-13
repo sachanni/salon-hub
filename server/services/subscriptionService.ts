@@ -5,11 +5,13 @@ import {
   subscriptionTiers, 
   salonSubscriptions, 
   subscriptionPayments,
+  subscriptionRefunds,
+  razorpayWebhookEvents,
   salons,
   SUBSCRIPTION_TIERS,
   SUBSCRIPTION_STATUSES
 } from '@shared/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, gte, lte } from 'drizzle-orm';
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID || '',
@@ -31,6 +33,14 @@ export interface TierLimits {
   maxStaff: number;
   maxServices: number;
   maxLocations: number;
+}
+
+export interface RefundResult {
+  success: boolean;
+  refundId?: string;
+  razorpayRefundId?: string;
+  refundAmount?: number;
+  message: string;
 }
 
 const TIER_CONFIGS: Record<string, { features: TierFeatures; limits: TierLimits; monthlyPricePaisa: number; yearlyPricePaisa: number }> = {
@@ -91,6 +101,15 @@ const TIER_CONFIGS: Record<string, { features: TierFeatures; limits: TierLimits;
     monthlyPricePaisa: 199900,
     yearlyPricePaisa: 1999900,
   },
+};
+
+// Industry standard refund policies
+const REFUND_POLICIES = {
+  FULL_REFUND_DAYS: 7,           // Full refund within 7 days of payment
+  PRORATED_REFUND_DAYS: 30,     // Prorated refund up to 30 days
+  MIN_REFUND_AMOUNT_PAISA: 100, // Minimum refund ₹1 (Razorpay requirement)
+  GRACE_PERIOD_DAYS: 3,         // Days after period end before downgrade
+  MAX_PAYMENT_RETRIES: 3,       // Max failed payments before downgrade
 };
 
 export class SubscriptionService {
@@ -332,7 +351,7 @@ export class SubscriptionService {
       const order = await razorpay.orders.create({
         amount,
         currency: 'INR',
-        receipt: `sub_${salonId}_${Date.now()}`,
+        receipt: `sub_${salonId.substring(0, 8)}_${Date.now()}`.substring(0, 40),
         notes: {
           salonId,
           tierName,
@@ -434,36 +453,487 @@ export class SubscriptionService {
     return this.getSalonSubscription(salonId);
   }
 
-  async cancelSubscription(salonId: string, reason?: string) {
+  // ==================== REFUND METHODS (Industry Standard) ====================
+
+  /**
+   * Calculate prorated refund amount based on unused days
+   * Industry standard: Refund = (Original Amount * Unused Days) / Total Days
+   */
+  calculateProratedRefund(
+    originalAmountPaisa: number,
+    periodStart: Date,
+    periodEnd: Date,
+    cancellationDate: Date = new Date()
+  ): { refundAmountPaisa: number; daysUsed: number; totalDays: number; refundType: 'full' | 'prorated' | 'none' } {
+    const totalDays = Math.ceil((periodEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24));
+    const daysUsed = Math.ceil((cancellationDate.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24));
+    const unusedDays = Math.max(0, totalDays - daysUsed);
+
+    // Full refund within first 7 days (industry standard)
+    if (daysUsed <= REFUND_POLICIES.FULL_REFUND_DAYS) {
+      return {
+        refundAmountPaisa: originalAmountPaisa,
+        daysUsed,
+        totalDays,
+        refundType: 'full',
+      };
+    }
+
+    // Prorated refund calculation
+    const refundAmountPaisa = Math.floor((originalAmountPaisa * unusedDays) / totalDays);
+
+    // No refund if amount is below minimum or no unused days
+    if (refundAmountPaisa < REFUND_POLICIES.MIN_REFUND_AMOUNT_PAISA || unusedDays <= 0) {
+      return {
+        refundAmountPaisa: 0,
+        daysUsed,
+        totalDays,
+        refundType: 'none',
+      };
+    }
+
+    return {
+      refundAmountPaisa,
+      daysUsed,
+      totalDays,
+      refundType: 'prorated',
+    };
+  }
+
+  /**
+   * Process refund via Razorpay
+   * Handles full, prorated, and partial refunds
+   */
+  async processRefund(
+    salonId: string,
+    reason?: string,
+    requestedBy?: string
+  ): Promise<RefundResult> {
+    const subscription = await this.getSalonSubscription(salonId);
+    if (!subscription) {
+      return { success: false, message: 'No subscription found' };
+    }
+
+    // Get the last successful payment for this subscription
+    const [lastPayment] = await db
+      .select()
+      .from(subscriptionPayments)
+      .where(and(
+        eq(subscriptionPayments.salonId, salonId),
+        eq(subscriptionPayments.status, 'paid')
+      ))
+      .orderBy(desc(subscriptionPayments.createdAt))
+      .limit(1);
+
+    if (!lastPayment || !lastPayment.razorpayPaymentId) {
+      return { success: false, message: 'No refundable payment found' };
+    }
+
+    // Calculate refund amount
+    const refundCalc = this.calculateProratedRefund(
+      lastPayment.amountPaisa,
+      subscription.subscription.currentPeriodStart,
+      subscription.subscription.currentPeriodEnd
+    );
+
+    if (refundCalc.refundType === 'none' || refundCalc.refundAmountPaisa === 0) {
+      return { 
+        success: false, 
+        message: 'No refund applicable. Subscription period has been mostly used.' 
+      };
+    }
+
+    try {
+      // Create refund via Razorpay API
+      const razorpayRefund = await razorpay.payments.refund(lastPayment.razorpayPaymentId, {
+        amount: refundCalc.refundAmountPaisa,
+        speed: 'normal', // 'normal' (5-7 days) or 'optimum' (instant if possible)
+        notes: {
+          salonId,
+          subscriptionId: subscription.subscription.id,
+          refundType: refundCalc.refundType,
+          reason: reason || 'Subscription cancellation',
+        },
+        receipt: `ref_${salonId.substring(0, 6)}_${Date.now()}`.substring(0, 40),
+      });
+
+      // Record refund in database
+      const [refundRecord] = await db.insert(subscriptionRefunds).values({
+        paymentId: lastPayment.id,
+        subscriptionId: subscription.subscription.id,
+        salonId,
+        originalAmountPaisa: lastPayment.amountPaisa,
+        refundAmountPaisa: refundCalc.refundAmountPaisa,
+        refundType: refundCalc.refundType,
+        reason,
+        status: 'processing',
+        razorpayRefundId: razorpayRefund.id,
+        razorpayPaymentId: lastPayment.razorpayPaymentId,
+        daysUsed: refundCalc.daysUsed,
+        totalDays: refundCalc.totalDays,
+        requestedBy,
+      }).returning();
+
+      return {
+        success: true,
+        refundId: refundRecord.id,
+        razorpayRefundId: razorpayRefund.id,
+        refundAmount: refundCalc.refundAmountPaisa / 100,
+        message: `Refund of ₹${(refundCalc.refundAmountPaisa / 100).toFixed(2)} initiated. Will be processed within 5-7 business days.`,
+      };
+    } catch (error: any) {
+      console.error('Razorpay refund error:', error);
+
+      // Record failed refund attempt
+      await db.insert(subscriptionRefunds).values({
+        paymentId: lastPayment.id,
+        subscriptionId: subscription.subscription.id,
+        salonId,
+        originalAmountPaisa: lastPayment.amountPaisa,
+        refundAmountPaisa: refundCalc.refundAmountPaisa,
+        refundType: refundCalc.refundType,
+        reason,
+        status: 'failed',
+        razorpayPaymentId: lastPayment.razorpayPaymentId,
+        failureReason: error.message,
+        daysUsed: refundCalc.daysUsed,
+        totalDays: refundCalc.totalDays,
+        requestedBy,
+      });
+
+      return {
+        success: false,
+        message: `Refund failed: ${error.message}. Please contact support.`,
+      };
+    }
+  }
+
+  /**
+   * Cancel subscription with optional refund processing
+   * Industry standard: User retains access until current period ends (grace period)
+   */
+  async cancelSubscription(
+    salonId: string, 
+    reason?: string, 
+    processRefund: boolean = true,
+    requestedBy?: string
+  ): Promise<{ subscription: any; refund?: RefundResult }> {
     const existing = await this.getSalonSubscription(salonId);
     if (!existing) {
       throw new Error('No active subscription found');
     }
 
-    const freeTier = await this.getTierByName(SUBSCRIPTION_TIERS.FREE);
     const now = new Date();
+    let refundResult: RefundResult | undefined;
 
+    // Process refund if requested and subscription is paid
+    if (processRefund && existing.tier?.name !== SUBSCRIPTION_TIERS.FREE) {
+      refundResult = await this.processRefund(salonId, reason, requestedBy);
+    }
+
+    // Cancel Razorpay subscription if exists
     if (existing.subscription.razorpaySubscriptionId) {
       try {
-        await razorpay.subscriptions.cancel(existing.subscription.razorpaySubscriptionId);
+        await razorpay.subscriptions.cancel(existing.subscription.razorpaySubscriptionId, {
+          cancel_at_cycle_end: false, // Immediate cancellation
+        });
       } catch (error) {
         console.error('Error cancelling Razorpay subscription:', error);
+      }
+    }
+
+    // Update subscription status
+    // Industry standard: Keep current tier until period end (grace period)
+    const gracePeriodEnd = new Date(existing.subscription.currentPeriodEnd);
+    gracePeriodEnd.setDate(gracePeriodEnd.getDate() + REFUND_POLICIES.GRACE_PERIOD_DAYS);
+
+    await db
+      .update(salonSubscriptions)
+      .set({
+        status: SUBSCRIPTION_STATUSES.CANCELLED,
+        cancelledAt: now,
+        cancelReason: reason,
+        updatedAt: now,
+        // Don't immediately downgrade - keep tier until period end
+      })
+      .where(eq(salonSubscriptions.id, existing.subscription.id));
+
+    const updatedSubscription = await this.getSalonSubscription(salonId);
+
+    return {
+      subscription: updatedSubscription,
+      refund: refundResult,
+    };
+  }
+
+  /**
+   * Handle expired subscriptions - downgrade to free tier
+   * Called by background job after grace period ends
+   */
+  async handleExpiredSubscriptions(): Promise<number> {
+    const now = new Date();
+    const gracePeriodAgo = new Date(now);
+    gracePeriodAgo.setDate(gracePeriodAgo.getDate() - REFUND_POLICIES.GRACE_PERIOD_DAYS);
+
+    const freeTier = await this.getTierByName(SUBSCRIPTION_TIERS.FREE);
+    if (!freeTier) {
+      console.error('Free tier not found');
+      return 0;
+    }
+
+    // Find cancelled subscriptions past grace period
+    const expiredSubs = await db
+      .select()
+      .from(salonSubscriptions)
+      .where(and(
+        eq(salonSubscriptions.status, SUBSCRIPTION_STATUSES.CANCELLED),
+        lte(salonSubscriptions.currentPeriodEnd, gracePeriodAgo)
+      ));
+
+    let downgradeCount = 0;
+    for (const sub of expiredSubs) {
+      if (sub.tierId !== freeTier.id) {
+        await db
+          .update(salonSubscriptions)
+          .set({
+            tierId: freeTier.id,
+            status: SUBSCRIPTION_STATUSES.EXPIRED,
+            updatedAt: now,
+          })
+          .where(eq(salonSubscriptions.id, sub.id));
+        downgradeCount++;
+      }
+    }
+
+    if (downgradeCount > 0) {
+      console.log(`[Subscription] Downgraded ${downgradeCount} expired subscriptions to free tier`);
+    }
+
+    return downgradeCount;
+  }
+
+  // ==================== PAUSE/RESUME FUNCTIONALITY ====================
+
+  /**
+   * Pause subscription - keeps data but suspends billing
+   * Industry standard: Max pause duration is typically 3 months
+   */
+  async pauseSubscription(salonId: string, pauseUntil?: Date): Promise<any> {
+    const subscription = await this.getSalonSubscription(salonId);
+    if (!subscription) {
+      throw new Error('No subscription found');
+    }
+
+    if (subscription.tier?.name === SUBSCRIPTION_TIERS.FREE) {
+      throw new Error('Cannot pause free subscription');
+    }
+
+    const now = new Date();
+    const maxPauseDate = new Date(now);
+    maxPauseDate.setMonth(maxPauseDate.getMonth() + 3); // Max 3 months pause
+
+    const pauseEnd = pauseUntil && pauseUntil < maxPauseDate ? pauseUntil : maxPauseDate;
+
+    // Pause Razorpay subscription if exists
+    if (subscription.subscription.razorpaySubscriptionId) {
+      try {
+        await razorpay.subscriptions.pause(subscription.subscription.razorpaySubscriptionId);
+      } catch (error) {
+        console.error('Error pausing Razorpay subscription:', error);
       }
     }
 
     await db
       .update(salonSubscriptions)
       .set({
-        tierId: freeTier!.id,
-        status: SUBSCRIPTION_STATUSES.CANCELLED,
-        cancelledAt: now,
-        cancelReason: reason,
+        status: 'paused',
         updatedAt: now,
       })
-      .where(eq(salonSubscriptions.id, existing.subscription.id));
+      .where(eq(salonSubscriptions.id, subscription.subscription.id));
 
     return this.getSalonSubscription(salonId);
   }
+
+  /**
+   * Resume paused subscription
+   */
+  async resumeSubscription(salonId: string): Promise<any> {
+    const subscription = await this.getSalonSubscription(salonId);
+    if (!subscription) {
+      throw new Error('No subscription found');
+    }
+
+    if (subscription.subscription.status !== 'paused') {
+      throw new Error('Subscription is not paused');
+    }
+
+    // Resume Razorpay subscription if exists
+    if (subscription.subscription.razorpaySubscriptionId) {
+      try {
+        await razorpay.subscriptions.resume(subscription.subscription.razorpaySubscriptionId);
+      } catch (error) {
+        console.error('Error resuming Razorpay subscription:', error);
+      }
+    }
+
+    const now = new Date();
+    await db
+      .update(salonSubscriptions)
+      .set({
+        status: SUBSCRIPTION_STATUSES.ACTIVE,
+        updatedAt: now,
+      })
+      .where(eq(salonSubscriptions.id, subscription.subscription.id));
+
+    return this.getSalonSubscription(salonId);
+  }
+
+  // ==================== FAILED PAYMENT HANDLING (Dunning) ====================
+
+  /**
+   * Handle failed payment - increment counter and potentially downgrade
+   * Industry standard dunning: 3 retries over 7 days, then downgrade
+   */
+  async handleFailedPayment(salonId: string, paymentId: string, failureReason: string): Promise<void> {
+    const subscription = await this.getSalonSubscription(salonId);
+    if (!subscription) return;
+
+    const newFailedCount = (subscription.subscription.failedPaymentCount || 0) + 1;
+    const now = new Date();
+
+    // Record failed payment
+    await db.insert(subscriptionPayments).values({
+      subscriptionId: subscription.subscription.id,
+      salonId,
+      amountPaisa: subscription.tier?.monthlyPricePaisa || 0,
+      status: 'failed',
+      razorpayPaymentId: paymentId,
+      failureReason,
+      periodStart: now,
+      periodEnd: now,
+    });
+
+    // Update subscription with failed count
+    const updateData: any = {
+      failedPaymentCount: newFailedCount,
+      updatedAt: now,
+    };
+
+    // After max retries, mark as past_due
+    if (newFailedCount >= REFUND_POLICIES.MAX_PAYMENT_RETRIES) {
+      updateData.status = SUBSCRIPTION_STATUSES.PAST_DUE;
+      console.log(`[Subscription] Salon ${salonId} marked as past_due after ${newFailedCount} failed payments`);
+    }
+
+    await db
+      .update(salonSubscriptions)
+      .set(updateData)
+      .where(eq(salonSubscriptions.id, subscription.subscription.id));
+  }
+
+  /**
+   * Handle successful payment after failures - reset counter
+   */
+  async handleSuccessfulPayment(salonId: string, paymentId: string, amountPaisa: number): Promise<void> {
+    const subscription = await this.getSalonSubscription(salonId);
+    if (!subscription) return;
+
+    const now = new Date();
+    const periodEnd = new Date(now);
+    
+    if (subscription.subscription.billingCycle === 'monthly') {
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    } else {
+      periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    }
+
+    // Record successful payment
+    await db.insert(subscriptionPayments).values({
+      subscriptionId: subscription.subscription.id,
+      salonId,
+      amountPaisa,
+      status: 'paid',
+      razorpayPaymentId: paymentId,
+      periodStart: now,
+      periodEnd,
+    });
+
+    // Reset failed count and update subscription
+    await db
+      .update(salonSubscriptions)
+      .set({
+        status: SUBSCRIPTION_STATUSES.ACTIVE,
+        failedPaymentCount: 0,
+        lastPaymentAt: now,
+        nextPaymentAt: periodEnd,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        updatedAt: now,
+      })
+      .where(eq(salonSubscriptions.id, subscription.subscription.id));
+  }
+
+  // ==================== WEBHOOK HANDLING ====================
+
+  /**
+   * Verify Razorpay webhook signature
+   */
+  verifyWebhookSignature(body: string, signature: string): boolean {
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET || '')
+      .update(body)
+      .digest('hex');
+    
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
+    );
+  }
+
+  /**
+   * Check if webhook event was already processed (idempotency)
+   */
+  async isEventProcessed(eventId: string): Promise<boolean> {
+    const [existing] = await db
+      .select()
+      .from(razorpayWebhookEvents)
+      .where(eq(razorpayWebhookEvents.eventId, eventId));
+    
+    return !!existing && existing.status === 'processed';
+  }
+
+  /**
+   * Record webhook event for idempotency
+   */
+  async recordWebhookEvent(eventId: string, eventType: string, payload: any, status: 'received' | 'processed' | 'failed', errorMessage?: string): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(razorpayWebhookEvents)
+      .where(eq(razorpayWebhookEvents.eventId, eventId));
+
+    if (existing) {
+      await db
+        .update(razorpayWebhookEvents)
+        .set({
+          status,
+          processedAt: status === 'processed' ? new Date() : null,
+          errorMessage,
+          retryCount: existing.retryCount + 1,
+        })
+        .where(eq(razorpayWebhookEvents.id, existing.id));
+    } else {
+      await db.insert(razorpayWebhookEvents).values({
+        eventId,
+        eventType,
+        payload,
+        status,
+        processedAt: status === 'processed' ? new Date() : null,
+        errorMessage,
+      });
+    }
+  }
+
+  // ==================== EXISTING METHODS ====================
 
   async checkFeatureAccess(salonId: string, feature: keyof TierFeatures): Promise<boolean> {
     const subscription = await this.getSalonSubscription(salonId);
@@ -488,6 +958,72 @@ export class SubscriptionService {
       .where(eq(subscriptionPayments.salonId, salonId))
       .orderBy(desc(subscriptionPayments.createdAt))
       .limit(limit);
+  }
+
+  async getRefundHistory(salonId: string, limit: number = 10) {
+    return db
+      .select()
+      .from(subscriptionRefunds)
+      .where(eq(subscriptionRefunds.salonId, salonId))
+      .orderBy(desc(subscriptionRefunds.createdAt))
+      .limit(limit);
+  }
+
+  /**
+   * Get refund estimate without processing
+   */
+  async getRefundEstimate(salonId: string): Promise<{
+    eligible: boolean;
+    refundAmount?: number;
+    refundType?: string;
+    daysUsed?: number;
+    totalDays?: number;
+    message: string;
+  }> {
+    const subscription = await this.getSalonSubscription(salonId);
+    if (!subscription || subscription.tier?.name === SUBSCRIPTION_TIERS.FREE) {
+      return { eligible: false, message: 'No paid subscription to refund' };
+    }
+
+    const [lastPayment] = await db
+      .select()
+      .from(subscriptionPayments)
+      .where(and(
+        eq(subscriptionPayments.salonId, salonId),
+        eq(subscriptionPayments.status, 'paid')
+      ))
+      .orderBy(desc(subscriptionPayments.createdAt))
+      .limit(1);
+
+    if (!lastPayment) {
+      return { eligible: false, message: 'No refundable payment found' };
+    }
+
+    const refundCalc = this.calculateProratedRefund(
+      lastPayment.amountPaisa,
+      subscription.subscription.currentPeriodStart,
+      subscription.subscription.currentPeriodEnd
+    );
+
+    if (refundCalc.refundType === 'none') {
+      return {
+        eligible: false,
+        daysUsed: refundCalc.daysUsed,
+        totalDays: refundCalc.totalDays,
+        message: 'No refund available. Most of the subscription period has been used.',
+      };
+    }
+
+    return {
+      eligible: true,
+      refundAmount: refundCalc.refundAmountPaisa / 100,
+      refundType: refundCalc.refundType,
+      daysUsed: refundCalc.daysUsed,
+      totalDays: refundCalc.totalDays,
+      message: refundCalc.refundType === 'full' 
+        ? 'Full refund available (within 7-day cancellation window)'
+        : `Prorated refund of ₹${(refundCalc.refundAmountPaisa / 100).toFixed(2)} available for ${refundCalc.totalDays - refundCalc.daysUsed} unused days`,
+    };
   }
 }
 

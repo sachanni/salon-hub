@@ -26,11 +26,13 @@ import BookingModal from "@/components/BookingModal";
 import { RescheduleModal } from "@/components/RescheduleModal";
 import { LateArrivalButton } from "@/components/customer/LateArrivalButton";
 import MyBeautyProfile from "@/components/customer/MyBeautyProfile";
+import CustomerMemberships from "@/components/customer/CustomerMemberships";
 import { 
   Calendar, 
   History, 
   User, 
   CreditCard, 
+  Crown,
   Plus,
   Clock,
   MapPin,
@@ -995,7 +997,7 @@ export default function CustomerDashboard() {
 
         {/* Main Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-flex" data-testid="tabs-navigation">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex" data-testid="tabs-navigation">
             <TabsTrigger value="upcoming" className="flex items-center gap-2" data-testid="tab-upcoming">
               <Calendar className="h-4 w-4" />
               <span className="hidden sm:inline">Upcoming</span>
@@ -1011,6 +1013,10 @@ export default function CustomerDashboard() {
             <TabsTrigger value="payments" className="flex items-center gap-2" data-testid="tab-payments">
               <CreditCard className="h-4 w-4" />
               <span className="hidden sm:inline">Payments</span>
+            </TabsTrigger>
+            <TabsTrigger value="memberships" className="flex items-center gap-2" data-testid="tab-memberships">
+              <Crown className="h-4 w-4" />
+              <span className="hidden sm:inline">Memberships</span>
             </TabsTrigger>
           </TabsList>
 
@@ -2370,6 +2376,17 @@ export default function CustomerDashboard() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* Memberships Tab */}
+          <TabsContent value="memberships" className="space-y-4" data-testid="content-memberships">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Crown className="h-6 w-6 text-amber-500" />
+                My Memberships
+              </h2>
+            </div>
+            <CustomerMemberships />
           </TabsContent>
         </Tabs>
       </div>

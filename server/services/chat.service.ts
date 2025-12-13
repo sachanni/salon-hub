@@ -36,6 +36,12 @@ interface UserPresence {
 const connectedUsers = new Map<string, Set<string>>();
 const typingUsers = new Map<string, Set<string>>();
 
+let ioInstance: SocketIOServer | null = null;
+
+export function getSocketIO(): SocketIOServer | null {
+  return ioInstance;
+}
+
 export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     cors: {
@@ -291,6 +297,7 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
     });
   });
 
+  ioInstance = io;
   console.log('✅ Chat Socket.IO server initialized');
   return io;
 }

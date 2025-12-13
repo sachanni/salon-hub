@@ -3,7 +3,7 @@ import { subscriptionService } from '../services/subscriptionService';
 import { db } from '../db';
 import { salons, subscriptionTiers, salonSubscriptions } from '@shared/schema';
 import { eq, count, sql, and, gte, lte, desc } from 'drizzle-orm';
-import { requireSuperAdmin, populateUserFromSession } from '../middleware/auth';
+import { requireSuperAdmin, populateUserFromSession, requireSalonAccess, type AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -140,7 +140,7 @@ router.get('/salon/:salonId/status', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/salon/:salonId/start-trial', async (req: Request, res: Response) => {
+router.post('/salon/:salonId/start-trial', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
   try {
     const { salonId } = req.params;
     const { tierName, trialDays = 14 } = req.body;
@@ -162,7 +162,7 @@ router.post('/salon/:salonId/start-trial', async (req: Request, res: Response) =
   }
 });
 
-router.post('/salon/:salonId/create-upgrade-order', async (req: Request, res: Response) => {
+router.post('/salon/:salonId/create-upgrade-order', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
   try {
     const { salonId } = req.params;
     const { tierName, billingCycle = 'monthly' } = req.body;
@@ -187,7 +187,7 @@ router.post('/salon/:salonId/create-upgrade-order', async (req: Request, res: Re
   }
 });
 
-router.post('/salon/:salonId/verify-upgrade', async (req: Request, res: Response) => {
+router.post('/salon/:salonId/verify-upgrade', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
   try {
     const { salonId } = req.params;
     const { 
@@ -222,7 +222,7 @@ router.post('/salon/:salonId/verify-upgrade', async (req: Request, res: Response
   }
 });
 
-router.post('/salon/:salonId/cancel', async (req: Request, res: Response) => {
+router.post('/salon/:salonId/cancel', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
   try {
     const { salonId } = req.params;
     const { reason } = req.body;
@@ -237,6 +237,68 @@ router.post('/salon/:salonId/cancel', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error cancelling subscription:', error);
     res.status(500).json({ error: error.message || 'Failed to cancel subscription' });
+  }
+});
+
+router.get('/salon/:salonId/refund-estimate', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    const estimate = await subscriptionService.getRefundEstimate(salonId);
+    res.json(estimate);
+  } catch (error: any) {
+    console.error('Error getting refund estimate:', error);
+    res.status(500).json({ error: error.message || 'Failed to get refund estimate' });
+  }
+});
+
+router.post('/salon/:salonId/process-refund', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    const { reason } = req.body;
+    
+    const result = await subscriptionService.processRefund(salonId, reason);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error processing refund:', error);
+    res.status(500).json({ error: error.message || 'Failed to process refund' });
+  }
+});
+
+router.post('/salon/:salonId/pause', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    const { pauseUntil } = req.body;
+    
+    const subscription = await subscriptionService.pauseSubscription(
+      salonId,
+      pauseUntil ? new Date(pauseUntil) : undefined
+    );
+    
+    res.json({
+      success: true,
+      message: 'Subscription paused successfully',
+      subscription,
+    });
+  } catch (error: any) {
+    console.error('Error pausing subscription:', error);
+    res.status(500).json({ error: error.message || 'Failed to pause subscription' });
+  }
+});
+
+router.post('/salon/:salonId/resume', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    
+    const subscription = await subscriptionService.resumeSubscription(salonId);
+    
+    res.json({
+      success: true,
+      message: 'Subscription resumed successfully',
+      subscription,
+    });
+  } catch (error: any) {
+    console.error('Error resuming subscription:', error);
+    res.status(500).json({ error: error.message || 'Failed to resume subscription' });
   }
 });
 
@@ -675,6 +737,116 @@ router.post('/admin/subscriptions/:salonId/cancel', populateUserFromSession, req
   } catch (error: any) {
     console.error('Error cancelling subscription:', error);
     res.status(500).json({ error: 'Failed to cancel subscription' });
+  }
+});
+
+// ==================== REFUND ENDPOINTS (Authenticated) ====================
+
+// Get refund estimate for a salon subscription
+router.get('/salon/:salonId/refund-estimate', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+
+    const [salon] = await db.select().from(salons).where(eq(salons.id, salonId));
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found' });
+    }
+
+    const estimate = await subscriptionService.getRefundEstimate(salonId);
+    
+    res.json({
+      eligible: estimate.eligible,
+      refundAmount: estimate.refundAmount || 0,
+      refundType: estimate.refundType,
+      daysUsed: estimate.daysUsed,
+      totalDays: estimate.totalDays,
+      message: estimate.message,
+    });
+  } catch (error: any) {
+    console.error('Error getting refund estimate:', error);
+    res.status(500).json({ error: error.message || 'Failed to get refund estimate' });
+  }
+});
+
+// Process refund for a salon subscription
+router.post('/salon/:salonId/process-refund', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    const { reason } = req.body;
+
+    const [salon] = await db.select().from(salons).where(eq(salons.id, salonId));
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found' });
+    }
+
+    const result = await subscriptionService.processRefund(salonId, reason);
+    
+    res.json({
+      success: result.success,
+      refundId: result.refundId,
+      razorpayRefundId: result.razorpayRefundId,
+      refundAmount: result.refundAmount || 0,
+      message: result.message,
+    });
+  } catch (error: any) {
+    console.error('Error processing refund:', error);
+    res.status(500).json({ error: error.message || 'Failed to process refund' });
+  }
+});
+
+// ==================== PAUSE/RESUME ENDPOINTS (Authenticated) ====================
+
+// Pause a salon subscription
+router.post('/salon/:salonId/pause', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+    const { reason, pauseDurationDays = 30 } = req.body;
+
+    const [salon] = await db.select().from(salons).where(eq(salons.id, salonId));
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found' });
+    }
+
+    // Validate pause duration (max 90 days)
+    if (pauseDurationDays < 1 || pauseDurationDays > 90) {
+      return res.status(400).json({ error: 'Pause duration must be between 1 and 90 days' });
+    }
+
+    const result = await subscriptionService.pauseSubscription(salonId, reason);
+    
+    res.json({
+      success: true,
+      message: 'Subscription paused successfully',
+      pausedUntil: result.pausedUntil,
+      status: result.status,
+    });
+  } catch (error: any) {
+    console.error('Error pausing subscription:', error);
+    res.status(500).json({ error: error.message || 'Failed to pause subscription' });
+  }
+});
+
+// Resume a paused subscription
+router.post('/salon/:salonId/resume', populateUserFromSession, requireSalonAccess(), async (req: Request, res: Response) => {
+  try {
+    const { salonId } = req.params;
+
+    const [salon] = await db.select().from(salons).where(eq(salons.id, salonId));
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found' });
+    }
+
+    const result = await subscriptionService.resumeSubscription(salonId);
+    
+    res.json({
+      success: true,
+      message: 'Subscription resumed successfully',
+      status: result.status,
+      currentPeriodEnd: result.currentPeriodEnd,
+    });
+  } catch (error: any) {
+    console.error('Error resuming subscription:', error);
+    res.status(500).json({ error: error.message || 'Failed to resume subscription' });
   }
 });
 

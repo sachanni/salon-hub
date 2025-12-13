@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { Map } from '@/components/ui/map';
 import SalonCard from '@/components/SalonCard';
 import { WebChatWidget } from '@/components/chat';
+import MembershipPlansCard from '@/components/customer/MembershipPlansCard';
 
 interface NearbySalon {
   id: string;
@@ -905,6 +906,11 @@ const SalonProfile: React.FC<SalonProfileProps> = ({ salonId: propSalonId }) => 
                   </div>
                 )}
               </div>
+            </section>
+
+            {/* Membership Plans Section */}
+            <section id="memberships" className="scroll-mt-[200px]">
+              <MembershipPlansCard salonId={salonId} salonName={salon?.name} />
             </section>
 
             {/* Offers Section - Salon-Specific Only */}

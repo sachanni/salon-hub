@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -56,10 +56,15 @@ import {
   ExternalLink,
   Download,
   FileSpreadsheet,
-  FileText
+  FileText,
+  Car,
+  Pause,
+  Play,
+  XCircle
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import ShopAdminManagement from "@/components/business-dashboard/ShopAdminManagement";
+import DepartureAlertsDashboard from "@/components/business-dashboard/DepartureAlertsDashboard";
 import { 
   BarChart, 
   Bar, 
@@ -161,6 +166,7 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
     { id: "deposits", label: "Deposits & Protection", icon: Wallet, badge: null },
     { id: "giftcards", label: "Gift Cards", icon: Gift, badge: "NEW" },
     { id: "rebooking", label: "Smart Rebooking", icon: RefreshCw, badge: "NEW" },
+    { id: "departure", label: "Departure Alerts", icon: Car, badge: "NEW" },
     { id: "subscription", label: "Subscription & Billing", icon: CreditCard, badge: "NEW" },
     { id: "integrations", label: "Social Integrations", icon: Globe, badge: "NEW" },
     { id: "team", label: "Team & Permissions", icon: Users, badge: "NEW" },
@@ -301,6 +307,10 @@ export default function BusinessSettings({ salonId }: BusinessSettingsProps) {
 
                   {activeTab === "integrations" && (
                     <SocialIntegrationsSettings salonId={salonId} />
+                  )}
+
+                  {activeTab === "departure" && (
+                    <DepartureAlertsDashboard salonId={salonId} />
                   )}
                 </CardContent>
               </ScrollArea>
@@ -5460,6 +5470,9 @@ function SubscriptionSettings({ salonId }: { salonId: string }) {
   const { toast } = useToast();
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   const { data: tiersData, isLoading: tiersLoading } = useQuery({
     queryKey: ['/api/subscriptions/tiers'],
@@ -5474,12 +5487,92 @@ function SubscriptionSettings({ salonId }: { salonId: string }) {
     },
   });
 
+  const { data: refundEstimate, refetch: refetchRefundEstimate } = useQuery({
+    queryKey: ['/api/subscriptions/salon', salonId, 'refund-estimate'],
+    queryFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/refund-estimate`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: showCancelModal,
+  });
+
   const { data: paymentHistory } = useQuery({
     queryKey: ['/api/subscriptions/salon', salonId, 'payment-history'],
     queryFn: async () => {
       const res = await fetch(`/api/subscriptions/salon/${salonId}/payment-history`);
       if (!res.ok) throw new Error('Failed to fetch payment history');
       return res.json();
+    },
+  });
+
+  const pauseMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to pause subscription');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Subscription Paused', description: 'Your subscription has been paused. You can resume anytime within 90 days.' });
+      setShowPauseModal(false);
+      refetchSubscription();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to resume subscription');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Subscription Resumed', description: 'Your subscription is now active again.' });
+      refetchSubscription();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/subscriptions/salon/${salonId}/process-refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: cancelReason }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to cancel subscription');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const message = data.refundAmountPaisa > 0 
+        ? `Refund of ₹${(data.refundAmountPaisa / 100).toFixed(2)} will be processed within 5-7 business days.`
+        : 'Your subscription has been cancelled.';
+      toast({ title: 'Subscription Cancelled', description: message });
+      setShowCancelModal(false);
+      setCancelReason('');
+      refetchSubscription();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -5621,25 +5714,82 @@ function SubscriptionSettings({ salonId }: { salonId: string }) {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4 text-sm">
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-4 text-sm">
               <div className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <span>Status: {subscription?.status}</span>
+                {subscription?.status === 'paused' ? (
+                  <Pause className="h-4 w-4 text-amber-600" />
+                ) : subscription?.status === 'canceled' ? (
+                  <XCircle className="h-4 w-4 text-red-600" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                )}
+                <span>Status: <span className="font-medium capitalize">{subscription?.status}</span></span>
               </div>
-              {subscription?.trialEndsAt && (
+              {subscription?.trialEndsAt && subscription?.status === 'trialing' && (
                 <div className="flex items-center gap-2 text-amber-600">
                   <AlertCircle className="h-4 w-4" />
                   <span>Trial ends: {new Date(subscription.trialEndsAt).toLocaleDateString()}</span>
                 </div>
               )}
-              {subscription?.currentPeriodEnd && currentTier.name !== 'free' && (
+              {subscription?.pausedAt && subscription?.status === 'paused' && (
+                <div className="flex items-center gap-2 text-amber-600">
+                  <Clock className="h-4 w-4" />
+                  <span>Paused since: {new Date(subscription.pausedAt).toLocaleDateString()}</span>
+                </div>
+              )}
+              {subscription?.currentPeriodEnd && currentTier.name !== 'free' && subscription?.status !== 'canceled' && (
                 <div className="flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-violet-600" />
-                  <span>Renews: {new Date(subscription.currentPeriodEnd).toLocaleDateString()}</span>
+                  <span>{subscription?.status === 'paused' ? 'Resumes by' : 'Renews'}: {new Date(subscription.currentPeriodEnd).toLocaleDateString()}</span>
+                </div>
+              )}
+              {subscription?.status === 'canceled' && subscription?.graceEndsAt && (
+                <div className="flex items-center gap-2 text-red-600">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>Access until: {new Date(subscription.graceEndsAt).toLocaleDateString()}</span>
                 </div>
               )}
             </div>
+            
+            {currentTier.name !== 'free' && subscription?.status !== 'canceled' && (
+              <div className="flex flex-wrap gap-2 pt-2 border-t">
+                {subscription?.status === 'paused' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => resumeMutation.mutate()}
+                    disabled={resumeMutation.isPending}
+                    className="text-green-600 border-green-200 hover:bg-green-50"
+                  >
+                    <Play className="h-4 w-4 mr-1" />
+                    {resumeMutation.isPending ? 'Resuming...' : 'Resume Subscription'}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPauseModal(true)}
+                    className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                  >
+                    <Pause className="h-4 w-4 mr-1" />
+                    Pause Subscription
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowCancelModal(true);
+                    refetchRefundEstimate();
+                  }}
+                  className="text-red-600 border-red-200 hover:bg-red-50"
+                >
+                  <XCircle className="h-4 w-4 mr-1" />
+                  Cancel Subscription
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -5764,6 +5914,96 @@ function SubscriptionSettings({ salonId }: { salonId: string }) {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={showPauseModal} onOpenChange={setShowPauseModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pause Subscription</DialogTitle>
+            <DialogDescription>
+              Your subscription will be paused and you can resume it anytime within 90 days.
+              During the pause, you'll retain access to your current features but won't be charged.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-center gap-2 text-amber-600 bg-amber-50 p-3 rounded-lg">
+              <AlertCircle className="h-5 w-5" />
+              <span className="text-sm">Maximum pause duration is 90 days. After that, your subscription will auto-resume.</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPauseModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => pauseMutation.mutate()}
+              disabled={pauseMutation.isPending}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {pauseMutation.isPending ? 'Pausing...' : 'Pause Subscription'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Cancel Subscription</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to cancel your subscription? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {refundEstimate && refundEstimate.eligibleForRefund && (
+              <div className="bg-green-50 border border-green-200 p-4 rounded-lg space-y-2">
+                <div className="flex items-center gap-2 text-green-700 font-medium">
+                  <CheckCircle className="h-5 w-5" />
+                  <span>You're eligible for a refund!</span>
+                </div>
+                <div className="text-sm text-green-600 space-y-1">
+                  <p>Original amount: ₹{(refundEstimate.paidAmountPaisa / 100).toFixed(2)}</p>
+                  <p>Days remaining: {refundEstimate.daysRemaining} of {refundEstimate.totalDays}</p>
+                  <p className="font-semibold text-lg">Refund amount: ₹{(refundEstimate.refundAmountPaisa / 100).toFixed(2)}</p>
+                  {refundEstimate.isWithinFullRefundWindow && (
+                    <p className="text-xs">Full refund (within 7-day window)</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {refundEstimate && !refundEstimate.eligibleForRefund && (
+              <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                <p className="text-sm text-gray-600">{refundEstimate.reason || 'No refund available for this subscription.'}</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="cancelReason">Reason for cancellation (optional)</Label>
+              <Textarea
+                id="cancelReason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Help us improve by sharing why you're leaving..."
+                rows={3}
+              />
+            </div>
+            <div className="flex items-center gap-2 text-gray-600 bg-gray-50 p-3 rounded-lg">
+              <AlertCircle className="h-5 w-5" />
+              <span className="text-sm">You'll have a 3-day grace period to retain access after cancellation.</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancelModal(false)}>
+              Keep Subscription
+            </Button>
+            <Button
+              onClick={() => cancelMutation.mutate()}
+              disabled={cancelMutation.isPending}
+              variant="destructive"
+            >
+              {cancelMutation.isPending ? 'Cancelling...' : 'Cancel Subscription'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Star, Clock, Phone, Filter, ArrowLeft, Calendar, Heart, Share2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MapPin, Star, Clock, Phone, Filter, ArrowLeft, Calendar, Heart, Share2, ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -922,10 +922,11 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
   }
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
-      <div className="flex flex-1 overflow-hidden min-w-0">
-        {/* Sidebar - Responsive: Full width on mobile, max 60% on desktop for 2-column grid */}
-        <div className="w-full md:w-[55%] lg:w-[60%] bg-white md:border-r border-gray-200 flex flex-col flex-shrink-0">
+    <div className="h-full bg-gray-50 overflow-hidden">
+      {/* CSS Grid layout - fixed map + scrollable sidebar like fresha.com */}
+      <div className="grid grid-cols-1 md:grid-cols-[60%_40%] h-full">
+        {/* Sidebar - Scrollable salon cards list */}
+        <div className="bg-white md:border-r border-gray-200 flex flex-col h-full overflow-hidden">
           {/* Shared Header Component */}
           <SearchResultsHeader
             salonCount={salons.length}
@@ -1107,42 +1108,55 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                           {formatDistance(salon.distance_km)} • {salon.city}
                         </p>
 
-                        {/* Services with Time Slots */}
+                        {/* Services with Time Slots - Fresha.com Style */}
                         {salon.services && salon.services.length > 0 && (
-                          <div className="space-y-3">
-                            {salon.services.slice(0, 2).map((service, idx) => {
+                          <div className="space-y-0">
+                            {salon.services.slice(0, 3).map((service, idx) => {
                               const salonTimeSlots = timeSlotsData[salon.id];
                               const displaySlots = salonTimeSlots?.availableSlots?.slice(0, 3) || [];
+                              const hasMoreSlots = (salonTimeSlots?.availableSlots?.length || 0) > 3;
                               
                               return (
-                                <div key={idx} className="border-t border-gray-100 pt-2">
-                                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                                    <div>
+                                <div key={idx} className="border-t border-gray-100 py-3 first:border-t-0 first:pt-0">
+                                  {/* Service Header Row */}
+                                  <div className="flex items-start justify-between gap-2 mb-2">
+                                    <div className="flex-1 min-w-0">
                                       <p className="text-sm font-medium text-gray-900 line-clamp-1">{service.name}</p>
                                       <p className="text-xs text-gray-500">{service.durationMinutes} mins</p>
                                     </div>
-                                    <p className="text-sm font-semibold text-gray-900 flex-shrink-0">
-                                      from ₹{service.price.toLocaleString()}
+                                    <p className="text-sm font-semibold text-gray-900 flex-shrink-0 whitespace-nowrap">
+                                      {service.price > 0 ? `from ₹${service.price.toLocaleString()}` : 'Price on request'}
                                     </p>
                                   </div>
                                   
-                                  {/* Time Slots */}
-                                  {displaySlots.length > 0 && idx === 0 && (
-                                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                  {/* Time Slots Row - Fresha Style */}
+                                  {displaySlots.length > 0 && (
+                                    <div className="flex items-center gap-2 mt-2">
                                       {displaySlots.map((slot) => (
                                         <button
                                           key={slot.id}
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            handleSalonClick(salon);
+                                            // Navigate to salon with pre-selected service and time
+                                            window.location.href = `/salon/${salon.id}?service=${encodeURIComponent(service.name)}&time=${encodeURIComponent(slot.time)}`;
                                           }}
-                                          className="px-2.5 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-full border border-purple-200 transition-colors"
+                                          className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-md border border-gray-200 hover:border-gray-300 transition-all duration-150"
                                         >
                                           {slot.time}
                                         </button>
                                       ))}
-                                      {(salonTimeSlots?.availableSlots?.length || 0) > 3 && (
-                                        <span className="text-xs text-gray-400">•••</span>
+                                      {/* More options menu */}
+                                      {hasMoreSlots && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSalonClick(salon);
+                                          }}
+                                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                                          title="More time slots"
+                                        >
+                                          <MoreVertical className="w-4 h-4" />
+                                        </button>
                                       )}
                                     </div>
                                   )}
@@ -1150,11 +1164,11 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
                               );
                             })}
                             
-                            {salon.services.length > 2 && (
+                            {salon.services.length > 3 && (
                               <a 
                                 href={`/salon/${salon.id}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="inline-block text-xs font-medium text-purple-600 hover:text-purple-700 hover:underline pt-1"
+                                className="inline-block text-xs font-medium text-purple-600 hover:text-purple-700 hover:underline pt-2 border-t border-gray-100 w-full"
                               >
                                 See all {salon.services.length} services
                               </a>
@@ -1171,8 +1185,8 @@ const SalonMapView: React.FC<SalonMapViewProps> = ({
           </ScrollArea>
         </div>
 
-        {/* Map View */}
-        <div className="flex-1 h-full relative min-w-0">
+        {/* Map View - Fixed in viewport, doesn't scroll (fresha.com style) */}
+        <div className="hidden md:block h-full sticky top-0 overflow-hidden">
           <ErrorBoundary
             fallback={
               <div className="h-full flex items-center justify-center bg-gray-50">

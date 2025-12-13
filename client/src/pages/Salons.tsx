@@ -149,8 +149,9 @@ export default function Salons() {
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-rose-50">
       <main>
         {showMapView ? (
-          <div className="min-h-screen">
-            <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-violet-200/50 shadow-lg overflow-visible">
+          <div className="h-screen flex flex-col overflow-hidden">
+            {/* Search bar - fixed height */}
+            <div className="flex-shrink-0 z-50 bg-white/95 backdrop-blur-md border-b border-violet-200/50 shadow-lg overflow-visible">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 overflow-visible">
                 <FreshaSearchBar
                   onSearch={(params) => {
@@ -174,9 +175,11 @@ export default function Salons() {
               </div>
             </div>
             
-            <SalonMapView
-              searchParams={searchParams}
-              onBackToSearch={() => {
+            {/* Map view fills remaining height */}
+            <div className="flex-1 overflow-hidden">
+              <SalonMapView
+                searchParams={searchParams}
+                onBackToSearch={() => {
                 setShowMapView(false);
                 setIsSearchActive(false);
                 setSearchParams({});
@@ -186,7 +189,8 @@ export default function Salons() {
               }}
               searchLocationName={searchLocationName}
               onSalonCountChange={setFilteredSalonCount}
-            />
+              />
+            </div>
           </div>
         ) : (
           <>

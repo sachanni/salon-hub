@@ -125,8 +125,25 @@ export default function ProductAnalytics() {
     );
   }
 
+  // Show loading while checking subscription status
+  if (featureAccess.isLoading) {
+    return (
+      <div className="min-h-screen bg-background p-4 md:p-6 lg:p-8">
+        <div className="max-w-7xl mx-auto space-y-6">
+          <Skeleton className="h-10 w-64" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-32" />
+            ))}
+          </div>
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </div>
+    );
+  }
+
   // Premium feature gating - show upgrade prompt for non-premium users
-  if (!featureAccess.isLoading && !featureAccess.canAccessAdvancedAnalytics) {
+  if (!featureAccess.canAccessAdvancedAnalytics) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="max-w-lg w-full border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
