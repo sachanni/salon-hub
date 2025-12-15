@@ -11,14 +11,21 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
-import { bookingAPI, depositAPI, DepositCheckResult, giftCardAPI } from '../services/api';
+import { bookingAPI, depositAPI, DepositCheckResult, giftCardAPI, membershipAPI, MembershipBenefitsResponse } from '../services/api';
 import { SelectedService } from '../types/navigation';
 import { DepositInfoCard } from '../components/DepositInfoCard';
 import { CancellationPolicyModal } from '../components/CancellationPolicyModal';
 import BookingNotesInput from '../components/BookingNotesInput';
 
 type PaymentMethod = 'pay_now' | 'pay_at_salon' | 'pay_deposit';
+
+interface CustomerInfo {
+  name: string;
+  email: string;
+  phone: string;
+}
 
 interface AppliedGiftCard {
   id: string;
@@ -66,10 +73,48 @@ export default function PaymentScreen() {
   const [appliedGiftCard, setAppliedGiftCard] = useState<AppliedGiftCard | null>(null);
   const [giftCardError, setGiftCardError] = useState<string | null>(null);
   const [bookingNotes, setBookingNotes] = useState('');
+  const [membershipBenefits, setMembershipBenefits] = useState<MembershipBenefitsResponse | null>(null);
+  const [membershipLoading, setMembershipLoading] = useState(true);
+  const [customerInfo, setCustomerInfo] = useState<CustomerInfo>({ name: 'Guest', email: '', phone: '' });
 
   useEffect(() => {
     checkDepositRequirements();
+    checkMembershipBenefits();
+    loadCustomerInfo();
   }, []);
+
+  const loadCustomerInfo = async () => {
+    try {
+      const authData = await AsyncStorage.getItem('authData');
+      if (authData) {
+        const parsed = JSON.parse(authData);
+        const firstName = parsed.user?.firstName || '';
+        const lastName = parsed.user?.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim() || 'Guest';
+        setCustomerInfo({
+          name: fullName,
+          email: parsed.user?.email || '',
+          phone: parsed.user?.phoneNumber || '',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading customer info:', error);
+    }
+  };
+
+  const checkMembershipBenefits = async () => {
+    try {
+      setMembershipLoading(true);
+      const response = await membershipAPI.calculateBenefits(salonId, selectedServices.map(s => s.id));
+      if (response.success && response.benefits) {
+        setMembershipBenefits(response.benefits);
+      }
+    } catch (error) {
+      console.log('Membership benefits not available');
+    } finally {
+      setMembershipLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (appliedGiftCard) {
@@ -112,9 +157,16 @@ export default function PaymentScreen() {
   const packageSavings = isPackageBooking && packageData 
     ? packageData.regularPriceInPaisa - packageData.packagePriceInPaisa 
     : 0;
+  const hasMembershipBenefits = membershipBenefits?.hasActiveMembership && !membershipLoading;
+  const membershipDiscount = hasMembershipBenefits ? (membershipBenefits.savings || 0) : 0;
   const discount = isPackageBooking ? 0 : Math.floor(subtotal * 0.05);
-  const gst = Math.floor((subtotal - discount) * 0.18);
-  const total = subtotal - discount + gst;
+  const baseForGst = hasMembershipBenefits 
+    ? membershipBenefits.discountedTotal 
+    : (subtotal - discount);
+  const gst = Math.floor(baseForGst * 0.18);
+  const total = hasMembershipBenefits 
+    ? (membershipBenefits.discountedTotal + gst)
+    : (subtotal - discount + gst);
   const onlineDiscount = selectedPaymentMethod === 'pay_now' ? Math.floor(total * 0.05) : 0;
   const giftCardDiscount = appliedGiftCard?.amountToApply || 0;
   const finalTotal = Math.max(0, total - onlineDiscount - giftCardDiscount);
@@ -186,15 +238,20 @@ export default function PaymentScreen() {
       return;
     }
 
+    if (membershipLoading) {
+      Alert.alert('Please Wait', 'Calculating membership benefits...');
+      return;
+    }
+
     try {
       setLoading(true);
 
       const bookingData = {
         salonId,
         serviceIds: selectedServices.map(s => s.id),
-        customerName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Guest',
-        customerEmail: user.email || 'guest@salonhub.com',
-        customerPhone: user.phone || '+91-0000000000',
+        customerName: customerInfo.name || 'Guest',
+        customerEmail: customerInfo.email || 'guest@salonhub.com',
+        customerPhone: customerInfo.phone || '+91-0000000000',
         bookingDate,
         bookingTime,
         paymentMethod: selectedPaymentMethod,
@@ -206,6 +263,8 @@ export default function PaymentScreen() {
         isPackageBooking: isPackageBooking || undefined,
         totalPrice: isPackageBooking && packageData ? packageData.packagePriceInPaisa : undefined,
         totalDuration: isPackageBooking && packageData ? packageData.totalDurationMinutes : undefined,
+        membershipId: hasMembershipBenefits ? membershipBenefits.membershipId : undefined,
+        membershipDiscountPaisa: hasMembershipBenefits ? membershipDiscount : undefined,
       };
 
       const response = await bookingAPI.createBooking(bookingData);
@@ -306,6 +365,17 @@ export default function PaymentScreen() {
             <Text style={styles.priceLabel}>Service Discount</Text>
             <Text style={styles.priceDiscount}>-{formatPrice(discount)}</Text>
           </View>
+          {hasMembershipBenefits && membershipDiscount > 0 && (
+            <View style={styles.priceRow}>
+              <View style={styles.membershipDiscountLabel}>
+                <Ionicons name="ribbon" size={14} color="#F59E0B" />
+                <Text style={styles.priceLabelMembership}>
+                  Membership ({membershipBenefits.discountPercentage}% off)
+                </Text>
+              </View>
+              <Text style={styles.priceDiscount}>-{formatPrice(membershipDiscount)}</Text>
+            </View>
+          )}
           <View style={styles.priceRow}>
             <Text style={styles.priceLabel}>GST (18%)</Text>
             <Text style={styles.priceValue}>{formatPrice(gst)}</Text>
@@ -769,6 +839,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#10B981',
   },
+  membershipDiscountLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  priceLabelMembership: {
+    fontSize: 14,
+    color: '#F59E0B',
+    fontWeight: '500',
+  },
   priceDivider: {
     height: 1,
     backgroundColor: '#E5E7EB',
@@ -942,7 +1022,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    background: 'linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)',
     backgroundColor: '#8B5CF6',
     alignItems: 'center',
     justifyContent: 'center',

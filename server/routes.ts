@@ -9550,7 +9550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let discountInPaisa = 0;
       let finalAmountInPaisa = serverTotalPrice;
       let offerSnapshot = null;
-      let userId = (req as any).user?.id || "guest";
+      let userId: string | null = (req as any).user?.id || null;
 
       if (offerId) {
         // Get offer details
@@ -9638,6 +9638,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
+      // Check if user exists, create guest account if not
+      // For guest bookings (isGuest: true), always look up/create based on email, ignoring session
+      // For authenticated bookings, use the session user
+      let createdUserId: string | null = null;
+      let tempPasswordForEmail: string | null = null;
+
+      if (isGuest || !(req as any).session?.userId) {
+        // Guest booking: look up or create user by email (case-insensitive)
+        const existingUser = await storage.getUserByEmail(customerEmail.toLowerCase().trim());
+        if (existingUser) {
+          createdUserId = existingUser.id;
+        } else {
+          // Create new guest user account
+          const bcrypt = await import("bcryptjs");
+          tempPasswordForEmail = crypto.randomBytes(8).toString('hex');
+          const hashedPassword = await bcrypt.default.hash(tempPasswordForEmail, 10);
+          
+          const newUser = await storage.createUser({
+            email: customerEmail.toLowerCase().trim(),
+            password: hashedPassword,
+            firstName: customerName?.split(' ')[0] || '',
+            lastName: customerName?.split(' ').slice(1).join(' ') || '',
+            phone: customerPhone || null,
+            emailVerified: 0,
+            phoneVerified: 0,
+            isActive: 1,
+          });
+          
+          let customerRole = await storage.getRoleByName("customer");
+          if (!customerRole) {
+            customerRole = await storage.createRole({ name: "customer", description: "Customer" });
+          }
+          await storage.assignUserRole(newUser.id, customerRole.id);
+          
+          createdUserId = newUser.id;
+          console.log(`✅ Created guest account for email ending in ...${customerEmail.slice(-10)}`);
+        }
+      } else {
+        // Authenticated booking: use the session user
+        createdUserId = (req as any).session?.userId;
+      }
+
+      // Update userId for offer tracking if we have a user (either existing or newly created)
+      if (createdUserId) {
+        userId = createdUserId;
+      }
+
       // Create booking record
       // Note: Currently storing primary service only. Multiple services stored in notes.
       // TODO: Create booking_services join table for proper multi-service support
@@ -9664,11 +9711,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           serviceIds.length > 1
             ? `Multiple services: ${services.map((s) => s!.name).join(", ")}`
             : null,
-        guestSessionId: isGuest ? bookingId : null,
+        guestSessionId: isGuest && !createdUserId ? bookingId : null,
+        userId: createdUserId || null,
       });
 
       // Track offer usage if offer was applied
-      if (offerId && userId !== "guest" && discountInPaisa > 0) {
+      if (offerId && userId && discountInPaisa > 0) {
         // Get current usage count to determine usage number
         const eligibility = await storage.getUserOfferEligibility(
           userId,
@@ -9727,6 +9775,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Don't fail the booking if notification fails
       }
 
+      // Send welcome email if new account was created
+      if (tempPasswordForEmail && customerEmail) {
+        try {
+          const { sendGuestWelcomeEmail } = await import("./communicationService");
+          await sendGuestWelcomeEmail(salonId, customerEmail, customerName || 'Guest', tempPasswordForEmail);
+          console.log(`✅ Welcome email sent to new guest account`);
+        } catch (welcomeError) {
+          console.error("Failed to send welcome email:", welcomeError);
+          // Don't fail the booking if welcome email fails
+        }
+      }
+
       res.json({
         success: true,
         bookingId: booking.id,
@@ -9740,6 +9800,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error creating booking:", error);
       res.status(500).json({ error: "Failed to create booking" });
+    }
+  });
+
+  // PUBLIC: Get booking confirmation details (for confirmation page - no auth required)
+  // Note: This endpoint intentionally limits exposed data to prevent PII leakage
+  app.get("/api/bookings/:bookingId/confirmation", async (req, res) => {
+    try {
+      const { bookingId } = req.params;
+
+      const booking = await storage.getBooking(bookingId);
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      // Get salon details
+      const salon = await storage.getSalon(booking.salonId);
+      
+      // Get service details  
+      const service = await storage.getService(booking.serviceId);
+      
+      // Get staff details if assigned
+      let staff = null;
+      if (booking.staffId) {
+        staff = await storage.getStaff(booking.staffId);
+      }
+
+      // Mask email for privacy (show only first 2 chars + domain)
+      const maskEmail = (email: string | null) => {
+        if (!email) return null;
+        const [local, domain] = email.split('@');
+        if (!domain) return null;
+        const masked = local.slice(0, 2) + '***';
+        return `${masked}@${domain}`;
+      };
+
+      // Return booking confirmation with LIMITED/MASKED data for security
+      // Only expose non-sensitive booking details to prevent PII leakage
+      res.json({
+        id: booking.id,
+        salonId: booking.salonId,
+        serviceId: booking.serviceId,
+        customerName: booking.customerName ? booking.customerName.split(' ')[0] : null, // Only first name
+        customerEmail: maskEmail(booking.customerEmail), // Masked email
+        customerPhone: null, // Never expose phone in public endpoint
+        bookingDate: booking.bookingDate,
+        bookingTime: booking.bookingTime,
+        status: booking.status,
+        totalAmountPaisa: booking.totalAmountPaisa,
+        discountInPaisa: booking.discountInPaisa,
+        finalAmountPaisa: booking.finalAmountPaisa,
+        notes: null, // Don't expose notes publicly
+        salon: salon ? {
+          name: salon.businessName || salon.name,
+          address: salon.address,
+          city: salon.city,
+        } : null,
+        service: service ? {
+          name: service.name,
+          durationMinutes: service.durationMinutes,
+        } : null,
+        staff: staff ? {
+          name: staff.name,
+        } : null,
+      });
+    } catch (error) {
+      console.error("Error fetching booking confirmation:", error);
+      res.status(500).json({ error: "Failed to fetch booking details" });
     }
   });
 

@@ -700,6 +700,11 @@ export default function ProfileScreen() {
                 <Text style={styles.settingText}>My Wallet</Text>
                 <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
               </TouchableOpacity>
+              <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push('/my-memberships' as any)}>
+                <Ionicons name="ribbon" size={20} color="#F59E0B" />
+                <Text style={styles.settingText}>My Memberships</Text>
+                <Ionicons name="chevron-forward" size={20} color="#D1D5DB" />
+              </TouchableOpacity>
               <TouchableOpacity style={[styles.settingItem, styles.settingItemBorder]} onPress={() => router.push('/notifications' as any)}>
                 <Ionicons name="notifications-outline" size={20} color="#F59E0B" />
                 <Text style={styles.settingText}>Notifications</Text>

@@ -41,6 +41,7 @@ import CustomerOffers from "@/pages/CustomerOffers";
 import AllOffersPage from "@/pages/AllOffersPage";
 import SalonProfile from "@/pages/SalonProfile";
 import SalonBookingPage from "@/pages/SalonBookingPage";
+import BookingConfirmation from "@/pages/BookingConfirmation";
 import ServicesSelection from "@/pages/ServicesSelection";
 import BookingPage from "@/pages/BookingPage";
 import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
@@ -177,6 +178,9 @@ function Router() {
         <Route path="/wishlist" component={Wishlist} />
         
         <Route path="/salon/:salonId/book" component={SalonBookingPage} />
+        <Route path="/booking/confirmation/:bookingId">
+          {(params) => <BookingConfirmation key={params.bookingId} />}
+        </Route>
         <Route path="/salon/:salonId/gift-cards" component={GiftCardsPage} />
         <Route path="/salon/:salonId">
           {(params) => <SalonProfile salonId={params.salonId!} />}

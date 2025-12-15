@@ -99,6 +99,7 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
 
     socket.on('conversation:join', async (conversationId: string) => {
       try {
+        // Check if user is a participant
         const participant = await db.query.chatParticipants.findFirst({
           where: and(
             eq(chatParticipants.conversationId, conversationId),
@@ -109,6 +110,49 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
         if (participant) {
           socket.join(`conversation:${conversationId}`);
           console.log(`User ${userId} joined conversation ${conversationId}`);
+          return;
+        }
+
+        // Fallback: Check if user is the salon owner for this conversation
+        const conversation = await db.query.chatConversations.findFirst({
+          where: eq(chatConversations.id, conversationId)
+        });
+
+        if (conversation) {
+          const salon = await db.query.salons.findFirst({
+            where: eq(salons.id, conversation.salonId)
+          });
+
+          if (salon && salon.ownerId === userId) {
+            // Add owner as participant for future joins
+            await db.insert(chatParticipants).values({
+              conversationId,
+              userId,
+              role: 'staff'
+            }).onConflictDoNothing();
+            
+            socket.join(`conversation:${conversationId}`);
+            console.log(`User ${userId} (salon owner) joined conversation ${conversationId}`);
+            return;
+          }
+
+          // Also check if user is staff of the salon
+          const userStaff = await db.query.staff.findFirst({
+            where: and(eq(staff.userId, userId), eq(staff.salonId, conversation.salonId))
+          });
+
+          if (userStaff) {
+            // Add staff as participant for future joins
+            await db.insert(chatParticipants).values({
+              conversationId,
+              userId,
+              role: 'staff',
+              staffId: userStaff.id
+            }).onConflictDoNothing();
+
+            socket.join(`conversation:${conversationId}`);
+            console.log(`User ${userId} (staff) joined conversation ${conversationId}`);
+          }
         }
       } catch (error) {
         console.error('Error joining conversation:', error);
@@ -133,16 +177,59 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
       try {
         const { conversationId, body, messageType = 'text', tempId } = data;
 
-        const participant = await db.query.chatParticipants.findFirst({
+        let participant = await db.query.chatParticipants.findFirst({
           where: and(
             eq(chatParticipants.conversationId, conversationId),
             eq(chatParticipants.userId, userId)
           )
         });
 
-        if (!participant) {
-          socket.emit('message:error', { tempId, error: 'Not a participant' });
-          return;
+        let senderRole: 'customer' | 'staff' = 'customer';
+
+        if (participant) {
+          senderRole = participant.role as 'customer' | 'staff';
+        } else {
+          // Fallback: Check if user is salon owner or staff
+          const conversation = await db.query.chatConversations.findFirst({
+            where: eq(chatConversations.id, conversationId)
+          });
+
+          if (!conversation) {
+            socket.emit('message:error', { tempId, error: 'Conversation not found' });
+            return;
+          }
+
+          const salon = await db.query.salons.findFirst({
+            where: eq(salons.id, conversation.salonId)
+          });
+
+          if (salon && salon.ownerId === userId) {
+            // Add owner as participant
+            await db.insert(chatParticipants).values({
+              conversationId,
+              userId,
+              role: 'staff'
+            }).onConflictDoNothing();
+            senderRole = 'staff';
+          } else {
+            const userStaff = await db.query.staff.findFirst({
+              where: and(eq(staff.userId, userId), eq(staff.salonId, conversation.salonId))
+            });
+
+            if (userStaff) {
+              // Add staff as participant
+              await db.insert(chatParticipants).values({
+                conversationId,
+                userId,
+                role: 'staff',
+                staffId: userStaff.id
+              }).onConflictDoNothing();
+              senderRole = 'staff';
+            } else {
+              socket.emit('message:error', { tempId, error: 'Not a participant' });
+              return;
+            }
+          }
         }
 
         const user = await db.query.users.findFirst({
@@ -160,7 +247,7 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
         const [message] = await db.insert(chatMessages).values({
           conversationId,
           senderId: userId,
-          senderRole: participant.role,
+          senderRole,
           senderName,
           senderAvatar: user?.profileImageUrl,
           messageType,
@@ -179,7 +266,7 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
             lastMessageAt: new Date(),
             lastMessagePreview: preview,
             updatedAt: new Date(),
-            ...(participant.role === 'customer' 
+            ...(senderRole === 'customer' 
               ? { staffUnreadCount: sql`${chatConversations.staffUnreadCount} + 1` }
               : { customerUnreadCount: sql`${chatConversations.customerUnreadCount} + 1` }
             )
@@ -212,14 +299,57 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
       try {
         const { conversationId, messageIds } = data;
 
-        const participant = await db.query.chatParticipants.findFirst({
+        let participant = await db.query.chatParticipants.findFirst({
           where: and(
             eq(chatParticipants.conversationId, conversationId),
             eq(chatParticipants.userId, userId)
           )
         });
 
-        if (!participant) return;
+        let readerRole: 'customer' | 'staff' = 'customer';
+
+        if (participant) {
+          readerRole = participant.role as 'customer' | 'staff';
+        } else {
+          // Fallback: Check if user is salon owner or staff
+          const conversation = await db.query.chatConversations.findFirst({
+            where: eq(chatConversations.id, conversationId)
+          });
+
+          if (!conversation) return;
+
+          const salon = await db.query.salons.findFirst({
+            where: eq(salons.id, conversation.salonId)
+          });
+
+          if (salon && salon.ownerId === userId) {
+            // Add owner as participant
+            await db.insert(chatParticipants).values({
+              conversationId,
+              userId,
+              role: 'staff'
+            }).onConflictDoNothing();
+            readerRole = 'staff';
+          } else {
+            const userStaff = await db.query.staff.findFirst({
+              where: and(eq(staff.userId, userId), eq(staff.salonId, conversation.salonId))
+            });
+
+            if (userStaff) {
+              // Add staff as participant
+              await db.insert(chatParticipants).values({
+                conversationId,
+                userId,
+                role: 'staff',
+                staffId: userStaff.id
+              }).onConflictDoNothing();
+              readerRole = 'staff';
+            } else {
+              // Not a participant and not salon owner/staff
+              return;
+            }
+          }
+        }
 
         await db.update(chatParticipants)
           .set({ lastReadAt: new Date() })
@@ -228,7 +358,7 @@ export function initializeChatSocket(httpServer: HTTPServer): SocketIOServer {
             eq(chatParticipants.userId, userId)
           ));
 
-        if (participant.role === 'customer') {
+        if (readerRole === 'customer') {
           await db.update(chatConversations)
             .set({ customerUnreadCount: 0 })
             .where(eq(chatConversations.id, conversationId));

@@ -1,13 +1,32 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { MessageCircle, Search, MoreVertical, Send, Check, CheckCheck, Clock } from 'lucide-react';
+import { 
+  MessageCircle, Search, MoreVertical, Send, Check, CheckCheck, Clock, 
+  User, Calendar, Phone, Mail, History, Zap, ChevronRight, X,
+  Archive, CheckCircle2, CircleDot, Tag
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel
+} from '@/components/ui/dropdown-menu';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { format, isToday, isYesterday, isSameDay, parseISO } from 'date-fns';
 
 interface Message {
   id: string;
@@ -28,6 +47,7 @@ interface Conversation {
   salonId: string;
   customerId: string;
   status: string;
+  context?: string;
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
   customerUnreadCount: number;
@@ -36,9 +56,50 @@ interface Conversation {
     id: string;
     firstName: string | null;
     lastName: string | null;
+    email?: string | null;
+    phone?: string | null;
     profileImageUrl: string | null;
   };
 }
+
+interface CustomerContext {
+  customer: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    profileImageUrl: string | null;
+    createdAt: string | null;
+  };
+  bookings: {
+    id: string;
+    date: string;
+    status: string;
+    services: { name: string; price: number }[];
+    totalAmount: number;
+  }[];
+  totalBookings: number;
+  totalSpent: number;
+}
+
+interface QuickReply {
+  id: string;
+  label: string;
+  text: string;
+  category: string;
+}
+
+const DEFAULT_QUICK_REPLIES: QuickReply[] = [
+  { id: '1', label: 'Greeting', text: 'Hello! Thank you for reaching out. How can I help you today?', category: 'General' },
+  { id: '2', label: 'Availability', text: 'Let me check our availability for you. What date and time works best for you?', category: 'Booking' },
+  { id: '3', label: 'Confirmation', text: 'Your appointment is confirmed! We look forward to seeing you.', category: 'Booking' },
+  { id: '4', label: 'Reschedule', text: 'No problem! I can help you reschedule. What new date would you prefer?', category: 'Booking' },
+  { id: '5', label: 'Price Info', text: 'I\'d be happy to share our pricing. Which service are you interested in?', category: 'Services' },
+  { id: '6', label: 'Location', text: 'You can find us at our salon address. Would you like directions?', category: 'General' },
+  { id: '7', label: 'Thanks', text: 'Thank you for choosing us! Please don\'t hesitate to reach out if you have any questions.', category: 'General' },
+  { id: '8', label: 'Running Late', text: 'Thank you for letting us know! We\'ll adjust your appointment time accordingly.', category: 'Booking' },
+];
 
 interface ChatInboxProps {
   salonId: string;
@@ -64,8 +125,12 @@ export function ChatInbox({
   const [isTyping, setIsTyping] = useState(false);
   const [customerTyping, setCustomerTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'resolved'>('all');
   const [chatToken, setChatToken] = useState<string>(authToken || '');
+  const [customerContext, setCustomerContext] = useState<CustomerContext | null>(null);
+  const [showContextPanel, setShowContextPanel] = useState(true);
+  const [quickReplies] = useState<QuickReply[]>(DEFAULT_QUICK_REPLIES);
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
   
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -166,6 +231,7 @@ export function ChatInbox({
       socketRef.current.emit('conversation:join', selectedConversation.id);
       loadMessages(selectedConversation.id);
       markAsRead(selectedConversation.id);
+      loadCustomerContext(selectedConversation.customerId);
     }
     return () => {
       if (selectedConversation && socketRef.current) {
@@ -213,8 +279,25 @@ export function ChatInbox({
     }
   };
 
-  const sendMessage = async () => {
-    if (!inputValue.trim() || !selectedConversation || !socketRef.current) return;
+  const loadCustomerContext = async (customerId: string) => {
+    try {
+      const response = await fetch(`/api/chat/customer-context/${customerId}?salonId=${salonId}`, {
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCustomerContext(data);
+      }
+    } catch (error) {
+      console.error('Error loading customer context:', error);
+      setCustomerContext(null);
+    }
+  };
+
+  const sendMessage = async (messageText?: string) => {
+    const textToSend = messageText || inputValue.trim();
+    if (!textToSend || !selectedConversation || !socketRef.current) return;
 
     const tempId = `temp-${Date.now()}`;
     const tempMessage: Message = {
@@ -225,7 +308,7 @@ export function ChatInbox({
       senderName: userName,
       senderAvatar: null,
       messageType: 'text',
-      body: inputValue.trim(),
+      body: textToSend,
       sentAt: new Date().toISOString(),
       deliveredAt: null,
       tempId
@@ -234,11 +317,12 @@ export function ChatInbox({
     pendingMessagesRef.current.set(tempId, tempMessage);
     setMessages(prev => [...prev, tempMessage]);
     setInputValue('');
+    setShowQuickReplies(false);
     scrollToBottom();
 
     socketRef.current.emit('message:send', {
       conversationId: selectedConversation.id,
-      body: inputValue.trim(),
+      body: textToSend,
       messageType: 'text',
       tempId
     });
@@ -250,16 +334,37 @@ export function ChatInbox({
     try {
       await fetch(`/api/chat/conversations/${conversationId}/read`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
+        credentials: 'include'
       });
+      
+      // Emit socket event to notify the customer that messages have been read
+      if (socketRef.current) {
+        socketRef.current.emit('message:read', { conversationId });
+      }
       
       setConversations(prev => prev.map(c => 
         c.id === conversationId ? { ...c, staffUnreadCount: 0 } : c
       ));
     } catch (error) {
       console.error('Error marking as read:', error);
+    }
+  };
+
+  const updateConversationStatus = async (conversationId: string, status: string) => {
+    try {
+      await fetch(`/api/chat/conversations/${conversationId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status })
+      });
+      
+      loadConversations();
+      if (selectedConversation?.id === conversationId && status !== 'active') {
+        setSelectedConversation(null);
+      }
+    } catch (error) {
+      console.error('Error updating status:', error);
     }
   };
 
@@ -302,6 +407,13 @@ export function ChatInbox({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatDateHeader = (dateString: string) => {
+    const date = parseISO(dateString);
+    if (isToday(date)) return 'Today';
+    if (isYesterday(date)) return 'Yesterday';
+    return format(date, 'MMMM d, yyyy');
+  };
+
   const formatRelativeTime = (dateString: string | null) => {
     if (!dateString) return '';
     
@@ -329,17 +441,52 @@ export function ChatInbox({
     return 'Customer';
   };
 
+  const groupMessagesByDate = (messages: Message[]) => {
+    const groups: { date: string; messages: Message[] }[] = [];
+    let currentGroup: { date: string; messages: Message[] } | null = null;
+
+    messages.forEach(message => {
+      const messageDate = message.sentAt;
+      const dateKey = format(parseISO(messageDate), 'yyyy-MM-dd');
+
+      if (!currentGroup || currentGroup.date !== dateKey) {
+        currentGroup = { date: messageDate, messages: [] };
+        groups.push(currentGroup);
+      }
+      currentGroup.messages.push(message);
+    });
+
+    return groups;
+  };
+
   const filteredConversations = conversations.filter(conv => {
     const matchesSearch = searchQuery
       ? getCustomerName(conv).toLowerCase().includes(searchQuery.toLowerCase())
       : true;
-    const matchesTab = activeTab === 'unread' 
-      ? conv.staffUnreadCount > 0 
-      : true;
+    
+    let matchesTab = true;
+    if (activeTab === 'unread') {
+      matchesTab = conv.staffUnreadCount > 0;
+    } else if (activeTab === 'resolved') {
+      matchesTab = conv.status === 'closed' || conv.status === 'archived';
+    } else {
+      matchesTab = conv.status === 'active';
+    }
+    
     return matchesSearch && matchesTab;
   });
 
   const totalUnread = conversations.reduce((sum, c) => sum + c.staffUnreadCount, 0);
+  const messageGroups = groupMessagesByDate(messages);
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'active': return <CircleDot className="h-3 w-3 text-green-500" />;
+      case 'closed': return <CheckCircle2 className="h-3 w-3 text-blue-500" />;
+      case 'archived': return <Archive className="h-3 w-3 text-gray-500" />;
+      default: return null;
+    }
+  };
 
   return (
     <div className="flex h-[calc(100vh-200px)] min-h-[500px] border rounded-lg overflow-hidden bg-background">
@@ -362,12 +509,13 @@ export function ChatInbox({
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'unread')} className="flex-1 flex flex-col">
-          <TabsList className="mx-4 mt-2">
-            <TabsTrigger value="all" className="flex-1">All</TabsTrigger>
-            <TabsTrigger value="unread" className="flex-1">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'unread' | 'resolved')} className="flex-1 flex flex-col">
+          <TabsList className="mx-4 mt-2 grid grid-cols-3">
+            <TabsTrigger value="all" className="text-xs">Active</TabsTrigger>
+            <TabsTrigger value="unread" className="text-xs">
               Unread {totalUnread > 0 && `(${totalUnread})`}
             </TabsTrigger>
+            <TabsTrigger value="resolved" className="text-xs">Resolved</TabsTrigger>
           </TabsList>
 
           <TabsContent value={activeTab} className="flex-1 m-0">
@@ -401,12 +549,15 @@ export function ChatInbox({
                         </Avatar>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
-                            <span className={cn(
-                              "font-medium truncate",
-                              conv.staffUnreadCount > 0 && "font-semibold"
-                            )}>
-                              {getCustomerName(conv)}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {getStatusIcon(conv.status)}
+                              <span className={cn(
+                                "font-medium truncate",
+                                conv.staffUnreadCount > 0 && "font-semibold"
+                              )}>
+                                {getCustomerName(conv)}
+                              </span>
+                            </div>
                             <span className="text-xs text-muted-foreground">
                               {formatRelativeTime(conv.lastMessageAt)}
                             </span>
@@ -449,108 +600,311 @@ export function ChatInbox({
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <h3 className="font-semibold">{getCustomerName(selectedConversation)}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">{getCustomerName(selectedConversation)}</h3>
+                    <Badge variant="outline" className="text-xs">
+                      {selectedConversation.status}
+                    </Badge>
+                  </div>
                   <p className="text-sm text-muted-foreground">
-                    {customerTyping ? 'Typing...' : isConnected ? 'Online' : 'Offline'}
+                    {customerTyping ? (
+                      <span className="text-primary animate-pulse">Typing...</span>
+                    ) : isConnected ? 'Online' : 'Offline'}
                   </p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon">
-                <MoreVertical className="h-5 w-5" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setShowContextPanel(!showContextPanel)}
+                  className="text-muted-foreground"
+                >
+                  <User className="h-4 w-4 mr-1" />
+                  {showContextPanel ? 'Hide' : 'Show'} Info
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon">
+                      <MoreVertical className="h-5 w-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {selectedConversation.status === 'active' && (
+                      <DropdownMenuItem onClick={() => updateConversationStatus(selectedConversation.id, 'closed')}>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Mark as Resolved
+                      </DropdownMenuItem>
+                    )}
+                    {selectedConversation.status === 'closed' && (
+                      <DropdownMenuItem onClick={() => updateConversationStatus(selectedConversation.id, 'active')}>
+                        <CircleDot className="h-4 w-4 mr-2" />
+                        Reopen Conversation
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={() => updateConversationStatus(selectedConversation.id, 'archived')}>
+                      <Archive className="h-4 w-4 mr-2" />
+                      Archive
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-4">
-                {messages.map((message) => {
-                  const isOwn = message.senderId === userId;
-                  const isSystem = message.messageType === 'system';
-
-                  if (isSystem) {
-                    return (
-                      <div key={message.id} className="flex justify-center my-2">
-                        <span className="text-xs text-muted-foreground italic bg-muted px-3 py-1 rounded-full">
-                          {message.body}
+            <div className="flex-1 flex overflow-hidden">
+              <ScrollArea className="flex-1 p-4">
+                <div className="space-y-4">
+                  {messageGroups.map((group, groupIndex) => (
+                    <div key={groupIndex}>
+                      <div className="flex justify-center my-4">
+                        <span className="text-xs text-muted-foreground bg-muted px-3 py-1 rounded-full">
+                          {formatDateHeader(group.date)}
                         </span>
                       </div>
-                    );
-                  }
+                      
+                      {group.messages.map((message) => {
+                        const isOwn = message.senderId === userId;
+                        const isSystem = message.messageType === 'system';
 
-                  return (
-                    <div
-                      key={message.id}
-                      className={cn(
-                        "flex gap-2",
-                        isOwn ? "justify-end" : "justify-start"
-                      )}
-                    >
-                      {!isOwn && (
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={message.senderAvatar || ''} />
-                          <AvatarFallback>
-                            {message.senderName?.charAt(0) || 'C'}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                      <div
-                        className={cn(
-                          "max-w-[70%] rounded-lg px-4 py-2",
-                          isOwn
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted"
-                        )}
-                      >
-                        <p className="text-sm whitespace-pre-wrap break-words">
-                          {message.body}
-                        </p>
-                        <div className={cn(
-                          "flex items-center gap-1 mt-1",
-                          isOwn ? "justify-end" : "justify-start"
-                        )}>
-                          <span className="text-[10px] opacity-60">
-                            {formatTime(message.sentAt)}
-                          </span>
-                          {isOwn && (
-                            <span className="opacity-60">
-                              {message.id.startsWith('temp-') ? (
-                                <Clock className="h-3 w-3" />
-                              ) : message.deliveredAt ? (
-                                <CheckCheck className="h-3 w-3" />
-                              ) : (
-                                <Check className="h-3 w-3" />
+                        if (isSystem) {
+                          return (
+                            <div key={message.id} className="flex justify-center my-2">
+                              <span className="text-xs text-muted-foreground italic bg-muted px-3 py-1 rounded-full">
+                                {message.body}
+                              </span>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={message.id}
+                            className={cn(
+                              "flex gap-2",
+                              isOwn ? "justify-end" : "justify-start"
+                            )}
+                          >
+                            {!isOwn && (
+                              <Avatar className="h-8 w-8">
+                                <AvatarImage src={message.senderAvatar || ''} />
+                                <AvatarFallback>
+                                  {message.senderName?.charAt(0) || 'C'}
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+                            <div
+                              className={cn(
+                                "max-w-[70%] rounded-lg px-4 py-2",
+                                isOwn
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted"
                               )}
-                            </span>
-                          )}
+                            >
+                              <p className="text-sm whitespace-pre-wrap break-words">
+                                {message.body}
+                              </p>
+                              <div className={cn(
+                                "flex items-center gap-1 mt-1",
+                                isOwn ? "justify-end" : "justify-start"
+                              )}>
+                                <span className="text-[10px] opacity-60">
+                                  {formatTime(message.sentAt)}
+                                </span>
+                                {isOwn && (
+                                  <span className="opacity-60">
+                                    {message.id.startsWith('temp-') ? (
+                                      <Clock className="h-3 w-3" />
+                                    ) : message.deliveredAt ? (
+                                      <CheckCheck className="h-3 w-3" />
+                                    ) : (
+                                      <Check className="h-3 w-3" />
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  
+                  {customerTyping && (
+                    <div className="flex gap-2 items-center">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={selectedConversation.customer?.profileImageUrl || ''} />
+                        <AvatarFallback>
+                          {getCustomerName(selectedConversation).charAt(0)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="bg-muted rounded-lg px-4 py-2">
+                        <div className="flex gap-1">
+                          <span className="w-2 h-2 bg-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                          <span className="w-2 h-2 bg-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                          <span className="w-2 h-2 bg-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-                
-                {customerTyping && (
-                  <div className="flex gap-2 items-center">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={selectedConversation.customer?.profileImageUrl || ''} />
-                      <AvatarFallback>
-                        {getCustomerName(selectedConversation).charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="bg-muted rounded-lg px-4 py-2">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                        <span className="w-2 h-2 bg-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                        <span className="w-2 h-2 bg-foreground/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                  )}
+                  
+                  <div ref={messagesEndRef} />
+                </div>
+              </ScrollArea>
+
+              {showContextPanel && customerContext && (
+                <div className="w-72 border-l bg-muted/30 overflow-y-auto">
+                  <div className="p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-semibold text-sm">Customer Info</h4>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-6 w-6"
+                        onClick={() => setShowContextPanel(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-12 w-12">
+                          <AvatarImage src={customerContext.customer.profileImageUrl || ''} />
+                          <AvatarFallback>
+                            {(customerContext.customer.firstName?.[0] || '') + (customerContext.customer.lastName?.[0] || '')}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium">
+                            {customerContext.customer.firstName} {customerContext.customer.lastName}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Customer since {customerContext.customer.createdAt 
+                              ? format(new Date(customerContext.customer.createdAt), 'MMM yyyy')
+                              : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      <div className="space-y-2">
+                        {customerContext.customer.email && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <Mail className="h-4 w-4 text-muted-foreground" />
+                            <span className="truncate">{customerContext.customer.email}</span>
+                          </div>
+                        )}
+                        {customerContext.customer.phone && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <Phone className="h-4 w-4 text-muted-foreground" />
+                            <span>{customerContext.customer.phone}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <Separator />
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-background rounded-lg p-3 text-center">
+                          <p className="text-2xl font-bold text-primary">{customerContext.totalBookings}</p>
+                          <p className="text-xs text-muted-foreground">Total Visits</p>
+                        </div>
+                        <div className="bg-background rounded-lg p-3 text-center">
+                          <p className="text-2xl font-bold text-primary">₹{customerContext.totalSpent.toLocaleString()}</p>
+                          <p className="text-xs text-muted-foreground">Total Spent</p>
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <History className="h-4 w-4 text-muted-foreground" />
+                          <h5 className="font-medium text-sm">Recent Bookings</h5>
+                        </div>
+                        
+                        {customerContext.bookings.length > 0 ? (
+                          <div className="space-y-2">
+                            {customerContext.bookings.slice(0, 5).map(booking => (
+                              <div key={booking.id} className="bg-background rounded-lg p-3">
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-xs font-medium">
+                                    {format(new Date(booking.date), 'MMM d, yyyy')}
+                                  </span>
+                                  <Badge 
+                                    variant={booking.status === 'completed' ? 'default' : 'secondary'}
+                                    className="text-[10px] h-5"
+                                  >
+                                    {booking.status}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {booking.services.map(s => s.name).join(', ')}
+                                </p>
+                                <p className="text-xs font-medium mt-1">
+                                  ₹{booking.totalAmount.toLocaleString()}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">No booking history</p>
+                        )}
                       </div>
                     </div>
                   </div>
-                )}
-                
-                <div ref={messagesEndRef} />
-              </div>
-            </ScrollArea>
+                </div>
+              )}
+            </div>
 
             <div className="p-4 border-t">
+              {showQuickReplies && (
+                <div className="mb-3 p-3 bg-muted rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">Quick Replies</span>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6"
+                      onClick={() => setShowQuickReplies(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                    {quickReplies.map(reply => (
+                      <Button
+                        key={reply.id}
+                        variant="outline"
+                        size="sm"
+                        className="justify-start text-left h-auto py-2 px-3"
+                        onClick={() => sendMessage(reply.text)}
+                      >
+                        <div>
+                          <p className="font-medium text-xs">{reply.label}</p>
+                          <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">
+                            {reply.text.substring(0, 40)}...
+                          </p>
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowQuickReplies(!showQuickReplies)}
+                  className={cn(showQuickReplies && "bg-primary text-primary-foreground")}
+                  title="Quick Replies"
+                >
+                  <Zap className="h-4 w-4" />
+                </Button>
                 <Input
                   value={inputValue}
                   onChange={handleInputChange}
@@ -560,7 +914,7 @@ export function ChatInbox({
                   disabled={!isConnected}
                 />
                 <Button
-                  onClick={sendMessage}
+                  onClick={() => sendMessage()}
                   size="icon"
                   disabled={!inputValue.trim() || !isConnected}
                 >

@@ -1,9 +1,10 @@
 import type { Express, Response } from "express";
 import { db } from "../db";
-import { bookings, services, salons, staff, salonReviews, users, servicePackages } from "@shared/schema";
+import { bookings, services, salons, staff, salonReviews, users, servicePackages, platformOffers, userOfferUsage } from "@shared/schema";
 import { eq, and, sql, desc, or, gte, lt, asc, inArray } from "drizzle-orm";
 import { authenticateMobileUser } from "../middleware/authMobile";
 import { z } from "zod";
+import { OfferCalculator } from "../offerCalculator";
 
 const cancelBookingSchema = z.object({
   reason: z.string().max(500).optional(),
@@ -33,6 +34,8 @@ const createBookingSchema = z.object({
   isPackageBooking: z.boolean().optional(),
   totalPrice: z.number().optional(),
   totalDuration: z.number().optional(),
+  // Offer/coupon discount fields
+  offerId: z.string().optional(),
 }).refine(
   (data) => data.serviceType !== 'home' || (data.address && data.address.trim().length > 0),
   { message: "Address is required for home service", path: ["address"] }
@@ -186,6 +189,96 @@ export function registerMobileBookingsRoutes(app: Express) {
         }
       }
 
+      // Handle offer/coupon discount
+      const { offerId } = parsed.data;
+      let offerDiscountPaisa = 0;
+      let appliedOffer: { id: string; title: string; discountType: string; discountValue: number } | null = null;
+
+      if (offerId && !isPackageBookingFlag) {
+        // Fetch the offer from database
+        const offer = await db.query.platformOffers.findFirst({
+          where: eq(platformOffers.id, offerId),
+        });
+
+        if (offer) {
+          // Check if offer is active and valid (with null-safety for dates)
+          const now = new Date();
+          const validFrom = offer.validFrom ? new Date(offer.validFrom) : new Date(0);
+          const validUntil = offer.validUntil ? new Date(offer.validUntil) : new Date('2099-12-31');
+          const isDateValid = now >= validFrom && now <= validUntil;
+          const isOfferActive = offer.isActive === 1 && isDateValid;
+
+          // Check usage limit (global limit)
+          const hasUsageRemaining = !offer.usageLimit || (offer.usageCount || 0) < offer.usageLimit;
+
+          // Check salon applicability (offer.salonId null means platform-wide)
+          const isSalonApplicable = !offer.salonId || offer.salonId === salonId || offer.isPlatformWide === 1;
+
+          // Check minimum purchase requirement
+          const meetsMinimum = !offer.minimumPurchase || totalAmountPaisa >= offer.minimumPurchase;
+
+          // Check per-user usage limit if applicable (maxUsagePerUser may not exist on all offers)
+          let userUsageValid = true;
+          const maxPerUser = (offer as any).maxUsagePerUser;
+          if (maxPerUser) {
+            const [userUsageCount] = await db.select({ count: sql<number>`count(*)` })
+              .from(userOfferUsage)
+              .where(and(
+                eq(userOfferUsage.userId, userId),
+                eq(userOfferUsage.offerId, offerId)
+              ));
+            const userUsages = parseInt(String(userUsageCount?.count || 0)) || 0;
+            userUsageValid = userUsages < maxPerUser;
+            if (!userUsageValid) {
+              console.log(`⚠️ User ${userId} exceeded per-user limit for offer ${offerId}`);
+            }
+          }
+
+          if (isOfferActive && hasUsageRemaining && isSalonApplicable && meetsMinimum && userUsageValid) {
+            // Calculate discount using OfferCalculator
+            const offerDetails = {
+              id: offer.id,
+              title: offer.title,
+              description: offer.description,
+              discountType: offer.discountType as 'percentage' | 'fixed',
+              discountValue: offer.discountValue,
+              minimumPurchase: offer.minimumPurchase,
+              maxDiscount: offer.maxDiscount,
+              isPlatformWide: offer.isPlatformWide,
+              salonId: offer.salonId,
+              ownedBySalonId: offer.ownedBySalonId,
+              validFrom: validFrom,
+              validUntil: validUntil,
+              usageLimit: offer.usageLimit,
+              usageCount: offer.usageCount || 0,
+              imageUrl: offer.imageUrl,
+            };
+
+            offerDiscountPaisa = OfferCalculator.calculateDiscount(offerDetails, totalAmountPaisa);
+            
+            if (offerDiscountPaisa > 0) {
+              appliedOffer = {
+                id: offer.id,
+                title: offer.title,
+                discountType: offer.discountType,
+                discountValue: offer.discountValue,
+              };
+              console.log(`🎟️ Mobile offer applied: ${offer.title}, discount ${offerDiscountPaisa} paisa on total ${totalAmountPaisa}`);
+            }
+          } else {
+            console.log(`⚠️ Offer ${offerId} not applicable: active=${isOfferActive}, usage=${hasUsageRemaining}, salon=${isSalonApplicable}, minimum=${meetsMinimum}`);
+          }
+        } else {
+          console.warn(`⚠️ Offer ${offerId} not found`);
+        }
+      }
+
+      // Calculate final amounts with offer discount
+      const originalAmountPaisa = serviceTotalPaisa;
+      const packageDiscountPaisa = isPackageBookingFlag ? serviceTotalPaisa - totalAmountPaisa : 0;
+      const totalDiscountPaisa = packageDiscountPaisa + offerDiscountPaisa;
+      const finalAmountPaisa = totalAmountPaisa - offerDiscountPaisa;
+
       const customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Customer';
       const customerEmail = user.email || '';
       const customerPhone = user.phone || '';
@@ -203,30 +296,102 @@ export function registerMobileBookingsRoutes(app: Express) {
         bookingDate: date,
         bookingTime: time,
         status: 'pending',
-        totalAmountPaisa,
-        originalAmountPaisa: serviceTotalPaisa, // Store original price for reference
-        finalAmountPaisa: totalAmountPaisa,
-        discountAmountPaisa: isPackageBookingFlag ? serviceTotalPaisa - totalAmountPaisa : 0,
+        totalAmountPaisa: finalAmountPaisa,
+        originalAmountPaisa,
+        finalAmountPaisa,
+        discountAmountPaisa: totalDiscountPaisa,
+        offerId: appliedOffer?.id || null,
+        offerTitle: appliedOffer?.title || null,
         notes: bookingNotes,
         customerName,
         customerEmail,
         customerPhone,
       }).returning();
 
+      // Track offer usage if an offer was applied
+      if (appliedOffer && offerDiscountPaisa > 0) {
+        try {
+          // Increment usage count on the offer
+          await db.update(platformOffers)
+            .set({ usageCount: sql`COALESCE(${platformOffers.usageCount}, 0) + 1` })
+            .where(eq(platformOffers.id, appliedOffer.id));
+
+          // Get current usage count for this user and offer
+          const [existingUsage] = await db.select({ count: sql<number>`count(*)` })
+            .from(userOfferUsage)
+            .where(and(
+              eq(userOfferUsage.userId, userId),
+              eq(userOfferUsage.offerId, appliedOffer.id)
+            ));
+          
+          const usageNumber = (parseInt(String(existingUsage?.count || 0)) || 0) + 1;
+
+          // Record offer usage for this user
+          await db.insert(userOfferUsage).values({
+            offerId: appliedOffer.id,
+            userId,
+            bookingId: newBooking.id,
+            discountAppliedInPaisa: offerDiscountPaisa,
+            usageNumber,
+          });
+
+          console.log(`✅ Mobile offer usage tracked: user ${userId}, offer ${appliedOffer.id}, usage #${usageNumber}`);
+        } catch (usageError) {
+          console.error('Failed to track offer usage:', usageError);
+        }
+      }
+
+      // Send booking confirmation notification (email + SMS)
+      try {
+        const { sendBookingConfirmation } = await import("../communicationService");
+        await sendBookingConfirmation(
+          salonId,
+          newBooking.id,
+          customerEmail,
+          customerPhone || undefined,
+          {
+            customer_name: customerName || "Valued Customer",
+            salon_name: salon.name || "Our Salon",
+            service_name: serviceNames,
+            booking_date: date,
+            booking_time: time,
+            staff_name: staffId ? "Your assigned stylist" : "Our Team",
+            total_amount: (finalAmountPaisa / 100).toFixed(0),
+          }
+        );
+        console.log(`✅ Mobile booking confirmation sent for booking ${newBooking.id}`);
+      } catch (notificationError) {
+        console.error("Failed to send mobile booking confirmation:", notificationError);
+        // Don't fail the booking if notification fails
+      }
+
+      const totalSavings = totalDiscountPaisa > 0 ? totalDiscountPaisa / 100 : 0;
+
       res.status(201).json({
         success: true,
-        message: isPackageBookingFlag ? "Package booking created successfully" : "Booking created successfully",
+        message: appliedOffer 
+          ? `Booking created with ${appliedOffer.title} applied!` 
+          : (isPackageBookingFlag ? "Package booking created successfully" : "Booking created successfully"),
         booking: {
           ...newBooking,
           salonName: salon.name,
           serviceName: serviceNames,
           serviceDuration: totalDuration,
-          totalAmount: totalAmountPaisa / 100,
-          originalAmount: serviceTotalPaisa / 100,
-          savings: isPackageBookingFlag ? (serviceTotalPaisa - totalAmountPaisa) / 100 : 0,
+          totalAmount: finalAmountPaisa / 100,
+          originalAmount: originalAmountPaisa / 100,
+          finalAmount: finalAmountPaisa / 100,
+          discountAmount: totalDiscountPaisa / 100,
+          savings: totalSavings,
           serviceCount: selectedServices.length,
           isPackageBooking: isPackageBookingFlag,
           packageName,
+          offerId: appliedOffer?.id || null,
+          offerTitle: appliedOffer?.title || null,
+          appliedOffer: appliedOffer ? {
+            id: appliedOffer.id,
+            title: appliedOffer.title,
+            discountAmount: offerDiscountPaisa / 100,
+          } : null,
         },
       });
     } catch (error) {

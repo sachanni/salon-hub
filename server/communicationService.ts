@@ -648,3 +648,31 @@ export async function sendLowStockAlert(
     variables
   });
 }
+
+export async function sendGuestWelcomeEmail(
+  salonId: string,
+  customerEmail: string,
+  customerName: string,
+  tempPassword: string
+): Promise<SendMessageResponse> {
+  // Sanitize inputs to prevent template injection (encode curly braces as HTML entities)
+  const escapeTemplateChars = (str: string) => str
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;');
+  const safeName = escapeTemplateChars(customerName);
+  const safeEmail = escapeTemplateChars(customerEmail);
+  const safePassword = escapeTemplateChars(tempPassword);
+  
+  return await communicationService.sendMessage({
+    to: customerEmail,
+    channel: 'email',
+    type: 'transactional',
+    salonId,
+    customerId: customerEmail,
+    customContent: {
+      subject: 'Welcome to StudioHub - Your Account is Ready!',
+      body: `Hi ${safeName},\n\nWelcome to StudioHub! An account has been created for you based on your recent booking.\n\nYou can now log in to view and manage all your bookings in one place.\n\nYour Login Credentials:\nEmail: ${safeEmail}\nTemporary Password: ${safePassword}\n\nFor security, please change your password after your first login.\n\nTo log in, visit our website and click "Sign In".\n\nBest regards,\nThe StudioHub Team`
+    },
+    variables: {}
+  });
+}

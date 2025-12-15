@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { MessageCircle, X, Minimize2, Maximize2, Send, ChevronLeft, Volume2, VolumeX } from 'lucide-react';
+import { MessageCircle, X, Minimize2, Send, ChevronLeft, Volume2, VolumeX, Check, CheckCheck, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format, isToday, isYesterday, parseISO } from 'date-fns';
+import { authenticatedFetch, getAccessToken } from '@/lib/auth';
 
 interface Message {
   id: string;
@@ -66,6 +67,9 @@ export function ChatDock({
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [chatToken, setChatToken] = useState<string>('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [customerTyping, setCustomerTyping] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const stored = localStorage.getItem('chatSoundEnabled');
     return stored !== 'false';
@@ -74,6 +78,7 @@ export function ChatDock({
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const totalUnread = conversations.reduce((sum, c) => sum + c.staffUnreadCount, 0);
 
@@ -87,9 +92,7 @@ export function ChatDock({
   useEffect(() => {
     const fetchToken = async () => {
       try {
-        const response = await fetch('/api/chat/token', {
-          credentials: 'include'
-        });
+        const response = await authenticatedFetch('/api/chat/token');
         if (response.ok) {
           const data = await response.json();
           setChatToken(data.token);
@@ -106,9 +109,7 @@ export function ChatDock({
 
     const fetchConversations = async () => {
       try {
-        const response = await fetch(`/api/chat/conversations?role=staff&salonId=${salonId}`, {
-          credentials: 'include'
-        });
+        const response = await authenticatedFetch(`/api/chat/conversations?role=staff&salonId=${salonId}`);
         if (!response.ok) {
           console.error('Failed to fetch conversations:', response.status, response.statusText);
           setIsLoading(false);
@@ -125,7 +126,7 @@ export function ChatDock({
     };
 
     fetchConversations();
-    const interval = setInterval(fetchConversations, 15000);
+    const interval = setInterval(fetchConversations, 30000);
     return () => clearInterval(interval);
   }, [salonId]);
 
@@ -156,10 +157,12 @@ export function ChatDock({
 
     socket.on('connect', () => {
       console.log('ChatDock: Socket connected');
+      setIsConnected(true);
     });
 
     socket.on('disconnect', () => {
       console.log('ChatDock: Socket disconnected');
+      setIsConnected(false);
     });
 
     socket.on('message:new', (message: Message) => {
@@ -194,9 +197,9 @@ export function ChatDock({
         });
         
         if (message.senderRole === 'customer') {
-          fetch(`/api/chat/conversations/${message.conversationId}/read`, {
-            method: 'POST',
-            credentials: 'include'
+          setCustomerTyping(false);
+          authenticatedFetch(`/api/chat/conversations/${message.conversationId}/read`, {
+            method: 'POST'
           }).catch(() => {});
         }
       }
@@ -227,12 +230,18 @@ export function ChatDock({
       ));
     });
 
+    socket.on('typing:update', ({ userId: typingUserId, isTyping: typing }: { userId: string; isTyping: boolean }) => {
+      if (typingUserId !== staffId && typingUserId !== userId) {
+        setCustomerTyping(typing);
+      }
+    });
+
     socketRef.current = socket;
 
     return () => {
       socket.disconnect();
     };
-  }, [chatToken, salonId, staffId]);
+  }, [chatToken, salonId, staffId, userId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -240,9 +249,7 @@ export function ChatDock({
 
   const fetchMessages = async (conversationId: string) => {
     try {
-      const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
-        credentials: 'include'
-      });
+      const response = await authenticatedFetch(`/api/chat/conversations/${conversationId}/messages`);
       if (response.ok) {
         const data = await response.json();
         setMessages(data.messages || []);
@@ -258,6 +265,7 @@ export function ChatDock({
     }
     
     setSelectedConversation(conv);
+    setCustomerTyping(false);
     
     if (socketRef.current) {
       socketRef.current.emit('conversation:join', conv.id);
@@ -266,15 +274,41 @@ export function ChatDock({
     await fetchMessages(conv.id);
     
     try {
-      await fetch(`/api/chat/conversations/${conv.id}/read`, {
-        method: 'POST',
-        credentials: 'include'
+      await authenticatedFetch(`/api/chat/conversations/${conv.id}/read`, {
+        method: 'POST'
       });
       setConversations(prev => prev.map(c => 
         c.id === conv.id ? { ...c, staffUnreadCount: 0 } : c
       ));
     } catch (error) {
       console.error('Failed to mark as read:', error);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+    
+    if (!isTyping && socketRef.current && selectedConversation) {
+      setIsTyping(true);
+      socketRef.current.emit('typing:start', selectedConversation.id);
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      stopTyping();
+    }, 2000);
+  };
+
+  const stopTyping = () => {
+    if (isTyping && socketRef.current && selectedConversation) {
+      setIsTyping(false);
+      socketRef.current.emit('typing:stop', selectedConversation.id);
+    }
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
     }
   };
 
@@ -287,7 +321,7 @@ export function ChatDock({
     const tempMessage: Message = {
       id: tempId,
       conversationId: selectedConversation.id,
-      senderId: staffId || '',
+      senderId: staffId || userId || '',
       senderRole: 'staff',
       senderName: userName || 'Staff',
       senderAvatar: null,
@@ -300,6 +334,7 @@ export function ChatDock({
 
     setMessages(prev => [...prev, tempMessage]);
     setInputValue('');
+    stopTyping();
 
     if (socketRef.current?.connected) {
       socketRef.current.emit('message:send', {
@@ -310,10 +345,9 @@ export function ChatDock({
       });
     } else {
       try {
-        const response = await fetch(`/api/chat/conversations/${selectedConversation.id}/messages`, {
+        const response = await authenticatedFetch(`/api/chat/conversations/${selectedConversation.id}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({ body: messageBody, messageType: 'text' })
         });
 
@@ -339,6 +373,7 @@ export function ChatDock({
     }
     setSelectedConversation(null);
     setMessages([]);
+    setCustomerTyping(false);
   };
 
   const toggleMinimize = () => {
@@ -354,6 +389,33 @@ export function ChatDock({
       handleSendMessage();
     }
   };
+
+  const formatDateHeader = (dateString: string) => {
+    const date = parseISO(dateString);
+    if (isToday(date)) return 'Today';
+    if (isYesterday(date)) return 'Yesterday';
+    return format(date, 'MMM d, yyyy');
+  };
+
+  const groupMessagesByDate = (messages: Message[]) => {
+    const groups: { date: string; messages: Message[] }[] = [];
+    let currentGroup: { date: string; messages: Message[] } | null = null;
+
+    messages.forEach(message => {
+      const messageDate = message.sentAt;
+      const dateKey = format(parseISO(messageDate), 'yyyy-MM-dd');
+
+      if (!currentGroup || format(parseISO(currentGroup.date), 'yyyy-MM-dd') !== dateKey) {
+        currentGroup = { date: messageDate, messages: [] };
+        groups.push(currentGroup);
+      }
+      currentGroup.messages.push(message);
+    });
+
+    return groups;
+  };
+
+  const messageGroups = groupMessagesByDate(messages);
 
   if (isMinimized) {
     return (
@@ -374,7 +436,7 @@ export function ChatDock({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 h-[480px] bg-white rounded-lg shadow-2xl border flex flex-col overflow-hidden">
+    <div className="fixed bottom-4 right-4 z-50 w-80 h-[480px] bg-white dark:bg-slate-900 rounded-lg shadow-2xl border flex flex-col overflow-hidden">
       <div className="flex items-center justify-between p-3 bg-gradient-to-r from-violet-500 to-purple-600 text-white">
         <div className="flex items-center gap-2">
           {selectedConversation && (
@@ -388,12 +450,21 @@ export function ChatDock({
             </Button>
           )}
           <MessageCircle className="h-5 w-5" />
-          <span className="font-semibold">
-            {selectedConversation 
-              ? `${selectedConversation.customer?.firstName || ''} ${selectedConversation.customer?.lastName || ''}`.trim() || 'Customer'
-              : 'Messages'
-            }
-          </span>
+          <div className="flex flex-col">
+            <span className="font-semibold text-sm">
+              {selectedConversation 
+                ? `${selectedConversation.customer?.firstName || ''} ${selectedConversation.customer?.lastName || ''}`.trim() || 'Customer'
+                : 'Messages'
+              }
+            </span>
+            {selectedConversation && (
+              <span className="text-[10px] text-white/70">
+                {customerTyping ? (
+                  <span className="animate-pulse">Typing...</span>
+                ) : isConnected ? 'Online' : 'Offline'}
+              </span>
+            )}
+          </div>
           {!selectedConversation && totalUnread > 0 && (
             <Badge className="bg-white/20 text-white border-0">{totalUnread}</Badge>
           )}
@@ -403,7 +474,10 @@ export function ChatDock({
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-white hover:bg-white/20"
-            onClick={() => setSoundEnabled(!soundEnabled)}
+            onClick={() => {
+              setSoundEnabled(!soundEnabled);
+              localStorage.setItem('chatSoundEnabled', (!soundEnabled).toString());
+            }}
             title={soundEnabled ? 'Mute' : 'Unmute'}
           >
             {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
@@ -442,7 +516,7 @@ export function ChatDock({
               <p className="text-xs text-slate-400 mt-1">Customer messages will appear here</p>
             </div>
           ) : (
-            <div className="divide-y">
+            <div className="divide-y dark:divide-slate-700">
               {conversations.map(conv => {
                 const customerName = conv.customer 
                   ? `${conv.customer.firstName || ''} ${conv.customer.lastName || ''}`.trim() || 'Customer'
@@ -453,8 +527,8 @@ export function ChatDock({
                   <button
                     key={conv.id}
                     className={cn(
-                      "w-full p-3 text-left hover:bg-violet-50 transition-colors flex items-start gap-3",
-                      conv.staffUnreadCount > 0 && "bg-violet-50/50"
+                      "w-full p-3 text-left hover:bg-violet-50 dark:hover:bg-slate-800 transition-colors flex items-start gap-3",
+                      conv.staffUnreadCount > 0 && "bg-violet-50/50 dark:bg-violet-900/20"
                     )}
                     onClick={() => handleSelectConversation(conv)}
                   >
@@ -466,14 +540,14 @@ export function ChatDock({
                         </AvatarFallback>
                       </Avatar>
                       {conv.staffUnreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-red-500 border-2 border-white" />
+                        <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-red-500 border-2 border-white dark:border-slate-900" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span className={cn(
-                          "text-sm truncate",
-                          conv.staffUnreadCount > 0 ? "font-semibold" : "text-slate-700"
+                          "text-sm truncate dark:text-slate-200",
+                          conv.staffUnreadCount > 0 ? "font-semibold" : "text-slate-700 dark:text-slate-300"
                         )}>
                           {customerName}
                         </span>
@@ -485,7 +559,7 @@ export function ChatDock({
                       </div>
                       <p className={cn(
                         "text-xs truncate mt-0.5",
-                        conv.staffUnreadCount > 0 ? "text-slate-600 font-medium" : "text-slate-500"
+                        conv.staffUnreadCount > 0 ? "text-slate-600 dark:text-slate-300 font-medium" : "text-slate-500 dark:text-slate-400"
                       )}>
                         {conv.lastMessagePreview || 'No messages'}
                       </p>
@@ -505,49 +579,104 @@ export function ChatDock({
         <>
           <ScrollArea className="flex-1 p-3">
             <div className="space-y-3">
-              {messages.map(message => (
-                <div
-                  key={message.id}
-                  className={cn(
-                    "flex",
-                    message.senderRole === 'staff' ? "justify-end" : "justify-start"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "max-w-[80%] rounded-lg px-3 py-2",
-                      message.senderRole === 'staff'
-                        ? "bg-violet-500 text-white"
-                        : "bg-slate-100 text-slate-800"
-                    )}
-                  >
-                    <p className="text-sm whitespace-pre-wrap">{message.body}</p>
-                    <p className={cn(
-                      "text-xs mt-1",
-                      message.senderRole === 'staff' ? "text-violet-200" : "text-slate-400"
-                    )}>
-                      {new Date(message.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+              {messageGroups.map((group, groupIndex) => (
+                <div key={groupIndex}>
+                  <div className="flex justify-center my-2">
+                    <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                      {formatDateHeader(group.date)}
+                    </span>
                   </div>
+                  
+                  {group.messages.map(message => {
+                    const isOwn = message.senderRole === 'staff';
+                    const isSystem = message.messageType === 'system';
+
+                    if (isSystem) {
+                      return (
+                        <div key={message.id} className="flex justify-center my-2">
+                          <span className="text-[10px] text-slate-400 italic bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                            {message.body}
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={message.id}
+                        className={cn(
+                          "flex",
+                          isOwn ? "justify-end" : "justify-start"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "max-w-[80%] rounded-lg px-3 py-2",
+                            isOwn
+                              ? "bg-violet-500 text-white"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+                          )}
+                        >
+                          <p className="text-sm whitespace-pre-wrap">{message.body}</p>
+                          <div className={cn(
+                            "flex items-center gap-1 mt-1",
+                            isOwn ? "justify-end" : "justify-start"
+                          )}>
+                            <span className={cn(
+                              "text-[10px]",
+                              isOwn ? "text-violet-200" : "text-slate-400"
+                            )}>
+                              {new Date(message.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {isOwn && (
+                              <span className="text-violet-200">
+                                {message.id.startsWith('temp-') ? (
+                                  <Clock className="h-3 w-3" />
+                                ) : message.deliveredAt ? (
+                                  <CheckCheck className="h-3 w-3" />
+                                ) : (
+                                  <Check className="h-3 w-3" />
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
+
+              {customerTyping && (
+                <div className="flex justify-start">
+                  <div className="bg-slate-100 dark:bg-slate-800 rounded-lg px-3 py-2">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                      <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                      <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
-          <div className="p-3 border-t bg-slate-50">
+          <div className="p-3 border-t dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
             <div className="flex gap-2">
               <Input
                 placeholder="Type a message..."
                 value={inputValue}
-                onChange={e => setInputValue(e.target.value)}
+                onChange={handleInputChange}
                 onKeyPress={handleKeyPress}
                 className="flex-1 text-sm"
+                disabled={!isConnected}
               />
               <Button
                 size="icon"
                 onClick={handleSendMessage}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() || !isConnected}
                 className="bg-violet-500 hover:bg-violet-600"
               >
                 <Send className="h-4 w-4" />

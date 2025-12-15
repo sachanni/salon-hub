@@ -1339,3 +1339,186 @@ export const beautyProfileAPI = {
     return response.data;
   },
 };
+
+export interface MembershipPlanAPI {
+  id: string;
+  salonId: string;
+  name: string;
+  description: string | null;
+  planType: 'discount' | 'credit' | 'packaged';
+  durationMonths: number;
+  priceInPaisa: number;
+  billingType: 'one_time' | 'monthly';
+  monthlyPriceInPaisa: number | null;
+  discountPercentage: number | null;
+  creditAmountInPaisa: number | null;
+  bonusPercentage: number | null;
+  priorityBooking: number;
+  isActive: number;
+  includedServices?: {
+    id: string;
+    serviceId: string;
+    quantityPerMonth: number;
+    isUnlimited: number;
+    serviceName: string;
+    servicePrice: number;
+  }[];
+}
+
+export interface CustomerMembershipAPI {
+  id: string;
+  planId: string;
+  customerId: string;
+  salonId: string;
+  status: 'active' | 'paused' | 'cancelled' | 'expired';
+  startDate: string;
+  endDate: string;
+  pausedAt: string | null;
+  resumedAt: string | null;
+  cancelledAt: string | null;
+  remainingCreditsInPaisa: number | null;
+  createdAt: string;
+  plan: MembershipPlanAPI;
+  salon: {
+    id: string;
+    name: string;
+    imageUrl?: string;
+  };
+  serviceUsage?: {
+    serviceId: string;
+    serviceName: string;
+    usedThisMonth: number;
+    quantityPerMonth: number;
+    isUnlimited: number;
+  }[];
+}
+
+export interface MembershipBenefitsResponse {
+  hasActiveMembership: boolean;
+  membershipId?: string;
+  planType?: string;
+  discountPercentage?: number;
+  originalTotal: number;
+  discountedTotal: number;
+  savings: number;
+  creditApplied?: number;
+  remainingCredits?: number;
+}
+
+export const membershipAPI = {
+  getAvailablePlans: async (salonId: string): Promise<{
+    success: boolean;
+    plans: MembershipPlanAPI[];
+  }> => {
+    try {
+      const response = await api.get(`/api/salons/${salonId}/memberships/available`);
+      return response.data;
+    } catch (error) {
+      console.warn('Membership plans not available');
+      return { success: true, plans: [] };
+    }
+  },
+
+  purchaseMembership: async (planId: string): Promise<{
+    success: boolean;
+    membership?: CustomerMembershipAPI;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post('/api/memberships/purchase', { planId });
+      return response.data;
+    } catch (error: any) {
+      console.error('Error purchasing membership:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to purchase membership';
+      error.message = errorMessage;
+      throw error;
+    }
+  },
+
+  getMyMemberships: async (): Promise<{
+    success: boolean;
+    memberships: CustomerMembershipAPI[];
+  }> => {
+    try {
+      const response = await api.get('/api/my/memberships');
+      return response.data;
+    } catch (error) {
+      console.warn('My memberships not available');
+      return { success: true, memberships: [] };
+    }
+  },
+
+  getMembershipDetails: async (membershipId: string): Promise<{
+    success: boolean;
+    membership?: CustomerMembershipAPI;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.get(`/api/my/memberships/${membershipId}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error getting membership details:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to get membership details';
+      error.message = errorMessage;
+      throw error;
+    }
+  },
+
+  pauseMembership: async (membershipId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post(`/api/my/memberships/${membershipId}/pause`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error pausing membership:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to pause membership';
+      error.message = errorMessage;
+      throw error;
+    }
+  },
+
+  resumeMembership: async (membershipId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post(`/api/my/memberships/${membershipId}/resume`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error resuming membership:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to resume membership';
+      error.message = errorMessage;
+      throw error;
+    }
+  },
+
+  cancelMembership: async (membershipId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post(`/api/my/memberships/${membershipId}/cancel`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error cancelling membership:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to cancel membership';
+      error.message = errorMessage;
+      throw error;
+    }
+  },
+
+  calculateBenefits: async (salonId: string, serviceIds: string[]): Promise<{
+    success: boolean;
+    benefits?: MembershipBenefitsResponse;
+    error?: string;
+  }> => {
+    try {
+      const response = await api.post(`/api/salons/${salonId}/calculate-membership-benefits`, { serviceIds });
+      return response.data;
+    } catch (error) {
+      return { success: false, error: 'Failed to calculate benefits' };
+    }
+  },
+};

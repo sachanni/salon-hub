@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -70,6 +71,7 @@ const planTypeColors = {
 export default function MembershipPlansCard({ salonId, salonName }: MembershipPlansCardProps) {
   const { isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [selectedPlan, setSelectedPlan] = useState<MembershipPlan | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
@@ -129,11 +131,7 @@ export default function MembershipPlansCard({ salonId, salonName }: MembershipPl
 
   const handleSelectPlan = (plan: MembershipPlan) => {
     if (!isAuthenticated) {
-      toast({
-        title: "Login Required",
-        description: "Please log in to purchase a membership",
-        variant: "destructive",
-      });
+      setLocation(`/login?redirect=/salon/${salonId}`);
       return;
     }
     setSelectedPlan(plan);

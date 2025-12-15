@@ -6,7 +6,8 @@ import {
   chatParticipants,
   users,
   salons,
-  staff
+  staff,
+  bookings
 } from '@shared/schema';
 import { eq, and, desc, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -81,6 +82,16 @@ router.post('/conversations', async (req: Request, res: Response) => {
       role: 'customer'
     });
 
+    // Add salon owner as participant first
+    if (salon.ownerId) {
+      await db.insert(chatParticipants).values({
+        conversationId: conversation.id,
+        userId: salon.ownerId,
+        role: 'staff'
+      }).onConflictDoNothing();
+    }
+
+    // Add staff members as participants
     const salonStaff = await db.query.staff.findMany({
       where: eq(staff.salonId, salonId),
       limit: 5
@@ -713,6 +724,99 @@ router.get('/unread-count', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching unread count:', error);
     res.status(500).json({ error: 'Failed to fetch unread count' });
+  }
+});
+
+router.get('/customer-context/:customerId', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const { customerId } = req.params;
+    const salonId = req.query.salonId as string;
+
+    if (!salonId) {
+      return res.status(400).json({ error: 'salonId is required' });
+    }
+
+    const userSalon = await db.query.salons.findFirst({
+      where: eq(salons.id, salonId)
+    });
+    
+    let hasAccess = false;
+    if (userSalon && userSalon.ownerId === userId) {
+      hasAccess = true;
+    } else {
+      const userStaff = await db.query.staff.findFirst({
+        where: and(eq(staff.userId, userId), eq(staff.salonId, salonId))
+      });
+      if (userStaff) hasAccess = true;
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const customer = await db.query.users.findFirst({
+      where: eq(users.id, customerId),
+      columns: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        profileImageUrl: true,
+        createdAt: true
+      }
+    });
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const customerBookings = await db.query.bookings.findMany({
+      where: and(
+        eq(bookings.userId, customerId),
+        eq(bookings.salonId, salonId)
+      ),
+      with: {
+        service: {
+          columns: {
+            name: true,
+            priceInPaisa: true
+          }
+        }
+      },
+      orderBy: [desc(bookings.bookingDate)],
+      limit: 10
+    });
+
+    const bookingData = customerBookings.map(b => ({
+      id: b.id,
+      date: b.bookingDate,
+      status: b.status,
+      services: b.service ? [{ name: b.service.name, price: Number(b.service.priceInPaisa) / 100 }] : [],
+      totalAmount: b.totalAmountPaisa ? Number(b.totalAmountPaisa) / 100 : 0
+    }));
+
+    const totalBookings = customerBookings.length;
+    const totalSpent = customerBookings.reduce((sum, b) => sum + (Number(b.totalAmountPaisa) / 100 || 0), 0);
+
+    res.json({
+      customer: {
+        ...customer,
+        createdAt: customer.createdAt?.toISOString() || null
+      },
+      bookings: bookingData,
+      totalBookings,
+      totalSpent
+    });
+
+  } catch (error) {
+    console.error('Error fetching customer context:', error);
+    res.status(500).json({ error: 'Failed to fetch customer context' });
   }
 });
 

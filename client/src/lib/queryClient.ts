@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { getAccessToken, refreshAccessToken } from "./auth";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok && res.status !== 304) {
@@ -7,17 +8,44 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+function getAuthHeaders(existingHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = getAccessToken();
+  if (token) {
+    return { ...existingHeaders, 'Authorization': `Bearer ${token}` };
+  }
+  return existingHeaders;
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
+  
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: getAuthHeaders(headers),
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
+
+  // If 401, try to refresh token and retry once
+  if (res.status === 401) {
+    try {
+      await refreshAccessToken();
+      const retryRes = await fetch(url, {
+        method,
+        headers: getAuthHeaders(headers),
+        body: data ? JSON.stringify(data) : undefined,
+        credentials: "include",
+      });
+      await throwIfResNotOk(retryRes);
+      return retryRes;
+    } catch (refreshError) {
+      // Refresh failed, return original 401
+    }
+  }
 
   await throwIfResNotOk(res);
   return res;
@@ -62,11 +90,54 @@ export const getQueryFn: <T>(options: {
       const res = await fetch(url, {
         credentials: "include",
         cache: "no-store",
-        headers: {
+        headers: getAuthHeaders({
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache'
-        }
+        })
       });
+
+      // If 401, try to refresh token and retry once
+      if (res.status === 401) {
+        try {
+          await refreshAccessToken();
+          const retryRes = await fetch(url, {
+            credentials: "include",
+            cache: "no-store",
+            headers: getAuthHeaders({
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            })
+          });
+          
+          if (unauthorizedBehavior === "returnNull" && retryRes.status === 401) {
+            return null;
+          }
+          
+          await throwIfResNotOk(retryRes);
+          
+          const retryText = await retryRes.text();
+          if (!retryText || retryText.trim() === '') {
+            return null as unknown as T;
+          }
+          
+          try {
+            const retryJsonResponse = JSON.parse(retryText);
+            if (retryJsonResponse && typeof retryJsonResponse === 'object' && 'success' in retryJsonResponse && 'data' in retryJsonResponse) {
+              return retryJsonResponse.data as T;
+            }
+            return retryJsonResponse as T;
+          } catch (error) {
+            console.error('JSON parsing error after token refresh:', error);
+            throw new Error(`Failed to parse JSON response: ${error}`);
+          }
+        } catch (refreshError) {
+          // Token refresh failed, continue with original 401 handling
+          if (unauthorizedBehavior === "returnNull") {
+            return null;
+          }
+          throw new Error('401: Unauthorized');
+        }
+      }
 
       if (unauthorizedBehavior === "returnNull" && res.status === 401) {
         return null;

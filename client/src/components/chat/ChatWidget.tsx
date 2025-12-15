@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { MessageCircle, X, Minimize2, Maximize2, Send, Paperclip, Smile, MoreVertical } from 'lucide-react';
+import { MessageCircle, X, Minimize2, Maximize2, Send, Paperclip, Smile, MoreVertical, Check, CheckCheck, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,6 +19,7 @@ interface Message {
   attachmentUrl: string | null;
   sentAt: string;
   deliveredAt: string | null;
+  readAt?: string | null;
   tempId?: string;
 }
 
@@ -138,10 +139,12 @@ export function ChatWidget({
 
     socket.on('message:read', ({ userId: readerId }: { userId: string }) => {
       if (readerId !== userId) {
-        setMessages(prev => prev.map(m => ({
-          ...m,
-          deliveredAt: m.deliveredAt || new Date().toISOString()
-        })));
+        setMessages(prev => prev.map(m => {
+          if (m.senderId === userId && !m.readAt) {
+            return { ...m, readAt: new Date().toISOString() };
+          }
+          return m;
+        }));
       }
     });
 
@@ -283,6 +286,11 @@ export function ChatWidget({
           'Authorization': `Bearer ${authToken}`
         }
       });
+      
+      // Emit socket event to notify the other party that messages have been read
+      if (socketRef.current) {
+        socketRef.current.emit('message:read', { conversationId: conversation.id });
+      }
     } catch (error) {
       console.error('Error marking as read:', error);
     }
@@ -483,6 +491,14 @@ export function ChatWidget({
                     {group.messages.map((message, messageIndex) => {
                       const isOwn = message.senderId === userId;
                       const isSystem = message.messageType === 'system';
+                      
+                      const isRead = isOwn && !message.id.startsWith('temp-') && (() => {
+                        const messageTime = new Date(message.sentAt).getTime();
+                        return messages.some(m => 
+                          m.senderId !== userId && 
+                          new Date(m.sentAt).getTime() > messageTime
+                        );
+                      })();
 
                       if (isSystem) {
                         return (
@@ -534,8 +550,14 @@ export function ChatWidget({
                                 {formatTime(message.sentAt)}
                               </span>
                               {isOwn && (
-                                <span className="text-[10px] opacity-60">
-                                  {message.id.startsWith('temp-') ? '...' : message.deliveredAt ? '...' : '..'}
+                                <span className="opacity-70">
+                                  {message.id.startsWith('temp-') ? (
+                                    <Clock className="h-3 w-3" />
+                                  ) : (isRead || message.readAt) ? (
+                                    <CheckCheck className="h-3 w-3 text-blue-400" />
+                                  ) : (
+                                    <Check className="h-3 w-3" />
+                                  )}
                                 </span>
                               )}
                             </div>

@@ -265,7 +265,42 @@ router.get('/my/memberships', authenticateToken, async (req: Request, res: Respo
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const memberships = await membershipService.getCustomerMemberships(userId);
+    const rawMemberships = await membershipService.getCustomerMemberships(userId);
+
+    // Transform to flattened format expected by frontend (web and mobile)
+    const memberships = rawMemberships.map((item: any) => ({
+      id: item.membership.id,
+      planId: item.membership.planId,
+      customerId: item.membership.customerId,
+      salonId: item.membership.salonId,
+      status: item.membership.status,
+      startDate: item.membership.startDate,
+      endDate: item.membership.endDate,
+      creditBalanceInPaisa: item.membership.creditBalanceInPaisa,
+      remainingCreditsInPaisa: item.membership.creditBalanceInPaisa, // alias for mobile app
+      pausedAt: item.membership.pausedAt,
+      resumeDate: item.membership.resumeDate,
+      resumedAt: item.membership.resumedAt,
+      cancelledAt: item.membership.cancelledAt,
+      createdAt: item.membership.createdAt,
+      plan: {
+        id: item.plan?.id,
+        name: item.plan?.name,
+        planType: item.plan?.planType,
+        durationMonths: item.plan?.durationMonths,
+        priceInPaisa: item.plan?.priceInPaisa,
+        discountPercentage: item.plan?.discountPercentage,
+        creditAmountInPaisa: item.plan?.creditAmountInPaisa,
+        bonusPercentage: item.plan?.bonusPercentage,
+        priorityBooking: item.plan?.priorityBooking,
+      },
+      salon: {
+        id: item.salon?.id,
+        name: item.salon?.name,
+        address: item.salon?.address,
+        city: item.salon?.city,
+      },
+    }));
 
     return res.json({
       success: true,

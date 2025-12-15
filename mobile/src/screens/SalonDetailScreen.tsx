@@ -13,18 +13,19 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { salonAPI } from '../services/api';
-import { Salon, Service, StaffMember, SalonReview, ServicePackage } from '../types/navigation';
+import { salonAPI, membershipAPI } from '../services/api';
+import { Salon, Service, StaffMember, SalonReview, ServicePackage, MembershipPlan } from '../types/navigation';
 import { useChat } from '../contexts/ChatContext';
 import { useAuth } from '../contexts/AuthContext';
 import { chatService } from '../services/chatService';
 import DepositBadge from '../components/DepositBadge';
 import PackageCard from '../components/PackageCard';
 import PackageDetailModal from '../components/PackageDetailModal';
+import MembershipPlansCard from '../components/MembershipPlansCard';
 
 const { width } = Dimensions.get('window');
 
-const TABS = ['Photos', 'Packages', 'Services', 'Team', 'Reviews', 'About'] as const;
+const TABS = ['Photos', 'Packages', 'Services', 'Memberships', 'Team', 'Reviews', 'About'] as const;
 type TabType = typeof TABS[number];
 
 export default function SalonDetailScreen() {
@@ -42,6 +43,8 @@ export default function SalonDetailScreen() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [reviews, setReviews] = useState<SalonReview[]>([]);
   const [packages, setPackages] = useState<ServicePackage[]>([]);
+  const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>([]);
+  const [membershipLoading, setMembershipLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('Photos');
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -63,12 +66,14 @@ export default function SalonDetailScreen() {
   const fetchSalonData = async () => {
     try {
       setLoading(true);
-      const [salonData, servicesData, staffData, reviewsData, packagesData] = await Promise.all([
+      setMembershipLoading(true);
+      const [salonData, servicesData, staffData, reviewsData, packagesData, membershipsData] = await Promise.all([
         salonAPI.getSalonById(salonId),
         salonAPI.getSalonServices(salonId),
         salonAPI.getSalonStaff(salonId),
         salonAPI.getSalonReviews(salonId, { limit: 5 }),
         salonAPI.getSalonPackages(salonId).catch(() => ({ packages: [] })),
+        membershipAPI.getAvailablePlans(salonId).catch(() => ({ plans: [] })),
       ]);
       
       setSalon(salonData);
@@ -76,11 +81,13 @@ export default function SalonDetailScreen() {
       setStaff(staffData || []);
       setReviews(reviewsData || []);
       setPackages(packagesData?.packages || []);
+      setMembershipPlans(membershipsData?.plans || []);
     } catch (error) {
       console.error('Error fetching salon data:', error);
       Alert.alert('Error', 'Failed to load salon details. Please try again.');
     } finally {
       setLoading(false);
+      setMembershipLoading(false);
     }
   };
 
@@ -410,6 +417,16 @@ export default function SalonDetailScreen() {
               <Text style={styles.seeAllServicesText}>See all services</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {activeTab === 'Memberships' && (
+          <MembershipPlansCard
+            plans={membershipPlans}
+            salonId={salonId}
+            salonName={salon?.name || ''}
+            loading={membershipLoading}
+            onPurchaseSuccess={fetchSalonData}
+          />
         )}
 
         {activeTab === 'Team' && (

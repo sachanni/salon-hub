@@ -308,8 +308,8 @@ export default function SalonBookingPage() {
         title: "Booking Confirmed! 🎉",
         description: `Your booking has been confirmed${data.discountApplied && data.discountApplied > 0 ? ` with ₹${(data.discountApplied / 100).toFixed(0)} discount!` : '!'}`,
       });
-      // Redirect to customer dashboard or booking confirmation
-      setTimeout(() => setLocation('/customer/dashboard'), 2000);
+      // Redirect to booking confirmation page (works for both guests and authenticated users)
+      setTimeout(() => setLocation(`/booking/confirmation/${data.bookingId}`), 1500);
     },
     onError: (error: any) => {
       toast({

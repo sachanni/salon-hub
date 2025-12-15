@@ -398,13 +398,18 @@ class MembershipService {
           id: membershipPlans.id,
           name: membershipPlans.name,
           planType: membershipPlans.planType,
+          durationMonths: membershipPlans.durationMonths,
+          priceInPaisa: membershipPlans.priceInPaisa,
           discountPercentage: membershipPlans.discountPercentage,
           creditAmountInPaisa: membershipPlans.creditAmountInPaisa,
+          bonusPercentage: membershipPlans.bonusPercentage,
+          priorityBooking: membershipPlans.priorityBooking,
         },
         salon: {
           id: salons.id,
           name: salons.name,
           address: salons.address,
+          city: salons.city,
         },
       })
       .from(customerMemberships)

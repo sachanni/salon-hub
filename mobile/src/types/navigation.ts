@@ -72,6 +72,7 @@ export interface Service {
   imageUrl?: string;
   isActive: number;
   priceType?: string;
+  depositPercentage?: number;
 }
 
 export interface StaffMember {
@@ -132,4 +133,61 @@ export interface PackageService {
   durationMinutes: number;
   imageUrl?: string;
   quantity: number;
+}
+
+export interface MembershipPlan {
+  id: string;
+  salonId: string;
+  name: string;
+  description: string | null;
+  planType: 'discount' | 'credit' | 'packaged';
+  durationMonths: number;
+  priceInPaisa: number;
+  billingType: 'one_time' | 'monthly';
+  monthlyPriceInPaisa: number | null;
+  discountPercentage: number | null;
+  creditAmountInPaisa: number | null;
+  bonusPercentage: number | null;
+  priorityBooking: number;
+  isActive: number;
+  includedServices?: MembershipPlanService[];
+}
+
+export interface MembershipPlanService {
+  id: string;
+  serviceId: string;
+  quantityPerMonth: number;
+  isUnlimited: number;
+  serviceName: string;
+  servicePrice: number;
+}
+
+export interface CustomerMembership {
+  id: string;
+  planId: string;
+  customerId: string;
+  salonId: string;
+  status: 'active' | 'paused' | 'cancelled' | 'expired';
+  startDate: string;
+  endDate: string;
+  pausedAt: string | null;
+  resumedAt: string | null;
+  cancelledAt: string | null;
+  remainingCreditsInPaisa: number | null;
+  createdAt: string;
+  plan: MembershipPlan;
+  salon: {
+    id: string;
+    name: string;
+    imageUrl?: string;
+  };
+  serviceUsage?: MembershipServiceUsage[];
+}
+
+export interface MembershipServiceUsage {
+  serviceId: string;
+  serviceName: string;
+  usedThisMonth: number;
+  quantityPerMonth: number;
+  isUnlimited: number;
 }

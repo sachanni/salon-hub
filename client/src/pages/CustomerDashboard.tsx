@@ -22,11 +22,13 @@ import { Separator } from "@/components/ui/separator";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getAccessToken } from "@/lib/auth";
 import BookingModal from "@/components/BookingModal";
 import { RescheduleModal } from "@/components/RescheduleModal";
 import { LateArrivalButton } from "@/components/customer/LateArrivalButton";
 import MyBeautyProfile from "@/components/customer/MyBeautyProfile";
 import CustomerMemberships from "@/components/customer/CustomerMemberships";
+import { CustomerChatModal } from "@/components/customer/CustomerChatModal";
 import { 
   Calendar, 
   History, 
@@ -264,6 +266,18 @@ export default function CustomerDashboard() {
     staffId?: string;
   } | null>(null);
 
+  // Chat modal state
+  const [chatModalOpen, setChatModalOpen] = useState(false);
+  const [chatSalonInfo, setChatSalonInfo] = useState<{
+    salonId: string;
+    salonName: string;
+    bookingContext?: {
+      bookingId: string;
+      serviceName: string;
+      bookingDate: string;
+    };
+  } | null>(null);
+
   // Payment filtering and search state
   const [paymentsStatusFilter, setPaymentsStatusFilter] = useState("all");
   const [paymentsDateFilter, setPaymentsDateFilter] = useState("all");
@@ -352,7 +366,7 @@ export default function CustomerDashboard() {
   }, [paymentsStatusFilter, paymentsDateFilter, currentPaymentsPage]);
 
   // Enhanced payment history fetching with filtering
-  const { data: paymentHistoryData, isLoading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = useQuery<ServerPaymentRecord[]>({
+  const { data: paymentHistoryData, isLoading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = useQuery<{ payments: ServerPaymentRecord[] }>({
     queryKey: [buildPaymentsQueryString],
     enabled: isAuthenticated && activeTab === "payments",
     staleTime: 30000
@@ -394,7 +408,7 @@ export default function CustomerDashboard() {
   // Map server data to frontend types
   const dashboardStats = customerProfile ? mapDashboardStats(customerProfile) : undefined;
   const upcomingAppointments = upcomingAppointmentsData?.appointments?.map(mapAppointmentData) || [];
-  const allPaymentHistory = paymentHistoryData?.map(mapPaymentData) || [];
+  const allPaymentHistory = paymentHistoryData?.payments?.map(mapPaymentData) || [];
 
   // Filter and search payment history with memoization
   const paymentHistory = useMemo(() => {
@@ -762,12 +776,28 @@ export default function CustomerDashboard() {
   };
 
   const handleContactSalon = (appointment?: Appointment) => {
-    toast({
-      title: "Contact Salon",
-      description: appointment 
-        ? `Contact information for ${appointment.salonName} will be available soon. You can visit their profile page for more details.`
-        : "Salon contact information will be available soon. You can contact them through their profile page.",
-    });
+    const authToken = getAccessToken();
+    console.log('handleContactSalon called', { appointment, user, hasToken: !!authToken });
+    if (appointment) {
+      const salonInfo = {
+        salonId: appointment.salonId,
+        salonName: appointment.salonName,
+        bookingContext: {
+          bookingId: appointment.id,
+          serviceName: appointment.serviceName,
+          bookingDate: formatDate(appointment.date)
+        }
+      };
+      console.log('Setting chatSalonInfo:', salonInfo);
+      setChatSalonInfo(salonInfo);
+      setChatModalOpen(true);
+      console.log('Modal should now be open');
+    } else {
+      toast({
+        title: "Contact Salon",
+        description: "Please select a booking to contact the salon about.",
+      });
+    }
   };
 
   // Enhanced status badge component with icons
@@ -1275,7 +1305,7 @@ export default function CustomerDashboard() {
                           <Button 
                             variant="outline" 
                             size="sm" 
-                            onClick={handleContactSalon}
+                            onClick={() => handleContactSalon(appointment)}
                             data-testid={`button-contact-${appointment.id}`}
                             className="flex items-center gap-1"
                           >
@@ -2505,6 +2535,24 @@ export default function CustomerDashboard() {
           salonName={rebookAppointment.salonName}
           salonId={rebookAppointment.salonId}
           staffId={rebookAppointment.staffId}
+        />
+      )}
+
+      {/* Chat Modal for contacting salon */}
+      {chatSalonInfo && user && getAccessToken() && (
+        <CustomerChatModal
+          isOpen={chatModalOpen}
+          onClose={() => {
+            setChatModalOpen(false);
+            setChatSalonInfo(null);
+          }}
+          salonId={chatSalonInfo.salonId}
+          salonName={chatSalonInfo.salonName}
+          userId={user.id}
+          userName={`${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Customer'}
+          userAvatar={user.profileImageUrl}
+          authToken={getAccessToken()!}
+          bookingContext={chatSalonInfo.bookingContext}
         />
       )}
     </div>
